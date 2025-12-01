@@ -1,5 +1,5 @@
 orjson~=3.11.4
-p115client==0.0.8.0.3
+p115client==0.0.8.2
 p115rsacipher==0.0.1
 nullbr~=1.0.7
 sentry-sdk~=2.46.0
