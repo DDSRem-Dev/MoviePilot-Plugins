@@ -145,7 +145,7 @@ jobs:
 
       # 步骤6：将构建好的 wheel 文件作为产物上传
       - name: 上传构建产物
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheel-${{ matrix.target }}
           path: ./wheelhouse/*.whl
@@ -180,7 +180,7 @@ jobs:
           mkdir -p ${{ steps.set_path.outputs.path }}
 
       - name: 下载所有 Wheels 产物
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           path: temp-wheels
 
