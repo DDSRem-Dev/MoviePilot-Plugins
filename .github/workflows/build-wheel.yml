@@ -134,7 +134,7 @@ jobs:
 
       # 步骤5：使用 cibuildwheel 构建 wheel 文件
       - name: 构建 Wheel
-        uses: pypa/cibuildwheel@v3.3.0
+        uses: pypa/cibuildwheel@v3.3.1
         env:
           CIBW_BUILD: ${{ steps.vars.outputs.cibw_build_version }}
           CIBW_OUTPUT_DIR: wheels
