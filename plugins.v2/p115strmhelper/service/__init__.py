@@ -26,6 +26,7 @@ from ..helper.share import ShareTransferHelper
 from ..helper.clean import Cleaner
 from ..helper.r302 import Redirect
 from ..helper.transfer import TransferTaskManager, TransferHandler
+from ..helper.webdav import WebdavCore
 from ..patch import TransferChainPatcher
 from ..core.config import configer
 from ..core.message import post_message
@@ -69,6 +70,8 @@ class ServiceHelper:
 
         self.transfer_task_manager: Optional[TransferTaskManager] = None
         self.transfer_handler: Optional[TransferHandler] = None
+
+        self.webdav_core: Optional[WebdavCore] = None
 
     def init_service(self):
         """
@@ -139,6 +142,9 @@ class ServiceHelper:
 
             # 初始化整理任务管理器和 TransferChain 补丁
             self._init_transfer_enhancement()
+
+            # 初始化 Webdav 服务
+            self.webdav_core = WebdavCore(client=self.client)
             return True
         except Exception as e:
             logger.error(f"服务项初始化失败: {e}")
