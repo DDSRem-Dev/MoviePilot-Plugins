@@ -3,7 +3,7 @@ p115client==0.0.8.3.3
 p115rsacipher==0.0.1
 python-sqlitedict==0.0.3
 nullbr~=1.0.9
-sentry-sdk~=2.50.0
+sentry-sdk~=2.51.0
 aligo~=6.2.6
 qrcode_terminal~=0.8
 pyahocorasick~=2.3.0
