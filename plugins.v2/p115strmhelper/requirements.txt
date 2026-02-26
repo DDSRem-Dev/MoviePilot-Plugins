@@ -1,5 +1,5 @@
 orjson~=3.11.7
-p115client==0.0.8.4.3.3
+p115client==0.0.8.4.6
 p115rsacipher==0.0.1
 python-sqlitedict==0.0.3
 nullbr~=1.0.9
