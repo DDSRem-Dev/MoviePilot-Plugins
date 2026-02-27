@@ -11,7 +11,7 @@
       "enabled": false
     },
     {
-      "matchPaths": [
+      "matchFileNames": [
         "plugins.v2/p115strmhelper/requirements.txt"
       ],
       "matchPackageNames": [
