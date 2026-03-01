@@ -1,4 +1,4 @@
 grpcio~=1.78.1
-protobuf~=5.29.6
+protobuf~=7.34.0
 clouddrive2-client==0.1.0
 httpx[http2]
