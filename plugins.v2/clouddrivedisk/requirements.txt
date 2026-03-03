@@ -1,5 +1,5 @@
 clouddrive2-client==0.1.1
-cryptography~=44.0.0
+cryptography~=46.0.5
 grpcio~=1.78.0
 httpx[http2]
 protobuf~=5.29.6
