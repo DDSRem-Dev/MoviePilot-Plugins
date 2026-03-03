@@ -1,10 +1,10 @@
-import hashlib
 import time
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import grpc
+from cryptography.hazmat.primitives import hashes
 from httpx import RequestError
 from httpx import stream as httpx_stream
 
@@ -472,11 +472,12 @@ class CloudDriveApi:
         """
         if hash_type == HashType.PIKPAK_SHA1:
             return self._compute_pikpak_sha1(path)
-        h = hashlib.md5() if hash_type == HashType.MD5 else hashlib.sha1()
+        algo = hashes.MD5() if hash_type == HashType.MD5 else hashes.SHA1()
+        h = hashes.Hash(algo)
         with open(path, "rb") as f:
             while chunk := f.read(8192):
                 h.update(chunk)
-        return h.hexdigest()
+        return h.finalize().hex()
 
     def _compute_pikpak_sha1(self, path: Path) -> str:
         """
@@ -495,12 +496,13 @@ class CloudDriveApi:
             seg_size = 1024 << 10
         else:
             seg_size = 2048 << 10
-        final_sha1 = hashlib.sha1()
+        final_sha1 = hashes.Hash(hashes.SHA1())
         with open(path, "rb") as f:
             while chunk := f.read(seg_size):
-                seg_digest = hashlib.sha1(chunk).digest()
-                final_sha1.update(seg_digest)
-        return final_sha1.hexdigest().upper()
+                seg = hashes.Hash(hashes.SHA1())
+                seg.update(chunk)
+                final_sha1.update(seg.finalize())
+        return final_sha1.finalize().hex().upper()
 
     def _compute_all_hashes_one_pass(self, path: Path) -> Dict[int, str]:
         """
@@ -518,18 +520,20 @@ class CloudDriveApi:
             seg_size = 1024 << 10
         else:
             seg_size = 2048 << 10
-        file_md5 = hashlib.md5()
-        file_sha1 = hashlib.sha1()
-        final_sha1 = hashlib.sha1()
+        file_md5 = hashes.Hash(hashes.MD5())
+        file_sha1 = hashes.Hash(hashes.SHA1())
+        final_sha1 = hashes.Hash(hashes.SHA1())
         with open(path, "rb") as f:
             while chunk := f.read(seg_size):
                 file_md5.update(chunk)
                 file_sha1.update(chunk)
-                final_sha1.update(hashlib.sha1(chunk).digest())
+                seg = hashes.Hash(hashes.SHA1())
+                seg.update(chunk)
+                final_sha1.update(seg.finalize())
         return {
-            HashType.MD5: file_md5.hexdigest(),
-            HashType.SHA1: file_sha1.hexdigest(),
-            HashType.PIKPAK_SHA1: final_sha1.hexdigest().upper(),
+            HashType.MD5: file_md5.finalize().hex(),
+            HashType.SHA1: file_sha1.finalize().hex(),
+            HashType.PIKPAK_SHA1: final_sha1.finalize().hex().upper(),
         }
 
     def _compute_file_md5_with_blocks(
@@ -550,7 +554,7 @@ class CloudDriveApi:
         :return: (文件 MD5 十六进制, 块 MD5 列表)
         """
         total_bytes = path.stat().st_size
-        file_md5 = hashlib.md5()
+        file_md5 = hashes.Hash(hashes.MD5())
         blocks: List[str] = []
         bytes_hashed = 0
         last_report = 0.0
@@ -559,14 +563,16 @@ class CloudDriveApi:
                 if cancelled_ref and cancelled_ref[0]:
                     break
                 file_md5.update(chunk)
-                blocks.append(hashlib.md5(chunk).hexdigest())
+                block_hasher = hashes.Hash(hashes.MD5())
+                block_hasher.update(chunk)
+                blocks.append(block_hasher.finalize().hex())
                 bytes_hashed += len(chunk)
                 if progress_callback:
                     now = time.monotonic()
                     if now - last_report >= 0.25:
                         last_report = now
                         progress_callback(bytes_hashed, total_bytes)
-        return file_md5.hexdigest(), blocks
+        return file_md5.finalize().hex(), blocks
 
     def _cancel_upload(self, upload_id: str) -> None:
         """
