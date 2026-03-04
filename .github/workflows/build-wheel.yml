@@ -130,7 +130,7 @@ jobs:
       # 步骤4：为 Linux 平台设置 QEMU
       - name: (仅Linux) 设置 QEMU
         if: runner.os == 'Linux'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       # 步骤5：使用 cibuildwheel 构建 wheel 文件
       - name: 构建 Wheel
