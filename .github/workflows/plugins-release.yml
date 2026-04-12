@@ -185,7 +185,7 @@ jobs:
 
       # 创建 GitHub Release
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Release 的标签名
           tag_name: ${{ matrix.plugin.tag_name }}
