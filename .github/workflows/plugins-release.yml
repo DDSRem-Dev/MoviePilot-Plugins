@@ -106,7 +106,7 @@ jobs:
         if: ${{ hashFiles(format('frontend/{0}/package.json', matrix.plugin.id)) != '' }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: ${{ format('frontend/{0}/package-lock.json', matrix.plugin.id) }}
 
