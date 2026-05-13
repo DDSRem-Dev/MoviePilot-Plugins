@@ -11,6 +11,7 @@ from oss2.utils import b64encode_as_string
 from oss2.exceptions import ServerError
 from p115client import P115Client, check_response
 from p115client.const import _CACHE_DIR
+from p115client.exception import P115NotADirectoryError
 from p115client.tool.attr import normalize_attr, get_id_to_path, get_attr
 from p115client.tool.fs_files import iter_fs_files
 from p115client.tool.iterdir import iter_files_with_path_skim
@@ -240,6 +241,12 @@ class P115Api:
                     )
         except Exception as e:
             logger.warn(f"【P115Disk】获取信息失败: {str(e)}")
+            if isinstance(e, P115NotADirectoryError) and file_id and file_id != "0":
+                try:
+                    self._id_cache.remove(id=int(file_id))
+                    self._id_item_cache.remove(id=int(file_id))
+                except Exception:
+                    pass
             try:
                 storage_chain = StorageChain()
                 fileitem = FileItem(
