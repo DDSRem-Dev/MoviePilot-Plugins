@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Any, List, Dict, Tuple, Optional
 
-from p115client import P115Client
-
 from app.core.event import eventmanager, Event
 from app.log import logger
 from app.plugins import _PluginBase

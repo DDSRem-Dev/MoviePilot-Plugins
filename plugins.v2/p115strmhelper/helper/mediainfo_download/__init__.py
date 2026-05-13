@@ -20,7 +20,7 @@ from httpx import (
 from orjson import loads
 from p115center import P115Center
 from p115pickcode import pickcode_to_id
-from p115client import P115Client, check_response
+from p115client import check_response
 from p115client.const import TYPE_TO_SUFFIXES
 from p115client.util import reduce_image_url_layers
 from p115client.tool.iterdir import (

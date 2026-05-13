@@ -8,7 +8,6 @@ from typing import List, Optional
 from aligo.core import set_config_folder
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from p115client import P115Client
 from pytz import timezone
 from watchfiles import watch, Change
 
