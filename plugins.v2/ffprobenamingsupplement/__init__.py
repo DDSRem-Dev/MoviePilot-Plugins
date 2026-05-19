@@ -1,3 +1,5 @@
+import re
+from copy import deepcopy
 from json import JSONDecodeError, loads
 from pathlib import Path
 from subprocess import TimeoutExpired, run
@@ -773,8 +775,23 @@ class FFprobeNamingSupplement(_PluginBase):
             logger.warning("【ffprobe命名补充】ffprobe JSON 解析失败: %s", e)
             return None
 
-    @eventmanager.register(ChainEventType.TransferRename, priority=20)
+    @eventmanager.register(ChainEventType.TransferRename, priority=6)
     def on_transfer_rename(self, event: Event) -> None:
+        """
+        处理 TransferRename 链式事件，使用本地 ffprobe 结果补充重命名字段。
+
+        本处理器以 ``priority=6`` 注册：
+
+        - 跑在默认 ``priority=10`` 的字符串改写类插件（如智能重命名）之前，
+          便于后者承接补充后的字段做大小写、词替换等链式叠加；
+        - 比同类字段补充插件（115网盘STRM助手，``priority=5``）稍晚一档，
+          作为本地 ffprobe 兜底路径，避免与中心化媒体信息提取竞争主路径。
+
+        当上游事件链已经写入 ``updated_str`` 时，本处理器不再用 ``template_string``
+        对整串重渲，而是基于 ``rename_dict`` 中字段的旧值对上游字符串做单词
+        边界级替换，避免覆盖上游字符串级改动；新增字段（旧值为空）在上游
+        已渲染串里没有锚点，会跳过并打 debug 日志。
+        """
         if not self._enabled:
             return
         data = event.event_data
@@ -825,24 +842,70 @@ class FFprobeNamingSupplement(_PluginBase):
             )
             return
 
+        # 记录字段变更前的旧值快照：链式补丁路径下用于在上游已渲染串里定位被改字段
+        original_rename_dict: Dict[str, Any] = deepcopy(rename_dict)
+
         changed = False
+        # 记录本次实际写入的字段，供链式补丁路径定位
+        applied_fields: Dict[str, Any] = {}
         for key, val in fields.items():
             if cls._should_apply_key(self._overwrite_mode, key, rename_dict, val):
                 rename_dict[key] = val
+                applied_fields[key] = val
                 changed = True
 
         if not changed:
             return
 
-        try:
-            new_render = Template(data.template_string).render(rename_dict)
-        except Exception as e:
-            logger.error(
-                "【ffprobe命名补充】模板重新渲染失败: %s",
-                e,
-                exc_info=True,
-            )
-            return
+        upstream_updated = bool(data.updated and data.updated_str)
+        if upstream_updated:
+            # 上游已写过 updated_str：基于其结果做差量补丁，避免重渲覆盖上游字符串级改动
+            patched = data.updated_str
+            skipped: List[str] = []
+            for key, new_value in applied_fields.items():
+                old_value = original_rename_dict.get(key)
+                if old_value is None or (
+                    isinstance(old_value, str) and not old_value.strip()
+                ):
+                    skipped.append(key)
+                    continue
+                old_token = str(old_value)
+                new_token = str(new_value)
+                if old_token == new_token:
+                    continue
+                # 单词边界替换，避免误伤同名子串（例如 audioCodec=AAC 不应替换文件名中的随机 "AAC" 子串）
+                pattern = rf"(?<![A-Za-z0-9]){re.escape(old_token)}(?![A-Za-z0-9])"
+                new_patched, count = re.subn(pattern, new_token, patched)
+                if count:
+                    patched = new_patched
+                else:
+                    skipped.append(key)
+            if skipped:
+                logger.debug(
+                    "【ffprobe命名补充】链式补丁跳过字段 %s（上游来源：%s）",
+                    ",".join(skipped),
+                    data.source,
+                )
+            if patched == data.updated_str:
+                # 没能定位到任何替换锚点，链式补丁未生效；不覆盖上游结果
+                logger.debug(
+                    "【ffprobe命名补充】上游已写入 updated_str 且本次补充字段在串中无锚点，"
+                    "保留上游结果不变（上游来源：%s）",
+                    data.source,
+                )
+                return
+            new_render = patched
+        else:
+            # 没有上游写入：按原逻辑用 template_string 整体重渲
+            try:
+                new_render = Template(data.template_string).render(rename_dict)
+            except Exception as e:
+                logger.error(
+                    "【ffprobe命名补充】模板重新渲染失败: %s",
+                    e,
+                    exc_info=True,
+                )
+                return
 
         data.updated = True
         data.updated_str = new_render
