@@ -1,3 +1,4 @@
+import re
 from time import sleep
 from copy import deepcopy
 from dataclasses import asdict
@@ -1776,10 +1777,21 @@ class P115StrmHelper(_PluginBase):
         mediasyncdel_helper = MediaSyncDelHelper()
         mediasyncdel_helper.download_file_del_sync(event)
 
-    @eventmanager.register(ChainEventType.TransferRename)
+    @eventmanager.register(ChainEventType.TransferRename, priority=5)
     def rename_dict_supplement(self, event: Event) -> None:
         """
         媒体数据补充
+
+        通过 ffprobe / 中心化接口获取真实媒体信息（如 effect=SDR/HDR、视频/音频
+        编码等），写回 ``event_data.rename_dict``，再据此生成新的 ``updated_str``。
+
+        本处理器使用 ``priority=5`` 强制在默认 priority=10 的字符串改写类插件
+        （如"智能重命名"）之前运行，便于后者承接补充后的字段做大小写、词替换
+        等链式叠加。
+
+        当上游事件链已经写入 ``updated_str`` 时（外部插件以更小的 priority 抢先
+        执行），本处理器不再对整串重渲，而是基于 ``rename_dict`` 中字段的旧值对
+        上游字符串做单词边界替换，避免抹掉上游的字符串级改动。
         """
         if not configer.enabled:
             return
@@ -1805,6 +1817,9 @@ class P115StrmHelper(_PluginBase):
         if Path(source_path).suffix.lower() not in settings.RMT_MEDIAEXT:
             logger.debug("【媒体数据补充】文件后缀不是媒体文件，跳过本次重命名补全")
             return
+
+        # 记录字段变更前的旧值快照：链式补丁路径下用于在上游已渲染串里定位被改字段
+        original_rename_dict: Dict[str, Any] = deepcopy(data.rename_dict)
 
         def share_strm_center(url: str) -> Optional[Dict[str, Any]]:
             for i in ["P115StrmHelper", "share_code=", "receive_code=", "id="]:
@@ -1884,6 +1899,8 @@ class P115StrmHelper(_PluginBase):
         overwrite_mode = configer.rename_dict_supplement_overwrite_mode
         if overwrite_mode not in ("fill_missing", "always"):
             overwrite_mode = "fill_missing"
+        # 记录本次实际写入的字段，供链式补丁路径定位
+        applied_fields: Dict[str, Any] = {}
         for key, value in media_info.items():
             if not value:
                 continue
@@ -1892,23 +1909,88 @@ class P115StrmHelper(_PluginBase):
                 if cur is not None and not (isinstance(cur, str) and cur.strip() == ""):
                     continue
             data.rename_dict[key] = value
+            applied_fields[key] = value
             changed = True
         if not changed:
             return
 
-        try:
-            new_render = Template(data.template_string).render(data.rename_dict)
-        except Exception as e:
-            logger.error(
-                "【媒体数据补充】模板重新渲染失败: %s",
-                e,
-                exc_info=True,
+        upstream_updated = bool(data.updated and data.updated_str)
+        if upstream_updated:
+            # 上游已写过 updated_str：基于其结果做差量补丁，避免重渲覆盖上游字符串级改动
+            new_render = self.__apply_rename_dict_patch_to_string(
+                base_str=data.updated_str,
+                original_rename_dict=original_rename_dict,
+                applied_fields=applied_fields,
+                upstream_source=data.source,
             )
-            return
+            if new_render == data.updated_str:
+                # 没能定位到任何替换锚点，链式补丁未生效；不覆盖上游结果
+                logger.debug(
+                    "【媒体数据补充】上游已写入 updated_str 且本次补充字段在串中无锚点，"
+                    "保留上游结果不变（上游来源：%s）",
+                    data.source,
+                )
+                return
+        else:
+            # 没有上游写入：按原逻辑用 template_string 整体重渲
+            try:
+                new_render = Template(data.template_string).render(data.rename_dict)
+            except Exception as e:
+                logger.error(
+                    "【媒体数据补充】模板重新渲染失败: %s",
+                    e,
+                    exc_info=True,
+                )
+                return
 
         data.updated = True
         data.updated_str = new_render
         data.source = "媒体数据补充"
+
+    @staticmethod
+    def __apply_rename_dict_patch_to_string(
+        base_str: str,
+        original_rename_dict: Dict[str, Any],
+        applied_fields: Dict[str, Any],
+        upstream_source: Optional[str] = None,
+    ) -> str:
+        """
+        在上游已渲染串上做单词边界级差量替换，避免链式覆盖。
+
+        仅对"旧值非空"的字段尝试 ``old_value -> new_value`` 替换；新增字段
+        （旧值为空）无法在已渲染串里定位锚点，本方法不会强行插入。
+
+        :param base_str: 上游写入的 ``updated_str``，作为替换基础。
+        :param original_rename_dict: 本插件改写 ``rename_dict`` 前的字段快照。
+        :param applied_fields: 本次实际改写的字段及其新值。
+        :param upstream_source: 上游处理器名称，仅用于日志。
+        :return: 应用差量替换后的字符串；若无可应用项则原样返回。
+        """
+        patched = base_str
+        skipped: List[str] = []
+        for key, new_value in applied_fields.items():
+            old_value = original_rename_dict.get(key)
+            if old_value is None or (isinstance(old_value, str) and not old_value.strip()):
+                skipped.append(key)
+                continue
+            old_token = str(old_value)
+            new_token = str(new_value)
+            if old_token == new_token:
+                continue
+            # 单词边界替换，避免误伤同名子串（例如 audioCodec=AAC 不应替换文件名中的随机 "AAC" 子串）
+            pattern = rf"(?<![A-Za-z0-9]){re.escape(old_token)}(?![A-Za-z0-9])"
+            new_patched, count = re.subn(pattern, new_token, patched)
+            if count:
+                patched = new_patched
+            else:
+                skipped.append(key)
+        if skipped:
+            logger.debug(
+                "【媒体数据补充】链式补丁跳过字段 %s（上游来源：%s）",
+                ",".join(skipped),
+                upstream_source,
+            )
+        return patched
 
     @eventmanager.register(ChainEventType.TransferIntercept)
     def intercept_if_exists_in_library(self, event: Event) -> None:
