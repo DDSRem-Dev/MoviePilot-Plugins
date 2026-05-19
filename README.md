@@ -35,6 +35,59 @@ Telegram 交流群: https://t.me/+1lcscM_EbqhkN2Rl
 
 - [115订阅站点修复](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/p115subfixer)：修复115网盘订阅追更插件导致的订阅站点被篡改问题，并自动卸载该插件
 
+---
+
+## English Overview
+
+> This is a third-party plugin repository for [MoviePilot](https://github.com/jxxghp/MoviePilot), a self-hosted media automation tool.
+> All plugins are written in Python (some with Rust via PyO3) and are licensed under GPL-3.0.
+
+### Plugin Categories
+
+#### Discovery Plugins
+
+| Plugin | Description |
+|---|---|
+| CCTV Discover | Browse CCTV content in the Discover tab |
+| Migu Video Discover | Browse Migu Video content in the Discover tab |
+| Bilibili Discover | Browse Bilibili content in the Discover tab |
+| Bangumi Daily Discover | Browse Bangumi daily broadcast schedule |
+| Mango TV Discover | Browse Mango TV content in the Discover tab |
+| Tencent Video Discover | Browse Tencent Video content in the Discover tab |
+
+#### Cloud Storage Plugins
+
+| Plugin | Description |
+|---|---|
+| 115 Pan Storage | High-performance 115 cloud storage module |
+| 115 Pan STRM Helper | End-to-end STRM file generation for 115 cloud |
+| 123 Pan Storage | Cloud storage support for 123 Pan |
+| 123 Pan STRM Helper | End-to-end STRM file generation for 123 Pan |
+| CloudDrive2 Storage | CloudDrive2 storage via native gRPC API |
+| Emby 302 Reverse Proxy | Reverse proxy for Emby with HTTP→final URL redirect and external player support |
+| MediaWarp | Emby/Jellyfin middleware: optimize STRM playback, custom frontend styles, script injection |
+
+#### Media Management Plugins
+
+| Plugin | Description |
+|---|---|
+| SaMedia Sync Delete | Sync-delete history records, source files, and download tasks via SaMedia plugin notifications |
+| ffprobe Naming Supplement | Calls `ffprobe` during rename to fill in `videoFormat`, `videoCodec`, `audioCodec`, `fps`, `effect` — supports STRM |
+
+#### Utility Plugins
+
+| Plugin | Description |
+|---|---|
+| 115 Subscription Fixer | Fixes subscription site tampering caused by the 115 pan subscription plugin and auto-uninstalls it |
+
+### Contributing
+
+- Issues and PRs are welcome from international contributors.
+- Please use either Chinese or English in issues/discussions.
+- For installation or usage questions, join the Telegram group: https://t.me/+1lcscM_EbqhkN2Rl
+
+---
+
 ## 感谢
 
 - [p115client](https://github.com/ChenyangGao/p115client)
