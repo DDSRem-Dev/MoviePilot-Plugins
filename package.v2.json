@@ -657,7 +657,7 @@
     },
     "FFprobeNamingSupplement": {
         "name": "ffprobe命名补充",
-        "description": "整理重命名时调用 ffprobe，补全命名模板中的 videoFormat、videoCodec、audioCodec、fps、effect，支持 STRM",
+        "description": "整理重命名时调用 ffprobe，补全命名模板中的 videoFormat、videoCodec、videoBit、audioCodec、fps、effect，支持 STRM",
         "labels": "整理",
         "version": "0.1.6",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/ffmpeg.png",

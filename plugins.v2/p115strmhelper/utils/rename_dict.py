@@ -1,5 +1,6 @@
 __all__ = ["RenameDictUtils"]
 
+from re import IGNORECASE, search as re_search
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 from urllib.parse import unquote
@@ -409,6 +410,26 @@ class RenameDictUtils:
         return video_s, audio_s
 
     @staticmethod
+    def _extract_video_bit_depth(video_s: Dict[str, Any]) -> Optional[str]:
+        """从 ffprobe 视频流提取位深，如 8bit、10bit"""
+        bps = (video_s.get("bits_per_raw_sample") or "").strip()
+        if bps and bps.isdigit():
+            return f"{bps}bit"
+        pix = (video_s.get("pix_fmt") or "").strip().lower()
+        if pix:
+            m = re_search(r"(\d+)(le|be)", pix)
+            if m:
+                n = int(m.group(1))
+                if n > 0:
+                    return f"{n}bit"
+        prof = (video_s.get("profile") or "").strip()
+        if prof:
+            m = re_search(r"main\s*(\d+)", prof, IGNORECASE)
+            if m:
+                return f"{m.group(1)}bit"
+        return None
+
+    @staticmethod
     def _probe_to_rename_fields(probe_json: Dict[str, Any]) -> Dict[str, str]:
         """
         从 ffprobe JSON 提取写入 rename_dict 的命名模板字段
@@ -435,6 +456,9 @@ class RenameDictUtils:
             vc = RenameDictUtils._map_video_codec(video_s.get("codec_name"))
             if vc:
                 out["videoCodec"] = vc
+            vb = RenameDictUtils._extract_video_bit_depth(video_s)
+            if vb:
+                out["videoBit"] = vb
             fps = RenameDictUtils._parse_frame_rate(
                 video_s.get("avg_frame_rate")
             ) or RenameDictUtils._parse_frame_rate(video_s.get("r_frame_rate"))
@@ -700,7 +724,7 @@ class RenameDictUtils:
         从 Emby 媒体信息 JSON 提取写入 rename_dict 的命名模板字段
 
         输出键与 RenameDictUtils._probe_to_rename_fields 一致：
-        videoFormat、videoCodec、fps、effect、audioCodec（有则写入）
+        videoFormat、videoCodec、videoBit、fps、effect、audioCodec（有则写入）
 
         :param payload: download_emby_mediainfo_data 单条值，或含 MediaSourceInfo 的 list/dict
         :return: 字符串字典，无法解析时为空 dict
@@ -727,6 +751,12 @@ class RenameDictUtils:
             vc = RenameDictUtils._map_video_codec(video_s.get("Codec"))
             if vc:
                 out["videoCodec"] = vc
+            vb = video_s.get("BitDepth")
+            if vb:
+                try:
+                    out["videoBit"] = f"{int(vb)}bit"
+                except (TypeError, ValueError):
+                    pass
             fps = RenameDictUtils._emby_numeric_fps_to_str(
                 video_s.get("AverageFrameRate")
             ) or RenameDictUtils._emby_numeric_fps_to_str(video_s.get("RealFrameRate"))

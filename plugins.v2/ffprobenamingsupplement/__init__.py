@@ -1,5 +1,6 @@
 from json import JSONDecodeError, loads
 from pathlib import Path
+from re import IGNORECASE, search as re_search
 from subprocess import TimeoutExpired, run
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
@@ -19,7 +20,7 @@ class FFprobeNamingSupplement(_PluginBase):
     """
 
     plugin_name = "ffprobe命名补充"
-    plugin_desc = "整理重命名时调用 ffprobe，补全命名模板中的 videoFormat、videoCodec、audioCodec、fps、effect，支持 STRM "
+    plugin_desc = "整理重命名时调用 ffprobe，补全命名模板中的 videoFormat、videoCodec、videoBit、audioCodec、fps、effect，支持 STRM "
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/ffmpeg.png"
     plugin_version = "0.1.6"
     plugin_author = "DDSRem"
@@ -207,7 +208,7 @@ class FFprobeNamingSupplement(_PluginBase):
                                             "label": "写入策略",
                                             "items": overwrite_items,
                                             "hint": (
-                                                "针对 videoFormat、videoCodec、audioCodec、fps、effect："
+                                                "针对 videoFormat、videoCodec、videoBit、audioCodec、fps、effect："
                                                 "仅补全＝缺或空才写入；始终覆盖＝以 ffprobe 为准覆盖"
                                             ),
                                             "persistent-hint": True,
@@ -278,6 +279,13 @@ class FFprobeNamingSupplement(_PluginBase):
                                                     "class": "text-body-2 mt-1",
                                                 },
                                                 "text": "{{videoCodec}} — 视频编码（如 H264、H265）",
+                                            },
+                                            {
+                                                "component": "div",
+                                                "props": {
+                                                    "class": "text-body-2 mt-1",
+                                                },
+                                                "text": "{{videoBit}} — 视频位深（如 8bit、10bit）",
                                             },
                                             {
                                                 "component": "div",
@@ -622,6 +630,26 @@ class FFprobeNamingSupplement(_PluginBase):
         return video_s, audio_s
 
     @classmethod
+    def _extract_video_bit_depth(cls, video_s: Dict[str, Any]) -> Optional[str]:
+        """从 ffprobe 视频流提取位深，如 8bit、10bit"""
+        bps = (video_s.get("bits_per_raw_sample") or "").strip()
+        if bps and bps.isdigit():
+            return f"{bps}bit"
+        pix = (video_s.get("pix_fmt") or "").strip().lower()
+        if pix:
+            m = re_search(r"(\d+)(le|be)", pix)
+            if m:
+                n = int(m.group(1))
+                if n > 0:
+                    return f"{n}bit"
+        prof = (video_s.get("profile") or "").strip()
+        if prof:
+            m = re_search(r"main\s*(\d+)", prof, IGNORECASE)
+            if m:
+                return f"{m.group(1)}bit"
+        return None
+
+    @classmethod
     def _probe_to_rename_fields(cls, probe_json: Dict[str, Any]) -> Dict[str, str]:
         """
         从 ffprobe JSON 提取写入 rename_dict 的命名模板字段
@@ -648,6 +676,9 @@ class FFprobeNamingSupplement(_PluginBase):
             vc = cls._map_video_codec(video_s.get("codec_name"))
             if vc:
                 out["videoCodec"] = vc
+            vb = cls._extract_video_bit_depth(video_s)
+            if vb:
+                out["videoBit"] = vb
             fps = cls._parse_frame_rate(
                 video_s.get("avg_frame_rate")
             ) or cls._parse_frame_rate(video_s.get("r_frame_rate"))

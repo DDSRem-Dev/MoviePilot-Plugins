@@ -119,7 +119,7 @@
                 { title: '仅补全缺失或空值', value: 'fill_missing' },
                 { title: '始终用探测结果覆盖上述键', value: 'always' },
               ]" density="compact" color="info" :disabled="!config.rename_dict_supplement_enabled"
-                hint="针对 videoFormat、videoCodec、audioCodec、fps、effect 等：仅补全＝缺或空才写入；始终覆盖＝以 ffprobe/中心化结果为准覆盖"
+                hint="针对 videoFormat、videoCodec、videoBit、audioCodec、fps、effect 等：仅补全＝缺或空才写入；始终覆盖＝以 ffprobe/中心化结果为准覆盖"
                 persistent-hint></v-select>
             </v-col>
           </v-row>
