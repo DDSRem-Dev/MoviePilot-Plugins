@@ -491,6 +491,11 @@ MoviePilot TransferTask
 | **字幕/音轨任务** | 每文件独立任务与历史 | ✅ 独立任务批量处理，无 related_files | 已对齐 |
 | **事件触发** | 仅主媒体文件 | 仅主媒体文件 | 已对齐 |
 | **空目录删除** | 支持 | ✅ 支持 | 已实现 |
+| **Preview 模式** | `task.preview=True` 只计算路径不执行 | ✅ `_handle_preview` 构造预览结果并回调 | 2026-05 适配 |
+| **TransferOverwriteCheck** | `ChainEventType` 允许插件介入覆盖判断 | ✅ 在 `_batch_move_or_copy` 前触发事件 | 2026-05 适配 |
+| **TransferRenameBuild** | `ChainEventType` 允许插件注入命名字段 | ✅ 在 `_compute_target_path` 模板渲染前触发 | 2026-05 适配 |
+| **AI Agent 重试** | `FailedRetryScheduler.schedule_retry` | ✅ `_record_fail` 中失败后触发重试 | 2026-05 适配 |
+| **目录路径尾部 `/`** | `type="dir"` 时路径以 `/` 结尾 | ✅ 所有 `FileItem(type="dir")` 构造均遵循 | 已遵循，无需修改 |
 
 ### 故意不实现的功能（115→115 场景不需要）
 
@@ -546,6 +551,20 @@ if self.jobview.is_done(task):
 
 ---
 
+#### 4. sync_extra_files 同步关联文件 ❌
+
+**MoviePilot 实现**：
+- `do_transfer(sync_extra_files=True)` 时，自动扫描同目录下与主视频媒体身份匹配的字幕/音轨文件
+- 将这些文件一并加入整理队列
+
+**插件未实现原因**：
+- **批量整理层内自动忽略**：当 `sync_extra_files=True` 时，MP 会为附加文件创建独立的 `TransferTask`
+- **插件的批量队列会自然收到这些任务**：由于插件拦截了 `__handle_transfer`，所有 MP 生成的 `TransferTask`（包括附加文件）都会经过插件的拦截判断
+- **关联整理模式 (`pan_transfer_linked_subtitle_audio=True`) 已处理**：此模式下，插件的 `discover_related_files` 已在源目录发现同目录字幕/音轨，MP 的 `sync_extra_files` 产生的额外任务被短路（`finish_task` + `remove_job`），不会重复处理
+- **非关联整理模式下**：附加文件作为独立任务进入批量队列，按字幕/音轨类型排序后批量处理，行为与 MP 原生一致
+
+**影响**：无影响，批量整理层内自动忽略，不重复处理
+
 ### 已对齐的功能
 
 #### 1. 事件触发条件 ✅
@@ -590,6 +609,35 @@ if self.jobview.is_done(task):
 - 使用 `_remove_completed_jobs()` 统一处理移除
 
 **状态**：已对齐
+
+---
+
+#### 4. add_success / add_fail 返回值 ✅
+
+**MoviePilot 实现**：
+- `TransferHistoryOper.add_success()` / `add_fail()` 返回 `TransferHistory` 对象（`history.id` 用于 `transfer_history_id`）
+
+**插件实现**：
+- `handler.py`、`handler_linked_batch.py`、`linked_subtitle_audio.py` 中均已捕获返回值
+- 事件数据中的 `transfer_history_id` 使用 `history.id if history else None`
+
+**状态**：已对齐
+
+---
+
+#### 5. 目录路径尾部 `/` 规范 ✅
+
+**MoviePilot 实现**：
+- `type="dir"` 的 `FileItem` 路径以 `/` 结尾
+- `EventManager.__normalize_transfer_event_data()` 中构造合成 `FileItem` 时遵循此约定
+
+**插件实现**：
+- `_build_plugin_target_fileitems`: `path=str(task.target_dir) + "/"`
+- `_get_folder`: `path=path.as_posix() + "/"`
+- `record_history` / `record_related_files`: `path=str(target_path.parent) + "/"`
+- `_handle_preview`: `path=str(target_path.parent) + "/"`
+
+**状态**：已遵循，无需修改
 
 ---
 
@@ -679,6 +727,8 @@ plugins.v2/p115strmhelper/
 │   ├── __init__.py
 │   ├── task.py                    # 任务队列管理
 │   ├── handler.py                 # 批量处理执行器
+│   ├── handler_linked_batch.py    # 关联整理批量处理
+│   ├── linked_subtitle_audio.py   # 字幕/音轨发现与历史
 │   └── cache_updater.py           # 缓存管理
 └── schemas/
     └── transfer.py                # 数据结构定义
@@ -725,23 +775,35 @@ plugins.v2/p115strmhelper/
 3. **字幕未随主视频移动**：
    - 与 MP 一致：需由 `do_transfer` 等为字幕单独排队；插件不再从目录「发现」关联文件
 
+4. **Preview 模式不生效**：
+   - 检查 `task.preview` 是否传递到 `_patched_handle_transfer`
+   - `_handle_preview` 是否正确构造 `TransferInfo` 并调用 callback
+
+5. **sync_extra_files 产生的附加文件重复处理**：
+   - 正常情况下不会重复：关联整理模式下附加文件任务被短路；非关联模式下作为独立任务进入批量队列
+   - 检查 `pan_transfer_linked_subtitle_audio` 配置是否正确
+
 ---
 
 ## 版本兼容性
 
 ### MoviePilot 版本要求
 
-- 支持 v2.8.0+ 的整理逻辑
+- 支持 v2.10.0+ 的整理逻辑
 - 关键依赖：
   - `TransferChain.__handle_transfer`
   - `JobManager` (finish_task, fail_task, is_finished, is_done, remove_job)
   - `TransferHistoryOper` (add_success, add_fail)
   - `TransHandler` (用于计算目标路径)
+  - `FailedRetryScheduler` (AI Agent 自动重试)
+  - `ChainEventType.TransferOverwriteCheck` (覆盖判断事件)
+  - `ChainEventType.TransferRenameBuild` (重命名字段注入事件)
 
 ### 已知差异
 
 - v2.9.5+ 引入了多线程整理，但插件通过批量处理已实现类似效果
 - v2.9.5+ 的 `transfer_completed()` 调用在 115→115 场景下不需要
+- v2.10.0+ 新增 Preview 模式、`TransferOverwriteCheck`、`TransferRenameBuild` 事件、`FailedRetryScheduler` AI 重试 — 均已适配
 
 ---
 
@@ -766,11 +828,15 @@ plugins.v2/p115strmhelper/
 ### 代码维护
 
 1. **保持简洁**：
-   - **不实现 115→115 场景不需要的功能**（种子删除、transfer_completed 等）
+   - **不实现 115→115 场景不需要的功能**（种子删除、transfer_completed、sync_extra_files 等）
    - **避免过度抽象**（直接使用 115 API，不需要存储操作抽象层）
    - **减少不必要的依赖**（已移除 SystemConfigOper 等）
 
 2. **与 MoviePilot 对齐**：
+   - ✅ v2.10.0+ Preview 模式已适配
+   - ✅ v2.10.0+ `TransferOverwriteCheck` 已适配
+   - ✅ v2.10.0+ `TransferRenameBuild` 已适配
+   - ✅ v2.10.0+ `FailedRetryScheduler` AI 重试已适配
    - 关注 MoviePilot 新版本的功能变更
    - 只对齐 115→115 场景需要的功能
    - 不需要的功能保持不实现，保持代码简洁
@@ -787,4 +853,4 @@ plugins.v2/p115strmhelper/
 
 ---
 
-*最后更新：2026-04-08*
+*最后更新：2026-05-22*

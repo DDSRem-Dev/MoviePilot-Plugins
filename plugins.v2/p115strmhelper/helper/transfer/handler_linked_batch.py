@@ -273,6 +273,63 @@ class TransferHandlerLinkedBatch:
                             over_flag = False
                             skip_reason: Optional[str] = None
 
+                            # 触发 TransferOverwriteCheck 事件，允许插件介入覆盖判断
+                            if overwrite_mode != "never":
+                                try:
+                                    from app.core.event import eventmanager
+                                    from app.schemas import (
+                                        TransferOverwriteCheckEventData,
+                                    )
+                                    from app.schemas.types import ChainEventType
+
+                                    event_data = TransferOverwriteCheckEventData(
+                                        fileitem=fileitem,
+                                        target_item=existing_item,
+                                        target_storage=self._handler.storage_name,
+                                        target_path=target_dir / target_name,
+                                        overwrite_mode=overwrite_mode,
+                                        transfer_type=transfer_type,
+                                    )
+                                    event = eventmanager.send_event(
+                                        ChainEventType.TransferOverwriteCheck,
+                                        event_data,
+                                    )
+                                    if event and event.event_data:
+                                        event_data = event.event_data
+                                        if event_data.overwrite is not None:
+                                            if event_data.overwrite:
+                                                over_flag = True
+                                                logger.info(
+                                                    f"【整理接管】插件强制覆盖: {target_dir / target_name}"
+                                                )
+                                            else:
+                                                skip_reason = (
+                                                    event_data.reason or "插件拒绝覆盖"
+                                                )
+                                                logger.info(
+                                                    f"【整理接管】插件拒绝覆盖: {target_dir / target_name}，原因: {skip_reason}"
+                                                )
+                                        if event_data.source_size is not None:
+                                            fileitem.size = event_data.source_size
+                                        if event_data.target_size is not None:
+                                            existing_item.size = event_data.target_size
+                                except Exception:
+                                    pass
+
+                            if skip_reason:
+                                task_path = (
+                                    task.fileitem.path
+                                    if task and task.fileitem
+                                    else None
+                                )
+                                if task_path:
+                                    task_failures[task_path] = skip_reason
+                                continue
+                            if over_flag:
+                                files_to_delete.append(existing_item)
+                                existing_files_map.pop(target_name, None)
+                                continue
+
                             if overwrite_mode == "always":
                                 over_flag = True
                                 logger.info(
@@ -705,13 +762,17 @@ class TransferHandlerLinkedBatch:
                     if new_fileitem.fileid:
                         if is_main:
                             task.fileitem.fileid = new_fileitem.fileid
-                            task.fileitem.pickcode = new_fileitem.pickcode or task.fileitem.pickcode
+                            task.fileitem.pickcode = (
+                                new_fileitem.pickcode or task.fileitem.pickcode
+                            )
                             logger.debug(
                                 f"【整理接管】更新主视频文件ID: {source_name} -> {new_fileitem.fileid}"
                             )
                         elif related_file:
                             related_file.fileitem.fileid = new_fileitem.fileid
-                            related_file.fileitem.pickcode = new_fileitem.pickcode or related_file.fileitem.pickcode
+                            related_file.fileitem.pickcode = (
+                                new_fileitem.pickcode or related_file.fileitem.pickcode
+                            )
                             logger.debug(
                                 f"【整理接管】更新关联文件ID: {source_name} -> {new_fileitem.fileid}"
                             )

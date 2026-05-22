@@ -147,6 +147,9 @@ class TransferChainPatcher:
                     chain_self.obtain_images(mediainfo=mediainfo)
 
                 if not mediainfo:
+                    # preview 模式下不创建历史记录
+                    if task.preview:
+                        return False, "未识别到媒体信息"
                     # 新增整理失败历史记录
                     his = transferhis.add_fail(
                         fileitem=task.fileitem,
@@ -166,6 +169,35 @@ class TransferChainPatcher:
                     )
                     # 任务失败，直接移除task
                     chain_self.jobview.remove_task(task.fileitem)
+
+                    # AI智能体自动重试整理
+                    if (
+                        his
+                        and settings.AI_AGENT_ENABLE
+                        and settings.AI_AGENT_RETRY_TRANSFER
+                    ):
+                        try:
+                            import asyncio
+                            from app.core import global_vars
+
+                            group_key = (
+                                task.download_hash
+                                or str(task.fileitem.path).rsplit("/", 1)[0]
+                                if task.fileitem
+                                else ""
+                            )
+                            asyncio.run_coroutine_threadsafe(
+                                chain_self.retry_scheduler.schedule_retry(
+                                    his.id, group_key=group_key
+                                ),
+                                global_vars.loop,
+                            )
+                            logger.info(
+                                f"【整理接管】已触发AI智能体重试整理历史记录 #{his.id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"【整理接管】触发AI智能体重试整理失败: {e}")
+
                     return False, "未识别到媒体信息"
 
                 mediainfo_changed = True
@@ -263,6 +295,17 @@ class TransferChainPatcher:
                     return True, "已由插件接管（字幕/音频文件，跟随主文件处理）"
 
                 need_rename, need_notify, need_scrape = cls._derive_transfer_flags(task)
+
+                # preview 模式：只计算目标路径并返回预览结果，不执行实际整理
+                if task.preview:
+                    return cls._handle_preview(
+                        chain_self,
+                        task,
+                        callback,
+                        need_rename,
+                        need_notify,
+                        need_scrape,
+                    )
 
                 # 注意：这个验证在 transfer_media 中进行，但由于我们拦截了，需要在这里进行
                 if task.mediainfo.type == MediaType.TV and task.fileitem.type == "file":
@@ -453,6 +496,27 @@ class TransferChainPatcher:
                 episodes_info=task.episodes_info,
             )
 
+            # 触发 TransferRenameBuild 事件，允许插件注入命名字段
+            try:
+                from app.core.event import eventmanager
+                from app.schemas import TransferRenameBuildEventData
+                from app.schemas.types import ChainEventType
+
+                build_event_data = TransferRenameBuildEventData(
+                    rename_dict=naming_dict,
+                    meta=task.meta,
+                    mediainfo=task.mediainfo,
+                    file_ext=file_ext,
+                    episodes_info=task.episodes_info,
+                )
+                build_event = eventmanager.send_event(
+                    ChainEventType.TransferRenameBuild, build_event_data
+                )
+                if build_event and build_event.event_data:
+                    naming_dict = build_event.event_data.rename_dict
+            except Exception:
+                pass
+
             rename_kwargs = {
                 "template_string": rename_format,
                 "rename_dict": naming_dict,
@@ -490,6 +554,71 @@ class TransferChainPatcher:
         except Exception as e:
             logger.error(f"【整理接管】计算目标路径失败: {e}", exc_info=True)
             return None
+
+    @classmethod
+    def _handle_preview(
+        cls,
+        chain_self,
+        task,
+        callback: Optional[Callable],
+        need_rename: bool,
+        need_notify: bool,
+        need_scrape: bool,
+    ) -> Optional[Tuple[bool, str]]:
+        """
+        Preview 模式：只计算目标路径，不执行实际文件操作
+
+        :param chain_self: TransferChain 实例
+        :param task: MoviePilot TransferTask
+        :param callback: 回调函数（preview 模式下为 _preview_callback）
+        :param need_rename: 是否需要重命名
+        :param need_notify: 是否需要通知
+        :param need_scrape: 是否需要刮削
+        :return: 回调结果或 (True, target_path)
+        """
+        try:
+            target_path = cls._compute_target_path(task, need_rename=need_rename)
+            if not target_path:
+                logger.error(
+                    f"【整理接管】Preview 模式计算目标路径失败: {task.fileitem.path}"
+                )
+                return False, "计算目标路径失败"
+
+            transfer_type = task.transfer_type
+            if not transfer_type and task.target_directory:
+                transfer_type = task.target_directory.transfer_type
+
+            target_storage = task.target_storage or ""
+            from app.schemas import FileItem, TransferInfo
+
+            transferinfo = TransferInfo(
+                success=True,
+                fileitem=task.fileitem,
+                target_item=FileItem(
+                    storage=target_storage,
+                    path=str(target_path),
+                    name=target_path.name,
+                    type="file",
+                ),
+                target_diritem=FileItem(
+                    storage=target_storage,
+                    path=str(target_path.parent) + "/",
+                    name=target_path.parent.name,
+                    type="dir",
+                ),
+                transfer_type=transfer_type or "move",
+                file_list=[task.fileitem.path],
+                file_list_new=[str(target_path)],
+                need_scrape=need_scrape,
+                need_notify=need_notify,
+            )
+
+            if callback:
+                return callback(task, transferinfo)
+            return True, str(target_path)
+        except Exception as e:
+            logger.error(f"【整理接管】Preview 模式异常: {e}", exc_info=True)
+            return False, f"Preview 异常: {e}"
 
     @classmethod
     def _call_original(
@@ -568,6 +697,7 @@ class TransferChainPatcher:
                 library_category_folder=task.library_category_folder,
                 source_oper=source_oper,
                 target_oper=target_oper,
+                preview=task.preview,
             )
 
             if not transferinfo:

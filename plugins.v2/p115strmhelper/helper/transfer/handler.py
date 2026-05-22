@@ -564,6 +564,63 @@ class TransferHandler:
                             over_flag = False
                             skip_reason: Optional[str] = None
 
+                            # 触发 TransferOverwriteCheck 事件，允许插件介入覆盖判断
+                            if overwrite_mode != "never":
+                                try:
+                                    from app.core.event import eventmanager
+                                    from app.schemas import (
+                                        TransferOverwriteCheckEventData,
+                                    )
+                                    from app.schemas.types import ChainEventType
+
+                                    event_data = TransferOverwriteCheckEventData(
+                                        fileitem=fileitem,
+                                        target_item=existing_item,
+                                        target_storage=self.storage_name,
+                                        target_path=target_dir / target_name,
+                                        overwrite_mode=overwrite_mode,
+                                        transfer_type=transfer_type,
+                                    )
+                                    event = eventmanager.send_event(
+                                        ChainEventType.TransferOverwriteCheck,
+                                        event_data,
+                                    )
+                                    if event and event.event_data:
+                                        event_data = event.event_data
+                                        if event_data.overwrite is not None:
+                                            if event_data.overwrite:
+                                                over_flag = True
+                                                logger.info(
+                                                    f"【整理接管】插件强制覆盖: {target_dir / target_name}"
+                                                )
+                                            else:
+                                                skip_reason = (
+                                                    event_data.reason or "插件拒绝覆盖"
+                                                )
+                                                logger.info(
+                                                    f"【整理接管】插件拒绝覆盖: {target_dir / target_name}，原因: {skip_reason}"
+                                                )
+                                        if event_data.source_size is not None:
+                                            fileitem.size = event_data.source_size
+                                        if event_data.target_size is not None:
+                                            existing_item.size = event_data.target_size
+                                except Exception:
+                                    pass
+
+                            if skip_reason:
+                                task_path = (
+                                    task.fileitem.path
+                                    if task and task.fileitem
+                                    else None
+                                )
+                                if task_path:
+                                    task_failures[task_path] = skip_reason
+                                continue
+                            if over_flag:
+                                files_to_delete.append(existing_item)
+                                existing_files_map.pop(target_name, None)
+                                continue
+
                             if overwrite_mode == "always":
                                 over_flag = True
                                 logger.info(
@@ -1009,7 +1066,9 @@ class TransferHandler:
                     new_fileitem = file_map[source_name]
                     if new_fileitem.fileid:
                         task.fileitem.fileid = new_fileitem.fileid
-                        task.fileitem.pickcode = new_fileitem.pickcode or task.fileitem.pickcode
+                        task.fileitem.pickcode = (
+                            new_fileitem.pickcode or task.fileitem.pickcode
+                        )
                         logger.debug(
                             f"【整理接管】更新文件ID: {source_name} -> {new_fileitem.fileid}"
                         )
@@ -1786,6 +1845,35 @@ class TransferHandler:
                 downloader=task.downloader,
                 download_hash=task.download_hash,
             )
+
+            # AI智能体自动重试整理
+            if (
+                history
+                and settings.AI_AGENT_ENABLE
+                and settings.AI_AGENT_RETRY_TRANSFER
+            ):
+                try:
+                    import asyncio
+
+                    from app.core import global_vars
+
+                    chain = TransferChain()
+                    group_key = (
+                        task.download_hash or str(task.fileitem.path).rsplit("/", 1)[0]
+                        if task.fileitem
+                        else ""
+                    )
+                    asyncio.run_coroutine_threadsafe(
+                        chain.retry_scheduler.schedule_retry(
+                            history.id, group_key=group_key
+                        ),
+                        global_vars.loop,
+                    )
+                    logger.info(
+                        f"【整理接管】已触发AI智能体重试整理历史记录 #{history.id}"
+                    )
+                except Exception as e:
+                    logger.error(f"【整理接管】触发AI智能体重试整理失败: {e}")
 
             fi = task.fileitem
             if self._is_media_file(fi):
