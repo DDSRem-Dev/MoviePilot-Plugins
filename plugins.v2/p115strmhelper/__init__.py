@@ -887,7 +887,7 @@ class P115StrmHelper(_PluginBase):
                             "name": f"STRM 定时备份-{backup_item.name}",
                             "trigger": CronTrigger.from_crontab(backup_item.cron),
                             "func": servicer.run_backup_task,
-                            "kwargs": {"task_name": backup_item.name},
+                            "func_kwargs": {"task_name": backup_item.name},
                         }
                     )
         if cron_service:
