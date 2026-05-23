@@ -12,7 +12,6 @@ from app.plugins import _PluginBase
 from app.schemas import (
     FileItem,
     NotificationType,
-    TransferRenameBuildEventData,
     TransferOverwriteCheckEventData,
     TransferInterceptEventData,
 )
@@ -20,6 +19,11 @@ from app.core.meta import MetaVideo
 from app.schemas.types import EventType, MessageChannel, ChainEventType, MediaType
 from app.helper.directory import DirectoryHelper
 from app.chain.storage import StorageChain
+
+try:
+    from app.schemas import TransferRenameBuildEventData
+except ImportError:
+    TransferRenameBuildEventData = None
 
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import Request
@@ -1792,7 +1796,9 @@ class P115StrmHelper(_PluginBase):
             return
 
         data = event.event_data
-        if not isinstance(data, TransferRenameBuildEventData):
+        if TransferRenameBuildEventData is None or not isinstance(
+            data, TransferRenameBuildEventData
+        ):
             return
         source_path: Optional[str] = data.source_path
         source_item: Optional[FileItem] = data.source_item
