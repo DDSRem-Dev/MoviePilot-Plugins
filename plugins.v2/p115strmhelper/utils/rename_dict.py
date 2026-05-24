@@ -432,6 +432,8 @@ class RenameDictUtils:
             m = re_search(r"(?:main|high)\s*(\d+)", prof, IGNORECASE)
             if m:
                 return f"{m.group(1)}bit"
+        if pix:
+            return "8bit"
         return None
 
     @staticmethod
