@@ -41,6 +41,7 @@ class TransferTask:
     downloader: Optional[str] = None  # 下载器
     download_hash: Optional[str] = None  # 下载记录hash
 
+    transfer_batch_id: Optional[str] = None
     related_files: List["RelatedFile"] = field(default_factory=list)
 
     @property

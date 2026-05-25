@@ -1,3 +1,4 @@
+import uuid
 from threading import Lock, Timer
 from typing import List, Optional, Callable
 
@@ -129,6 +130,10 @@ class TransferTaskManager:
 
             # 标记为正在处理
             self._processing = True
+
+            transfer_batch_id = uuid.uuid4().hex
+            for task in tasks_to_process:
+                task.transfer_batch_id = transfer_batch_id
 
         # 在锁外执行批量处理，避免阻塞
         try:

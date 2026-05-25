@@ -126,6 +126,7 @@ class TransferHandler:
             fileitem=task.fileitem,
             mediainfo=task.mediainfo,
             meta=task.meta,
+            transfer_batch_id=task.transfer_batch_id,
         )
 
     @staticmethod
