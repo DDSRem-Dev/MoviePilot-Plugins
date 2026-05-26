@@ -418,6 +418,11 @@ class MediaSyncDelHelper:
         :param file_path: 文件路径
         :param p115_library_path: 115 网盘 媒体库路径映射
         """
+        stem_suffix = Path(Path(file_path).stem).suffix
+        mediaext = {ext.lstrip(".").lower() for ext in settings.RMT_MEDIAEXT or []}
+        if stem_suffix and stem_suffix.lstrip(".").lower() in mediaext:
+            return stem_suffix.lstrip(".")
+
         _, sub_paths = PathUtils.get_p115_media_path(file_path, p115_library_path)
         if not sub_paths:
             return None

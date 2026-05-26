@@ -162,6 +162,16 @@ class TestGetMediaFilePathsWithSuffix(TestCase):
         self.assertEqual(media_path, "/媒体库/Movie/电影 (2026)/电影 (2026).mkv")
         self.assertEqual(media_path_final, "/媒体库/Movie/电影 (2026)/电影 (2026).MKV")
 
+    def test_windows_separator_output_is_normalized(self):
+        """Windows 分隔符输入也规范化为斜杠"""
+        media_path, media_path_final = PathUtils.get_media_file_paths_with_suffix(
+            "\\媒体库\\ISO\\电影 (2026)\\电影 (2026).iso.strm",
+            "iso",
+        )
+
+        self.assertEqual(media_path, "/媒体库/ISO/电影 (2026)/电影 (2026).iso")
+        self.assertEqual(media_path_final, "/媒体库/ISO/电影 (2026)/电影 (2026).ISO")
+
     def test_upper_iso_strm_keeps_existing_case(self):
         """大写 ISO STRM 文件名保留已有后缀大小写"""
         media_path, media_path_final = PathUtils.get_media_file_paths_with_suffix(

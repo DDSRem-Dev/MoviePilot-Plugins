@@ -2,7 +2,7 @@ __all__ = ["PathUtils", "PathRemoveUtils"]
 
 
 from os import name as os_name
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from shutil import rmtree
 from typing import List, Optional, Tuple
 
@@ -144,13 +144,14 @@ class PathUtils:
         :param media_suffix: 真实媒体后缀
         :return: 正常大小写路径和大小写切换路径
         """
-        path = Path(file_path)
+        normalized_path = file_path.replace("\\", "/")
+        path = PurePosixPath(normalized_path)
         if not path.suffix or not media_suffix:
-            return file_path, file_path
+            return normalized_path, normalized_path
 
         suffix = media_suffix.lstrip(".")
         if not suffix:
-            return file_path, file_path
+            return normalized_path, normalized_path
 
         stem = path.stem
         suffix_marker = f".{suffix}"
