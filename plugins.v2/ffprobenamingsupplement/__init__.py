@@ -760,8 +760,12 @@ class FFprobeNamingSupplement(_PluginBase):
         cur = rename_dict.get(key)
         if cur is None:
             return True
-        if isinstance(cur, str) and cur.strip() == "":
-            return True
+        if isinstance(cur, str):
+            cur_stripped = cur.strip()
+            if not cur_stripped:
+                return True
+            if key == "audioCodec" and not re_search(r"\d+\.\d+", cur_stripped):
+                return True
         return False
 
     @classmethod

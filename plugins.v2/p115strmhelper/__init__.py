@@ -3,6 +3,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from functools import wraps
 from pathlib import Path
+from re import search as re_search
 from typing import Any, List, Dict, Tuple, Optional, Union
 
 from app.core.config import settings
@@ -1936,7 +1937,13 @@ class P115StrmHelper(_PluginBase):
                 continue
             if overwrite_mode == "fill_missing":
                 cur = data.rename_dict.get(key)
-                if cur is not None and not (isinstance(cur, str) and cur.strip() == ""):
+                if cur is None:
+                    pass
+                elif isinstance(cur, str):
+                    cur_stripped = cur.strip()
+                    if cur_stripped and (key != "audioCodec" or re_search(r"\d+\.\d+", cur_stripped)):
+                        continue
+                else:
                     continue
             data.rename_dict[key] = value
 
