@@ -1,0 +1,16 @@
+services:
+  hdhive-auth-broker:
+    build: .
+    image: hdhive-auth-broker:local
+    container_name: hdhive-auth-broker
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${BROKER_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
