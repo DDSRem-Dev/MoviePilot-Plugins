@@ -54,6 +54,16 @@
       "constraints": {
         "go": "1.22"
       }
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "enabled": false,
+      "description": "Disable go directive updates in go.mod"
     }
   ]
 }
