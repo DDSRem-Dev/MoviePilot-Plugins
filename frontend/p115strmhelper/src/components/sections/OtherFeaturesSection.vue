@@ -150,7 +150,7 @@
             </v-card-text>
           </v-card>
 
-          <v-card variant="outlined" class="mt-4">
+          <!-- <v-card variant="outlined" class="mt-4">
             <v-card-item>
               <v-card-title class="d-flex align-center">
                 <v-icon start>mdi-api</v-icon>
@@ -186,7 +186,7 @@
                 当前状态：{{ authModeLabel() }}
               </div>
             </v-card-text>
-          </v-card>
+          </v-card> -->
 
           <v-alert type="info" variant="tonal" density="compact" class="mt-6" icon="mdi-information">
             <div class="text-body-2 mb-1"><strong>频道搜索说明（/sh）</strong></div>
@@ -422,11 +422,10 @@
                     <div v-for="(sp, spIndex) in item.source_paths" :key="`sp-${index}-${spIndex}`"
                       class="d-flex align-center mb-2">
                       <v-text-field v-model="item.source_paths[spIndex]" label="源目录路径" density="compact"
-                        variant="outlined" hide-details class="mr-2"
-                        append-icon="mdi-folder-home"
+                        variant="outlined" hide-details class="mr-2" append-icon="mdi-folder-home"
                         @click:append="openDirSelector(index, 'local', 'backupSourcePath', String(spIndex))"></v-text-field>
-                      <v-btn icon size="small" color="error" variant="tonal"
-                        @click="removeSourcePath(index, spIndex)" title="删除此目录">
+                      <v-btn icon size="small" color="error" variant="tonal" @click="removeSourcePath(index, spIndex)"
+                        title="删除此目录">
                         <v-icon>mdi-delete-outline</v-icon>
                       </v-btn>
                     </div>
@@ -459,8 +458,8 @@
                       hide-details></v-switch>
                   </v-col>
                   <v-col cols="12" md="4" v-if="item.timing_enabled">
-                    <VCronField v-model="item.cron" label="备份周期" density="compact" variant="outlined"
-                      hint="设置备份任务的执行周期" persistent-hint></VCronField>
+                    <VCronField v-model="item.cron" label="备份周期" density="compact" variant="outlined" hint="设置备份任务的执行周期"
+                      persistent-hint></VCronField>
                   </v-col>
                   <v-col cols="12" md="4">
                     <v-text-field v-model.number="item.retain_count" label="保留备份数" type="number" density="compact"
@@ -470,12 +469,12 @@
 
                 <v-row>
                   <v-col cols="12" class="d-flex ga-2">
-                    <v-btn size="small" color="primary" prepend-icon="mdi-backup-restore" @click="triggerBackup(item.name)"
-                      :loading="backupLoading[item.name]" :disabled="!item.name">
+                    <v-btn size="small" color="primary" prepend-icon="mdi-backup-restore"
+                      @click="triggerBackup(item.name)" :loading="backupLoading[item.name]" :disabled="!item.name">
                       立即备份
                     </v-btn>
-                    <v-btn size="small" color="info" prepend-icon="mdi-format-list-bulleted" @click="listBackups(item.name)"
-                      :disabled="!item.name">
+                    <v-btn size="small" color="info" prepend-icon="mdi-format-list-bulleted"
+                      @click="listBackups(item.name)" :disabled="!item.name">
                       查看备份
                     </v-btn>
                   </v-col>
@@ -512,8 +511,7 @@
               <v-divider></v-divider>
               <v-card-text>
                 <v-data-table :headers="backupListHeaders" :items="backupListData" density="compact"
-                  :loading="backupListLoading" no-data-text="暂无备份记录"
-                  items-per-page-text="每页条数">
+                  :loading="backupListLoading" no-data-text="暂无备份记录" items-per-page-text="每页条数">
                   <template v-slot:item.file_size="{ item }">
                     {{ formatBytes(item.file_size) }}
                   </template>
@@ -539,7 +537,8 @@
               </v-card-text>
               <v-card-actions>
                 <v-spacer></v-spacer>
-                <v-btn color="grey" variant="text" @click="restoreConfirmDialog = false" :disabled="restoreConfirmLoading">
+                <v-btn color="grey" variant="text" @click="restoreConfirmDialog = false"
+                  :disabled="restoreConfirmLoading">
                   取消
                 </v-btn>
                 <v-btn color="warning" variant="text" @click="handleConfirmRestore" :loading="restoreConfirmLoading">
