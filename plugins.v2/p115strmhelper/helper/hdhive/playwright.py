@@ -914,10 +914,10 @@ class HDHivePlaywrightClient:
                 debug.log("未检测到 CF 容器（正常情况）")
 
             if cf_container_found:
-                cf_retry_sel = "button:has-text('重试')"
+                cf_retry_sel = "button:has-text('重新验证')"
                 cf_iframe_found = False
                 cf_retry_found = False
-                debug.log("第二阶段：等待 CF iframe 或重试按钮 (15s)")
+                debug.log("第二阶段：等待 CF iframe 或重新验证按钮 (15s)")
                 deadline = 15000
                 step_ms = 500
                 waited = 0
@@ -934,7 +934,7 @@ class HDHivePlaywrightClient:
                         el = page.query_selector(cf_retry_sel)
                         if el:
                             cf_retry_found = True
-                            debug.log(f"  CF 重试按钮出现 (waited={waited}ms)")
+                            debug.log(f"  CF 重新验证按钮出现 (waited={waited}ms)")
                             break
                     except Exception:
                         pass
@@ -944,7 +944,7 @@ class HDHivePlaywrightClient:
                 debug.screenshot(
                     page,
                     "cf_phase2_result",
-                    f"第二阶段结果 iframe={cf_iframe_found} retry={cf_retry_found}",
+                    f"第二阶段结果 iframe={cf_iframe_found} revalidate={cf_retry_found}",
                 )
                 debug.log_page_state(page, "CF第二阶段")
                 debug.save_html(page, "cf_phase2_result")
@@ -994,14 +994,14 @@ class HDHivePlaywrightClient:
                         debug.save_html(page, "cf_not_resolved")
 
                 elif cf_retry_found:
-                    debug.log("【CF挑战】Turnstile 首次验证失败，点击重试按钮")
+                    debug.log("【CF挑战】Turnstile 首次验证失败，点击重新验证按钮")
                     try:
                         page.click(cf_retry_sel)
-                        debug.log("  重试按钮点击成功")
+                        debug.log("  重新验证按钮点击成功")
                         sleep(1)
-                        debug.screenshot(page, "after_cf_retry", "CF重试按钮点击后")
+                        debug.screenshot(page, "after_cf_retry", "CF重新验证按钮点击后")
                     except Exception as e:
-                        debug.log(f"  重试按钮点击失败: {e}")
+                        debug.log(f"  重新验证按钮点击失败: {e}")
 
                     debug.log("等待 Turnstile token 写入（验证通过），超时 30s")
                     token_sel = "input[name='cf-turnstile-response']"
@@ -1038,7 +1038,7 @@ class HDHivePlaywrightClient:
                         debug.save_html(page, "cf_token_timeout")
 
                 else:
-                    debug.log("【CF挑战】15s 内既无 iframe 也无重试按钮，CF 状态异常")
+                    debug.log("【CF挑战】15s 内既无 iframe 也无重新验证按钮，CF 状态异常")
                     debug.screenshot(page, "cf_unknown_state", "CF状态未知")
                     debug.log_page_state(page, "CF未知状态")
                     debug.save_html(page, "cf_unknown_state")
