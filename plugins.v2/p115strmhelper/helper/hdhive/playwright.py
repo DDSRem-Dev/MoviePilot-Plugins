@@ -898,61 +898,89 @@ class HDHivePlaywrightClient:
             btn_loc.first.click()
             debug.screenshot(page, "after_checkin_click", "签到按钮点击后")
 
+            cf_container_sel = "div#cf-turnstile"
             cf_iframe_sel = "iframe[src*='challenges.cloudflare.com']"
-            debug.log("等待 CloudFlare 挑战 iframe (8s)")
+
+            debug.log("第一阶段：等待 CF 挑战容器 div#cf-turnstile (15s)")
+            cf_container_found = False
             try:
-                page.wait_for_selector(cf_iframe_sel, timeout=8000)
-                debug.log("【CF挑战】检测到 CloudFlare iframe！")
-                debug.screenshot(page, "cf_challenge_detected", "CF挑战iframe已出现")
-                debug.log_page_state(page, "CF挑战")
-                debug.save_html(page, "cf_challenge_detected")
-
-                cf_frame = page.frame_locator(cf_iframe_sel)
-                cf_click_success = False
-                cf_selectors = (
-                    "input[type='checkbox']",
-                    "[class*='ctp-checkbox']",
-                    ".mark",
-                    "label",
-                )
-                for cf_sel in cf_selectors:
-                    try:
-                        debug.log(f"  尝试 CF 选择器: {cf_sel}")
-                        cf_frame.locator(cf_sel).click(timeout=3000)
-                        debug.log(f"  CF 选择器点击成功: {cf_sel}")
-                        cf_click_success = True
-                        sleep(0.5)
-                        debug.screenshot(
-                            page, "after_cf_click", f"CF点击后 (sel={cf_sel})"
-                        )
-                        break
-                    except Exception as e:
-                        debug.log(f"  CF 选择器失败: {cf_sel}  错误: {e}")
-
-                if not cf_click_success:
-                    debug.log("【CF挑战】所有 CF 选择器均失败，CF 可能未被解决！")
-                    debug.screenshot(page, "cf_click_all_failed", "CF所有选择器失败")
-
-                debug.log("等待 CF iframe 消失（验证通过），超时 15s")
-                try:
-                    page.wait_for_selector(cf_iframe_sel, state="hidden", timeout=15000)
-                    debug.log("CF iframe 已消失，验证通过")
-                    debug.screenshot(page, "cf_resolved", "CF验证通过后")
-                except PlaywrightTimeoutError:
-                    debug.log("【CF挑战】等待 CF iframe 消失超时，CF 验证可能未通过！")
-                    debug.screenshot(page, "cf_not_resolved", "CF验证未通过超时")
-                    debug.log_page_state(page, "CF未通过")
-                    debug.save_html(page, "cf_not_resolved")
-
+                page.wait_for_selector(cf_container_sel, timeout=15000)
+                cf_container_found = True
+                debug.log("【CF挑战】检测到 CF 容器，等待 iframe 异步加载 (15s)")
+                debug.screenshot(page, "cf_container_detected", "CF容器已出现")
+                debug.log_page_state(page, "CF容器")
+                debug.save_html(page, "cf_container_detected")
             except PlaywrightTimeoutError:
-                debug.log("未检测到 CF 挑战 iframe（正常情况）")
+                debug.log("未检测到 CF 容器（正常情况）")
+
+            if cf_container_found:
+                debug.log("第二阶段：等待 CF iframe 加载 (15s)")
+                cf_iframe_found = False
+                try:
+                    page.wait_for_selector(cf_iframe_sel, timeout=15000)
+                    cf_iframe_found = True
+                    debug.log("【CF挑战】CF iframe 已加载，开始尝试点击")
+                    debug.screenshot(page, "cf_iframe_loaded", "CF iframe已加载")
+                    debug.save_html(page, "cf_iframe_loaded")
+                except PlaywrightTimeoutError:
+                    debug.log("【CF挑战】CF 容器存在但 iframe 15s 内未加载！")
+                    debug.screenshot(page, "cf_iframe_timeout", "CF iframe加载超时")
+                    debug.log_page_state(page, "CF iframe超时")
+                    debug.save_html(page, "cf_iframe_timeout")
+
+                if cf_iframe_found:
+                    cf_frame = page.frame_locator(cf_iframe_sel)
+                    cf_click_success = False
+                    cf_selectors = (
+                        "input[type='checkbox']",
+                        "[class*='ctp-checkbox']",
+                        ".mark",
+                        "label",
+                    )
+                    for cf_sel in cf_selectors:
+                        try:
+                            debug.log(f"  尝试 CF 选择器: {cf_sel}")
+                            cf_frame.locator(cf_sel).click(timeout=5000)
+                            debug.log(f"  CF 选择器点击成功: {cf_sel}")
+                            cf_click_success = True
+                            sleep(0.5)
+                            debug.screenshot(
+                                page, "after_cf_click", f"CF点击后 (sel={cf_sel})"
+                            )
+                            break
+                        except Exception as e:
+                            debug.log(f"  CF 选择器失败: {cf_sel}  错误: {e}")
+
+                    if not cf_click_success:
+                        debug.log("【CF挑战】所有 CF 选择器均失败，CF 可能未被解决！")
+                        debug.screenshot(
+                            page, "cf_click_all_failed", "CF所有选择器失败"
+                        )
+
+                    debug.log("等待 CF iframe 消失（验证通过），超时 30s")
+                    try:
+                        page.wait_for_selector(
+                            cf_iframe_sel, state="hidden", timeout=30000
+                        )
+                        debug.log("CF iframe 已消失，验证通过")
+                        debug.screenshot(page, "cf_resolved", "CF验证通过后")
+                    except PlaywrightTimeoutError:
+                        debug.log(
+                            "【CF挑战】等待 CF iframe 消失超时，CF 验证可能未通过！"
+                        )
+                        debug.screenshot(page, "cf_not_resolved", "CF验证未通过超时")
+                        debug.log_page_state(page, "CF未通过")
+                        debug.save_html(page, "cf_not_resolved")
+            else:
                 cf_signals = _CheckinDebugSession._detect_cf_signals(page)
                 if cf_signals:
                     debug.log(
-                        f"【警告】未检测到 CF iframe，但页面有 CF 信号: {cf_signals}"
+                        f"【警告】未检测到 CF 容器，但页面有 CF 信号: {cf_signals}"
                     )
-                    debug.screenshot(page, "cf_signals_no_iframe", "有CF信号但无iframe")
-                    debug.save_html(page, "cf_signals_no_iframe")
+                    debug.screenshot(
+                        page, "cf_signals_no_container", "有CF信号但无容器"
+                    )
+                    debug.save_html(page, "cf_signals_no_container")
 
             debug.log("开始轮询签到结果（最长 30s）")
             _RESULT_PHRASES = [
