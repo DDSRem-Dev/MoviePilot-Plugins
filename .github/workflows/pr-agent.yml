@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: PR Code Review
         id: pragent
-        uses: the-pr-agent/pr-agent@v0.35.0
+        uses: the-pr-agent/pr-agent@v0.36.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEEPSEEK.KEY: ${{ secrets.DEEPSEEK_API_KEY }}
