@@ -1038,12 +1038,65 @@ class HDHivePlaywrightClient:
                         debug.save_html(page, "cf_token_timeout")
 
                 else:
-                    debug.log(
-                        "【CF挑战】15s 内既无 iframe 也无重新验证按钮，CF 状态异常"
-                    )
+                    debug.log("【CF挑战】15s 内既无 iframe 也无重新验证按钮")
                     debug.screenshot(page, "cf_unknown_state", "CF状态未知")
                     debug.log_page_state(page, "CF未知状态")
                     debug.save_html(page, "cf_unknown_state")
+
+                    widget_token_sel = "input[name='cf-turnstile-response']"
+                    try:
+                        existing_val = page.eval_on_selector(
+                            widget_token_sel, "el => el.value", timeout=1000
+                        )
+                        if existing_val:
+                            debug.log("  Token 已存在，直接进入结果轮询")
+                        else:
+                            debug.log(
+                                "  Widget 已初始化但 token 为空，"
+                                "Turnstile 可能无法连接 Cloudflare（建议为 MoviePilot 配置代理）"
+                            )
+                            try:
+                                page.click("div#cf-turnstile", force=True)
+                                debug.log("  已点击 Turnstile 容器，等待响应")
+                                sleep(1)
+                                debug.screenshot(
+                                    page, "cf_container_nudge", "Turnstile容器点击后"
+                                )
+                            except Exception as e:
+                                debug.log(f"  容器点击失败: {e}")
+
+                            debug.log("等待 Turnstile token 写入（验证通过），超时 30s")
+                            token_set = False
+                            waited3 = 0
+                            while waited3 < 30000:
+                                try:
+                                    val = page.eval_on_selector(
+                                        widget_token_sel, "el => el.value", timeout=500
+                                    )
+                                    if val:
+                                        token_set = True
+                                        debug.log(
+                                            f"  Token 写入成功 (waited={waited3}ms)"
+                                        )
+                                        break
+                                except Exception:
+                                    pass
+                                page.wait_for_timeout(step_ms)
+                                waited3 += step_ms
+
+                            if not token_set:
+                                debug.log(
+                                    "  30s 内 token 未写入，Cloudflare 验证无法完成。"
+                                    "请为 MoviePilot 配置代理后重试。"
+                                )
+                                debug.screenshot(
+                                    page, "cf_mode_c_timeout", "ModeC超时无token"
+                                )
+                                debug.save_html(page, "cf_mode_c_timeout")
+                    except Exception:
+                        debug.log(
+                            "  Widget 未初始化（cf-turnstile 为空），Turnstile JS 未运行"
+                        )
 
             else:
                 cf_signals = _CheckinDebugSession._detect_cf_signals(page)
