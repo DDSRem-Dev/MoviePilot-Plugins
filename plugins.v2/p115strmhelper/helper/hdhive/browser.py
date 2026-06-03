@@ -1804,9 +1804,9 @@ class HDHivePlaywrightClient:
 
             try:
                 dismiss = page.locator("button:has-text('我知道了')")
-                dismiss.first.wait_for(state="visible", timeout=5000)
+                dismiss.first.wait_for(state="visible", timeout=1500)
                 dismiss.first.click()
-                dismiss.first.wait_for(state="hidden", timeout=3000)
+                dismiss.first.wait_for(state="hidden", timeout=2000)
             except Exception:
                 pass
 
@@ -1817,7 +1817,6 @@ class HDHivePlaywrightClient:
                 tab = page.locator(_tab_115_sel)
                 tab.first.wait_for(state="visible", timeout=10000)
                 tab.first.click()
-                page.wait_for_timeout(3000)
             except Exception:
                 page.evaluate("""
                     () => {
@@ -1826,14 +1825,17 @@ class HDHivePlaywrightClient:
                         }
                     }
                 """)
-                page.wait_for_timeout(2000)
+            _waited = 0
+            while _waited < 5000 and not captured:
+                page.wait_for_timeout(100)
+                _waited += 100
 
             if captured:
                 return captured
 
             try:
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(500)
             except Exception:
                 pass
             dom_data = page.evaluate(self._scrape_resource_cards_js())
