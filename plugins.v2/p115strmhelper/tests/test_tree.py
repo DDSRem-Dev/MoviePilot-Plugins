@@ -2,6 +2,15 @@
 DirectoryTree / RedisStorage / TxtFileStorage 测试模块
 """
 
+import sys
+from types import ModuleType
+
+# 注入 version mock，避免 CI 中插件目录的 version.py 被优先加载
+_version_mod = ModuleType("version")
+_version_mod.APP_VERSION = "test"
+_version_mod.FRONTEND_VERSION = "test"
+sys.modules["version"] = _version_mod
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
