@@ -15,6 +15,19 @@ class StrmApiConfig(BaseModel):
 class StrmApiData(BaseModel):
     """
     API 调用生成 STRM 数据
+
+    Attributes:
+        id: 文件 ID
+        name: 文件名
+        sha1: 文件 SHA1
+        size: 文件大小
+        pick_code: 文件 pickcode
+        local_path: 本地路径
+        pan_path: 网盘路径
+        pan_media_path: 网盘媒体库路径
+        media_server_refresh: 是否刷新媒体服务器
+        scrape_metadata: 是否刮削元数据
+        auto_download_mediainfo: 是否自动下载媒体元数据
     """
 
     id: Optional[int] = Field(default=None, description="文件ID")

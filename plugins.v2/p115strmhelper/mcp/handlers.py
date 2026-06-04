@@ -18,12 +18,12 @@ async def dispatch_rpc(
     """
     根据 method 调用对应逻辑，返回 JSON-RPC 响应体（dict），供上层序列化为 JSON
 
-    :param api: 插件 Api 实例
-    :param servicer: 插件 ServiceHelper 实例
-    :param method: JSON-RPC 方法名，如 initialize、tools/list、tools/call 等
-    :param params: 方法参数（dict）
-    :param request_id: 请求 id，原样带回响应
-    :return: 响应体 dict，或 None（不向客户端回写时）
+    :param api (Any): 插件 Api 实例
+    :param servicer (Any): 插件 ServiceHelper 实例
+    :param method (str): JSON-RPC 方法名，如 initialize、tools/list、tools/call 等
+    :param params (Dict): 方法参数（dict）
+    :param request_id (Any): 请求 id，原样带回响应
+    :return Dict: 响应体 dict，或 None（不向客户端回写时）
     """
     if not method:
         return {

@@ -21,9 +21,10 @@ def _sse_message(event: str, data: str) -> str:
     """
     构造一条 SSE 消息
 
-    :param event: 事件名
-    :param data: 数据内容
-    :return: 格式化为 "event: x\\ndata: y\\n\\n" 的字符串
+    :param event (str): 事件名
+    :param data (str): 数据内容
+
+    :return str: 格式化为 "event: x\\ndata: y\\n\\n" 的字符串
     """
     return f"event: {event}\ndata: {data}\n\n"
 
@@ -35,8 +36,10 @@ class MCPManager:
 
     def __init__(self, api: Any, servicer: Any = None):
         """
-        :param api: 插件 Api 实例，供 RPC 调用
-        :param servicer: 插件 ServiceHelper 实例
+        初始化 MCP 会话管理器
+
+        :param api (Any): 插件 Api 实例，供 RPC 调用
+        :param servicer (Any): 插件 ServiceHelper 实例
         """
         self._api = api
         self._servicer = servicer
@@ -48,8 +51,8 @@ class MCPManager:
         """
         GET /mcp/sse：建立 SSE 连接，先发送 endpoint 事件，再持续发送 message 事件
 
-        :param request: FastAPI 请求对象
-        :return: StreamingResponse，媒体类型 text/event-stream
+        :param request (Request): FastAPI 请求对象
+        :return StreamingResponse: 媒体类型 text/event-stream
         """
         scope = request.scope
         # 返回客户端用于 POST 的完整路径（含插件前缀），否则客户端会误解析为相对路径导致失败
@@ -68,15 +71,16 @@ class MCPManager:
         if apikey:
             endpoint_url += f"&apikey={apikey}"
 
-        async def event_stream():
-            """
-            SSE 事件流生成器协程
+            async def event_stream():
+                """
+                SSE 事件流生成器协程
 
-            持续从会话队列中读取响应并作为 SSE message 事件发送，
-            每 300 秒发送一次 ping 以保持连接
+                持续从会话队列中读取响应并作为 SSE message 事件发送，
+                每 300 秒发送一次 ping 以保持连接
 
-            :yields: SSE 格式的事件字符串
-            """
+                :yields str: SSE 格式的事件字符串
+                """
+
             try:
                 yield _sse_message("endpoint", endpoint_url)
                 while True:
@@ -108,8 +112,8 @@ class MCPManager:
         """
         POST /mcp/messages?session_id=xxx：接收 JSON-RPC 请求，分发后把响应写入该会话的 SSE 流
 
-        :param request: FastAPI 请求对象，query 含 session_id，body 为 JSON-RPC
-        :return: 202 Accepted 或 4xx 错误响应
+        :param request (Request): FastAPI 请求对象，query 含 session_id，body 为 JSON-RPC
+        :return Response: 202 Accepted 或 4xx 错误响应
         """
         session_id = request.query_params.get("session_id")
         if not session_id:

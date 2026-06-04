@@ -24,8 +24,9 @@ def _dump(obj: Any) -> str:
     """
     将对象序列化为 JSON 字符串
 
-    :param obj: 支持 model_dump()、dict() 或普通可序列化对象
-    :return: UTF-8 JSON 字符串
+    :param obj (Any): 支持 model_dump()、dict() 或普通可序列化对象
+
+    :return str: UTF-8 JSON 字符串
     """
     if hasattr(obj, "model_dump"):
         return orjson_dumps(obj.model_dump(), default=str).decode()
@@ -40,11 +41,11 @@ async def run_tool(
     """
     根据 name 调用对应 handler（Api 或 INTERNAL_TOOLS），返回 JSON 字符串结果
 
-    :param api: 插件 Api 实例，供包装 Api 的 tools 使用
-    :param servicer: 插件 ServiceHelper 实例
-    :param name: 工具名称
-    :param arguments: 工具参数字典
-    :return: 序列化后的 JSON 字符串（成功为结果，失败为含 error 的 dict）
+    :param api (Any): 插件 Api 实例，供包装 Api 的 tools 使用
+    :param servicer (Any): 插件 ServiceHelper 实例
+    :param name (str): 工具名称
+    :param arguments (Dict): 工具参数字典
+    :return str: 序列化后的 JSON 字符串（成功为结果，失败为含 error 的 dict）
     """
     internal_handlers = {t["def"]["name"]: t["handler"] for t in INTERNAL_TOOLS}
     if name in internal_handlers:
