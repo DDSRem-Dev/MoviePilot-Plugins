@@ -96,10 +96,11 @@ def create_client_with_timeout(
     """
     为现有的 P115Client 实例添加超时支持
 
-    :param client: P115Client 实例（或其子类）
-    :param default_timeout: 普通操作超时配置
-    :param slow_timeout: 慢操作超时配置
-    :return: 带超时支持的客户端
+    :param client (P115Client): P115Client 实例（或其子类）
+    :param default_timeout (Dict): 普通操作超时配置
+    :param slow_timeout (Dict): 慢操作超时配置
+
+    :return P115Client: 带超时支持的客户端
     """
     if not default_timeout:
         return client
@@ -144,9 +145,11 @@ class P115ClientWithTimeout(P115Client):
         **kwargs,
     ):
         """
-        :param cookies: 115 Cookie（字符串或路径）
-        :param default_timeout: 普通操作超时配置，如 {"connect": 30, "read": 60}
-        :param slow_timeout: 慢操作超时配置，如 {"connect": 30, "read": 300}
+        初始化带超时的 P115Client
+
+        :param cookies (Any): 115 Cookie（字符串或路径）
+        :param default_timeout (Dict): 普通操作超时配置，如 {"connect": 30, "read": 60}
+        :param slow_timeout (Dict): 慢操作超时配置，如 {"connect": 30, "read": 300}
         """
         super().__init__(cookies, **kwargs)
         self._default_timeout = default_timeout
@@ -207,10 +210,11 @@ def create_client(
     """
     创建 P115Client，可选带超时配置
 
-    :param cookies: 115 Cookie（字符串或路径）
-    :param default_timeout: 普通操作超时，如 {"connect": 30, "read": 60}，None 表示不启用
-    :param slow_timeout: 慢操作超时，如 {"connect": 30, "read": 300}，None 则与 default_timeout 相同
-    :return: P115Client 实例（可能被 P115ClientWithTimeout 包装）
+    :param cookies (Any): 115 Cookie（字符串或路径）
+    :param default_timeout (Dict): 普通操作超时，如 {"connect": 30, "read": 60}，None 表示不启用
+    :param slow_timeout (Dict): 慢操作超时，如 {"connect": 30, "read": 300}，None 则与 default_timeout 相同
+
+    :return P115Client: P115Client 实例（可能被 P115ClientWithTimeout 包装）
     """
     if not default_timeout:
         return P115Client(cookies)
@@ -232,12 +236,13 @@ def build_timeout_config(
     """
     从配置值构建超时字典
 
-    :param timeout_enabled: 是否启用超时
-    :param connect: 连接超时秒数
-    :param pool: 连接池超时秒数
-    :param read: 读取超时秒数
-    :param write: 写入超时秒数
-    :return: 超时配置字典，未启用时返回 None
+    :param timeout_enabled (bool): 是否启用超时
+    :param connect (int): 连接超时秒数
+    :param pool (int): 连接池超时秒数
+    :param read (int): 读取超时秒数
+    :param write (int): 写入超时秒数
+
+    :return Dict: 超时配置字典，未启用时返回 None
     """
     if not timeout_enabled:
         return None

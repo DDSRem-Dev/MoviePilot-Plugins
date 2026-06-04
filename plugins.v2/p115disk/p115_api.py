@@ -73,9 +73,9 @@ class P115Api:
         """
         通过文件夹路径获取文件夹 ID
 
-        :param path: 文件夹路径
+        :param path (Path): 文件夹路径
 
-        :return: 目录 ID
+        :return int: 目录 ID
         """
         try:
             if path.as_posix() == "/":
@@ -117,9 +117,9 @@ class P115Api:
         """
         递归遍历文件夹
 
-        :param fileitem: 文件项，可以是文件或目录
+        :param fileitem (FileItem): 文件项，可以是文件或目录
 
-        :return: 文件项列表
+        :return List: 文件项列表
         """
         if fileitem.type == "file":
             item = self.detail(fileitem)
@@ -181,9 +181,9 @@ class P115Api:
         """
         浏览文件或目录
 
-        :param fileitem: 文件项，可以是文件或目录
+        :param fileitem (FileItem): 文件项，可以是文件或目录
 
-        :return: 文件项列表，如果是文件则返回包含该文件的列表，如果是目录则返回目录下的所有文件和子目录
+        :return List: 文件项列表，如果是文件则返回包含该文件的列表，如果是目录则返回目录下的所有文件和子目录
         """
         self._list_rate_limiter.acquire()
         if fileitem.type == "file":
@@ -292,10 +292,10 @@ class P115Api:
         """
         创建目录
 
-        :param fileitem: 父目录文件项
-        :param name: 要创建的目录名称
+        :param fileitem (FileItem): 父目录文件项
+        :param name (str): 要创建的目录名称
 
-        :return: 创建成功返回目录文件项，失败返回None
+        :return FileItem: 创建成功返回目录文件项，失败返回 None
         """
         try:
             new_path = Path(fileitem.path) / name
@@ -344,9 +344,9 @@ class P115Api:
         """
         获取目录，如目录不存在则创建
 
-        :param path: 目录路径
+        :param path (Path): 目录路径
 
-        :return: 目录文件项，如果创建失败则返回None
+        :return FileItem: 目录文件项，如果创建失败则返回 None
         """
         folder = self.get_item(path)
         if folder:
@@ -390,9 +390,9 @@ class P115Api:
         获取文件或目录，不存在返回None
         如果连续三次调用都是同一个目录且API都返回不存在，则接下来的15秒内直接返回None
 
-        :param path: 文件或目录路径
+        :param path (Path): 文件或目录路径
 
-        :return: 文件项，如果不存在则返回None
+        :return FileItem: 文件项，如果不存在则返回 None
         """
         path_str = path.as_posix()
         now = monotonic()
@@ -528,8 +528,8 @@ class P115Api:
         """
         记录 get_item 失败，如果连续失败3次则加入黑名单15秒
 
-        :param path_str: 目录路径
-        :param now: 当前时间戳
+        :param path_str (str): 目录路径
+        :param now (float): 当前时间戳
         """
         if path_str not in self._get_item_fail_records:
             self._get_item_fail_records[path_str] = {"count": 0, "first_fail_time": now}
@@ -549,9 +549,9 @@ class P115Api:
         """
         获取父目录
 
-        :param fileitem: 文件项
+        :param fileitem (FileItem): 文件项
 
-        :return: 父目录文件项，如果不存在则返回None
+        :return FileItem: 父目录文件项，如果不存在则返回 None
         """
         return self.get_item(Path(fileitem.path).parent)
 
@@ -560,9 +560,9 @@ class P115Api:
         删除文件或目录
         此操作将文件移动到回收站，不会永久删除
 
-        :param fileitem: 要删除的文件项
+        :param fileitem (FileItem): 要删除的文件项
 
-        :return: 删除成功返回True，失败返回False
+        :return bool: 删除成功返回 True，失败返回 False
         """
         self._delete_rate_limiter.acquire()
 
@@ -596,10 +596,10 @@ class P115Api:
         """
         重命名文件或目录
 
-        :param fileitem: 要重命名的文件项
-        :param name: 新名称
+        :param fileitem (FileItem): 要重命名的文件项
+        :param name (str): 新名称
 
-        :return: 重命名成功返回True，失败返回False
+        :return bool: 重命名成功返回 True，失败返回 False
         """
         self._rename_rate_limiter.acquire()
         try:
@@ -645,10 +645,10 @@ class P115Api:
         """
         下载文件，保存到本地，返回本地临时文件地址
 
-        :param fileitem: 要下载的文件项
-        :param path: 文件保存路径，如果为None则保存到临时目录
+        :param fileitem (FileItem): 要下载的文件项
+        :param path (Path): 文件保存路径，如果为 None 则保存到临时目录
 
-        :return: 下载成功返回本地文件路径，失败返回None
+        :return Path: 下载成功返回本地文件路径，失败返回 None
         """
         detail = self.get_item(Path(fileitem.path))
         if not detail:
@@ -709,8 +709,10 @@ class P115Api:
     @staticmethod
     def _calc_sha1(filepath: Path, size: Optional[int] = None) -> str:
         """
-        计算文件SHA1
-        size: 前多少字节
+        计算文件 SHA1
+
+        :param filepath (Path): 文件路径
+        :param size (int): 前多少字节，为 None 则计算整个文件
         """
         sha1 = hashes.Hash(hashes.SHA1())
         with open(filepath, "rb") as f:
@@ -726,7 +728,7 @@ class P115Api:
         """
         获取 OSS 上传凭证
 
-        :return: (endpoint, access_key_id, access_key_secret, security_token, expiration_time)
+        :return Tuple: (endpoint, access_key_id, access_key_secret, security_token, expiration_time)
         """
         token_resp = self.client.upload_gettoken(**get_ios_ua_app(app=False))
         check_response(token_resp)
@@ -755,9 +757,10 @@ class P115Api:
         """
         检查 token 是否即将过期
 
-        :param expiration_time: token 过期时间
-        :param threshold_minutes: 提前多少分钟判定为即将过期（默认 5 分钟）
-        :return: True 表示即将过期或已过期
+        :param expiration_time (datetime): token 过期时间
+        :param threshold_minutes (int): 提前多少分钟判定为即将过期（默认 5 分钟）
+
+        :return bool: True 表示即将过期或已过期
         """
         now = datetime.now(timezone.utc)
         remaining = (expiration_time - now).total_seconds()
@@ -772,11 +775,11 @@ class P115Api:
         """
         上传文件到云盘
 
-        :param target_dir: 上传目标目录项
-        :param local_path: 本地文件路径
-        :param new_name: 上传后的文件名，如果为None则使用本地文件名
+        :param target_dir (FileItem): 上传目标目录项
+        :param local_path (Path): 本地文件路径
+        :param new_name (str): 上传后的文件名，如果为 None 则使用本地文件名
 
-        :return: 上传成功返回文件项，失败返回None
+        :return FileItem: 上传成功返回文件项，失败返回 None
         """
         if not local_path.exists():
             logger.error(f"【P115Disk】本地文件不存在: {local_path}")
@@ -1048,9 +1051,9 @@ class P115Api:
         """
         获取文件详情
 
-        :param fileitem: 文件项
+        :param fileitem (FileItem): 文件项
 
-        :return: 包含详细信息的文件项，如果获取失败则返回None
+        :return FileItem: 包含详细信息的文件项，如果获取失败则返回 None
         """
         return self.get_item(Path(fileitem.path))
 
@@ -1058,11 +1061,11 @@ class P115Api:
         """
         复制文件或目录到目标位置
 
-        :param fileitem: 要复制的文件项
-        :param path: 目标目录路径
-        :param new_name: 复制后的新文件名
+        :param fileitem (FileItem): 要复制的文件项
+        :param path (Path): 目标目录路径
+        :param new_name (str): 复制后的新文件名
 
-        :return: 复制成功返回True，失败返回False
+        :return bool: 复制成功返回 True，失败返回 False
         """
         self._copy_rate_limiter.acquire()
         try:
@@ -1092,11 +1095,11 @@ class P115Api:
         """
         移动文件或目录到目标位置
 
-        :param fileitem: 要移动的文件项
-        :param path: 目标目录路径
-        :param new_name: 移动后的新文件名
+        :param fileitem (FileItem): 要移动的文件项
+        :param path (Path): 目标目录路径
+        :param new_name (str): 移动后的新文件名
 
-        :return: 移动成功返回True，失败返回False
+        :return bool: 移动成功返回 True，失败返回 False
         """
         self._move_rate_limiter.acquire()
         try:
@@ -1149,9 +1152,10 @@ class P115Api:
         硬链接文件
         云盘存储不支持硬链接操作
 
-        :param fileitem: 文件项
-        :param target_file: 目标文件路径
-        :return: 始终返回False，表示不支持此操作
+        :param fileitem (FileItem): 文件项
+        :param target_file (Path): 目标文件路径
+
+        :return bool: 始终返回 False，表示不支持此操作
         """
         return False
 
@@ -1160,9 +1164,10 @@ class P115Api:
         软链接文件
         云盘存储不支持软链接操作
 
-        :param fileitem: 文件项
-        :param target_file: 目标文件路径
-        :return: 始终返回False，表示不支持此操作
+        :param fileitem (FileItem): 文件项
+        :param target_file (Path): 目标文件路径
+
+        :return bool: 始终返回 False，表示不支持此操作
         """
         return False
 
@@ -1170,7 +1175,7 @@ class P115Api:
         """
         获取存储使用情况
 
-        :return: 存储使用情况对象，包含总容量和可用容量，获取失败返回None
+        :return StorageUsage: 存储使用情况对象，包含总容量和可用容量，获取失败返回 None
         """
         try:
             resp = self.client.fs_index_info(0, **get_ios_ua_app(app=False))
@@ -1187,7 +1192,7 @@ class P115Api:
         """
         支持的整理方式
 
-        :return: 支持的整理方式字典
+        :return Dict: 支持的整理方式字典
         """
         return self.transtype
 
@@ -1195,8 +1200,8 @@ class P115Api:
         """
         是否支持整理方式
 
-        :param transtype: 整理方式 (move/copy)
+        :param transtype (str): 整理方式 (move/copy)
 
-        :return: 是否支持
+        :return bool: 是否支持
         """
         return transtype in self.transtype

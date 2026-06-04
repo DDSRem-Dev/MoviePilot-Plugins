@@ -47,8 +47,9 @@ class IdPathCache:
         """
         通过 ID 获取路径
 
-        :param id: 文件 ID
-        :return: 目录路径，如果不存在则返回 None
+        :param id (int): 文件 ID
+
+        :return str: 目录路径，如果不存在则返回 None
         """
         return self.id_to_dir.get(str(id))
 
@@ -56,8 +57,9 @@ class IdPathCache:
         """
         通过路径获取 ID
 
-        :param directory: 目录路径
-        :return: 文件 ID，如果不存在则返回 None
+        :param directory (str): 目录路径
+
+        :return int: 文件 ID，如果不存在则返回 None
         """
         _id = self.dir_to_id.get(directory)
         if _id is None:
@@ -71,8 +73,9 @@ class IdPathCache:
         """
         通过 ID 或路径删除单条缓存
 
-        :param id: 文件 ID
-        :param directory: 目录路径
+        :param id (int): 文件 ID
+        :param directory (str): 目录路径
+
         :raises ValueError: 当 id 和 directory 都未提供时抛出
         """
         if id is not None:
@@ -117,8 +120,8 @@ class ItemIdCache:
         """
         添加缓存
 
-        :param id: 文件 ID
-        :param item: 文件详情
+        :param id (int): 文件 ID
+        :param item (Dict): 文件详情
         """
         self.id_to_item.set(key=str(id), value=item)
 
@@ -126,8 +129,9 @@ class ItemIdCache:
         """
         获取文件详情
 
-        :param id: 文件 ID
-        :return: 文件详情，如果不存在则返回 None
+        :param id (int): 文件 ID
+
+        :return Dict: 文件详情，如果不存在则返回 None
         """
         return self.id_to_item.get(str(id))
 
@@ -135,7 +139,7 @@ class ItemIdCache:
         """
         删除缓存
 
-        :param id: 文件 ID
+        :param id (int): 文件 ID
         """
         self.id_to_item.delete(key=str(id))
 
