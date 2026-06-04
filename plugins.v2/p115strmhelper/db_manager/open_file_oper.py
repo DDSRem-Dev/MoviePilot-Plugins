@@ -14,9 +14,9 @@ class OpenFileOper(DbOper):
         """
         获取所有 ID
 
-        :param type: 数据类型
+        :param type (str): 数据类型，"file" 或 "folder"
 
-        :return: ID 集合
+        :return Set: ID 集合
         """
         if type == "file":
             return OpenFile.get_all_id(self._db)
@@ -26,8 +26,8 @@ class OpenFileOper(DbOper):
         """
         批量写入
 
-        :param batch: 写入数据
-        :param type: 数据类型
+        :param batch (List): 写入数据
+        :param type (str): 数据类型，"file" 或 "folder"
         """
         if type == "file":
             OpenFile.upsert_batch_by_list(self._db, batch)
@@ -37,9 +37,9 @@ class OpenFileOper(DbOper):
         """
         通过目录 ID 获取路径
 
-        :param parent_id: 父目录 ID
+        :param parent_id (int): 父目录 ID
 
-        :return: 路径
+        :return str: 路径
         """
         return OpenFolder.get_by_id(self._db, parent_id).path
 
@@ -47,9 +47,9 @@ class OpenFileOper(DbOper):
         """
         获取一组文件信息
 
-        :param ids: 一组文件 ID
+        :param ids (Set): 一组文件 ID
 
-        :return: 迭代器，文件信息
+        :return Iterator: 迭代器，文件信息
         """
         for item in OpenFile.get_by_ids(self._db, ids):
             i = item.__dict__

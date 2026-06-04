@@ -12,6 +12,8 @@ class LifeEventDbHelper(DbOper):
     def upsert_batch_by_list(self, batch: List[Dict]):
         """
         通过列表批量写入或更新数据
+
+        :param batch (List): 待写入的数据列表
         """
         data = [
             {

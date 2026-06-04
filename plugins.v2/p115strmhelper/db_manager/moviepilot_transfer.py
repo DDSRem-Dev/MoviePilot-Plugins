@@ -19,7 +19,7 @@ class TransferHBOper(DbOper):
         通过路径查询转移记录
         所有匹配项
 
-        :param path: 查询路径
+        :param path (str): 查询路径
 
         :return List: 数据列表
         """

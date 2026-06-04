@@ -25,7 +25,9 @@ class OpenFolder(P115StrmHelperBase):
         """
         获取所有 ID
 
-        :return: ID 集合
+        :param db (Session): 数据库会话
+
+        :return Set: ID 集合
         """
         stmt = select(OpenFolder.id)
         return set(db.scalars(stmt).all())
@@ -35,6 +37,9 @@ class OpenFolder(P115StrmHelperBase):
     def upsert_batch_by_list(db: Session, batch: List[Dict]):
         """
         通过列表批量写入或更新数据
+
+        :param db (Session): 数据库会话
+        :param batch (List): 待写入的数据列表
         """
         stmt = sqlite_insert(OpenFolder).prefix_with("OR REPLACE")
         db.execute(stmt, batch)
@@ -44,5 +49,10 @@ class OpenFolder(P115StrmHelperBase):
     def get_by_id(db: Session, folder_id: int):
         """
         通过ID获取
+
+        :param db (Session): 数据库会话
+        :param folder_id (int): 文件夹 ID
+
+        :return OpenFolder: 匹配的文件夹模型实例，未找到返回 None
         """
         return db.scalars(select(OpenFolder).where(OpenFolder.id == folder_id)).first()

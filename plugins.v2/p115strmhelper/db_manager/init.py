@@ -21,6 +21,8 @@ from ..db_manager.models import *  # noqa
 def init_db(engine):
     """
     初始化数据库
+
+    :param engine (Engine): SQLAlchemy 数据库引擎
     """
     if not engine:
         raise SQLAlchemyError("数据库引擎获取失败")
@@ -31,6 +33,10 @@ def init_db(engine):
 def migration_db(db_path, script_location, version_locations: list):
     """
     更新数据库
+
+    :param db_path (Path): 数据库文件路径
+    :param script_location (Path): Alembic 迁移脚本目录
+    :param version_locations (List): 版本目录列表
     """
     # 启动时的更新，调整从 /config/plugins/p115strmhelper/database/versions 中读取持久化的迁移脚本)
     meta_data_path = Path(
@@ -57,6 +63,8 @@ def migration_db(db_path, script_location, version_locations: list):
 def init_migration_scripts() -> bool:
     """
     初始化持久化的迁移脚本，将源目录内容完整复制到目标目录
+
+    :return bool: 迁移脚本初始化成功返回 True，失败返回 False
     """
     # 使用 Path 对象定义路径
     source_path = Path(
@@ -108,6 +116,11 @@ def init_migration_scripts() -> bool:
 def get_ancestors(script: ScriptDirectory, revision_id: str) -> Set[str]:
     """
     获取给定 revision 的所有祖先（历史版本）
+
+    :param script (ScriptDirectory): Alembic 脚本目录对象
+    :param revision_id (str): 版本 ID
+
+    :return Set: 祖先版本 ID 集合
     """
     ancestors = set()
     # 路径上的所有版本都被认为是“祖先”
@@ -124,6 +137,11 @@ def sync_to_revision(
 ):
     """
     智能地将数据库同步到指定的目标版本，无需 alembic.ini 文件
+
+    :param script_location (str): Alembic 迁移脚本目录路径
+    :param sqlalchemy_url (str): 数据库连接 URL
+    :param target_revision (str): 目标版本号
+    :param version_locations (str): 版本目录路径，可选
     """
     logger.info(f"--- 开始智能迁移，目标版本: {target_revision} ---")
 
@@ -206,4 +224,4 @@ def sync_to_revision(
         )
         return
 
-    logger.info(f"--- 迁移操作成功完成 ---")
+    logger.info("--- 迁移操作成功完成 ---")

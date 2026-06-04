@@ -35,7 +35,9 @@ class OpenFile(P115StrmHelperBase):
         """
         获取所有 ID
 
-        :return: ID 集合
+        :param db (Session): 数据库会话
+
+        :return Set: ID 集合
         """
         stmt = select(OpenFile.id)
         return set(db.scalars(stmt).all())
@@ -45,6 +47,9 @@ class OpenFile(P115StrmHelperBase):
     def upsert_batch_by_list(db: Session, batch: List[Dict]):
         """
         通过列表批量写入或更新数据
+
+        :param db (Session): 数据库会话
+        :param batch (List): 待写入的数据列表
         """
         stmt = sqlite_insert(OpenFile).prefix_with("OR REPLACE")
         db.execute(stmt, batch)
@@ -54,6 +59,11 @@ class OpenFile(P115StrmHelperBase):
     def get_by_ids(db: Session, ids: Set[int]) -> List["OpenFile"] | None:
         """
         通过一组 ID 获取一组文件信息
+
+        :param db (Session): 数据库会话
+        :param ids (Set): 文件 ID 集合
+
+        :return List: 匹配的文件信息列表
         """
         if not ids:
             return []

@@ -18,6 +18,12 @@ class FileDbHelper(DbOper):
     def process_item(item: Dict) -> List[Dict]:
         """
         处理单个项目，分离文件夹和文件数据
+
+        :param item (Dict): 包含文件信息的字典，必须包含 path 键
+
+        :return List: 处理后的数据列表，每项包含 table 和 data 字段
+
+        :raises PathNotInKey: 当 item 中缺少 path 键时抛出
         """
         if not item.get("path"):
             raise PathNotInKey("键中不包含 path 项")
@@ -65,6 +71,11 @@ class FileDbHelper(DbOper):
     def process_life_file_item(event, file_path: str) -> List[Dict]:
         """
         处理115生活事件文件 event
+
+        :param event (Dict): 115 生活事件中的文件数据
+        :param file_path (str): 文件路径
+
+        :return List: 处理后的数据列表
         """
         return [
             {
@@ -88,6 +99,11 @@ class FileDbHelper(DbOper):
     def process_life_dir_item(event, file_path: str) -> List[Dict]:
         """
         处理115生活事件文件夹 event
+
+        :param event (Dict): 115 生活事件中的文件夹数据
+        :param file_path (str): 文件夹路径
+
+        :return List: 处理后的数据列表
         """
         return [
             {
@@ -105,6 +121,12 @@ class FileDbHelper(DbOper):
     def process_fs_files_item(item) -> List[Dict]:
         """
         处理115原始返回数据
+
+        :param item (Dict): 115 原始 API 返回的文件或文件夹数据
+
+        :return List: 处理后的数据列表
+
+        :raises PathNotInKey: 当 item 中缺少 path 键时抛出
         """
         if not item.get("path"):
             raise PathNotInKey("键中不包含 path 项")
@@ -144,6 +166,10 @@ class FileDbHelper(DbOper):
     def process_fileitem(fileitem: Optional[FileItem]) -> List[Dict]:
         """
         处理MP fileitem 类型数据
+
+        :param fileitem (FileItem): MoviePilot 的文件项对象
+
+        :return List: 处理后的数据列表，fileitem 为空时返回空列表
         """
         if not fileitem:
             return []
@@ -185,6 +211,10 @@ class FileDbHelper(DbOper):
     def upsert_batch(self, batch: List[Dict]):
         """
         批量写入或更新数据
+
+        :param batch (List): 待处理的数据列表，每项包含 table 和 data 字段
+
+        :return bool: 操作成功返回 True
         """
         files_data_map = {
             entry["data"]["id"]: entry["data"]
@@ -211,6 +241,11 @@ class FileDbHelper(DbOper):
     def upsert_batch_by_list(self, list_type: str, batch: List[Dict]):
         """
         通过列表批量写入或更新数据
+
+        :param list_type (str): 数据类型，files 或 folders
+        :param batch (List): 待写入的数据列表
+
+        :return bool: 操作成功返回 True
         """
         if list_type == "files":
             File.upsert_batch_by_list(self._db, batch)
@@ -221,6 +256,10 @@ class FileDbHelper(DbOper):
     def get_by_path(self, path: str) -> Optional[Dict]:
         """
         通过路径获取项目
+
+        :param path (str): 文件或文件夹路径
+
+        :return Dict: 匹配的文件或文件夹信息字典，未找到返回 None
         """
         file = File.get_by_path(self._db, path)
         if file:
@@ -237,6 +276,10 @@ class FileDbHelper(DbOper):
     def get_by_id(self, id: int) -> Optional[Dict]:
         """
         通过ID获取项目
+
+        :param id (int): 文件或文件夹 ID
+
+        :return Dict: 匹配的文件或文件夹信息字典，未找到返回 None
         """
         file = File.get_by_id(self._db, id)
         if file:
@@ -253,6 +296,10 @@ class FileDbHelper(DbOper):
     def get_children(self, path: str) -> Dict:
         """
         获取路径下的所有子项
+
+        :param path (str): 父目录路径
+
+        :return Dict: 包含 files、subfolders 和 meta 信息的字典
         """
         parent = Folder.get_by_path(self._db, path)
         if not parent:
@@ -267,7 +314,8 @@ class FileDbHelper(DbOper):
             清洗数据库记录，移除内部状态并添加类型标记
 
             :param record: File 或 Folder 的 ORM 实例
-            :return: 清理后的字典
+
+            :return dict: 清理后的字典
             """
             d = record.__dict__
             d.pop("_sa_instance_state", None)
@@ -287,6 +335,11 @@ class FileDbHelper(DbOper):
     def remove_by_path_batch(self, path: str, only_file: bool = False):
         """
         通过路径批量删除
+
+        :param path (str): 要删除的路径前缀
+        :param only_file (bool): 仅删除文件而不删除文件夹
+
+        :return bool: 操作成功返回 True
         """
         File.remove_by_path_batch(self._db, path)
         if not only_file:
@@ -296,6 +349,11 @@ class FileDbHelper(DbOper):
     def remove_by_id_batch(self, id: int, only_file: bool = False):
         """
         通过文件夹 ID 批量删除
+
+        :param id (int): 文件夹 ID
+        :param only_file (bool): 仅删除文件而不删除文件夹
+
+        :return bool: 操作成功返回 True
         """
         folder = Folder.get_by_id(self._db, id)
         if not folder:
@@ -309,6 +367,9 @@ class FileDbHelper(DbOper):
     def remove_by_path(self, path_type: str, path: str):
         """
         删除指定路径的记录
+
+        :param path_type (str): 路径类型，file 或 folder
+        :param path (str): 要删除的路径
         """
         if path_type == "file":
             File.delete_by_path(self._db, path)
@@ -318,6 +379,9 @@ class FileDbHelper(DbOper):
     def remove_by_id(self, id_type: str, id: int):
         """
         通过 ID 删除记录
+
+        :param id_type (str): ID 类型，file 或 folder
+        :param id (int): 要删除的记录 ID
         """
         if id_type == "file":
             File.delete_by_id(self._db, id)
@@ -327,6 +391,11 @@ class FileDbHelper(DbOper):
     def update_path_by_id(self, id: int, new_path: str) -> bool:
         """
         通过ID匹配数据并修改path
+
+        :param id (int): 文件 ID
+        :param new_path (str): 新的路径
+
+        :return bool: 更新成功返回 True，项目不存在或类型不匹配返回 False
         """
         item = self.get_by_id(id)
         if not item:
@@ -342,6 +411,11 @@ class FileDbHelper(DbOper):
     def update_name_by_id(self, id: int, new_name: str) -> bool:
         """
         通过ID匹配数据并修改name
+
+        :param id (int): 文件 ID
+        :param new_name (str): 新的名称
+
+        :return bool: 更新成功返回 True，项目不存在或类型不匹配返回 False
         """
         item = self.get_by_id(id)
         if not item:
@@ -359,6 +433,12 @@ class FileDbHelper(DbOper):
     ) -> bool:
         """
         批量更新以旧前缀开头的路径
+
+        :param old_prefix (str): 旧的路径前缀
+        :param new_prefix (str): 新的路径前缀
+        :param only_file (bool): 仅更新文件而不更新文件夹
+
+        :return bool: 操作成功返回 True
         """
         File.update_path_prefix(self._db, old_prefix, new_prefix)
         if not only_file:
@@ -371,9 +451,11 @@ class FileDbHelper(DbOper):
         """
         清除指定路径前缀下、未出现在本次扫描中的幽灵数据库记录，返回实际删除总行数
 
-        :param path_prefix: 网盘路径前缀（末尾带 /）
-        :param seen_file_ids: 本次扫描到的文件 ID 集合
-        :param seen_folder_ids: 本次扫描到的目录 ID 集合
+        :param path_prefix (str): 网盘路径前缀（末尾带 /）
+        :param seen_file_ids (Set): 本次扫描到的文件 ID 集合
+        :param seen_folder_ids (Set): 本次扫描到的目录 ID 集合
+
+        :return int: 实际删除的总行数
         """
         file_count = File.remove_by_path_prefix_not_in_ids(
             self._db, path_prefix, seen_file_ids
@@ -387,7 +469,7 @@ class FileDbHelper(DbOper):
         """
         从文件表中任意获取一条 pickcode 不为空的数据的 pickcode
 
-        :return: pickcode
+        :return str: pickcode 字符串，未找到返回 None
         """
         pickcode = File.get_any_pickcode(self._db)
         if pickcode:

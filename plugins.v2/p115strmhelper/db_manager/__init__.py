@@ -44,8 +44,8 @@ class _DBManager:
         """
         事件监听器，在每个新连接上执行
 
-        :param dbapi_connection: 底层数据库连接对象
-        :param _connection_record: SQLAlchemy 内部用来记录这个连接信息的对象
+        :param dbapi_connection (Any): 底层数据库连接对象
+        :param _connection_record (Any): SQLAlchemy 内部用来记录这个连接信息的对象
         """
         cursor = dbapi_connection.cursor()
         try:
@@ -71,7 +71,8 @@ class _DBManager:
     def init_database(self, db_path: Path):
         """
         初始化数据库引擎
-        :param db_path: 数据库路径
+
+        :param db_path (Path): 数据库路径
         """
         # 数据库已经启动
         if self.is_initialized():
@@ -125,7 +126,8 @@ class _DBManager:
         执行 SQLite 的 checkpoint 操作
 
         在 WAL 模式下，将数据从 -wal 文件写回主数据库文件；关闭前会被调用一次；可以上定时任务，定期执行写入，防止 wal 文件积增
-        :param mode: checkpoint 模式 (PASSIVE, FULL, RESTART, TRUNCATE)
+
+        :param mode (str): checkpoint 模式 (PASSIVE, FULL, RESTART, TRUNCATE)
         """
         #
         if not self.Engine or not configer.get_config("DB_WAL_ENABLE"):
@@ -166,6 +168,8 @@ class _DBManager:
     def is_initialized(self) -> bool:
         """
         判断数据库是否初始化并连接、创建会话工厂
+
+        :return bool: 已初始化返回 True，否则返回 False
         """
         if (
             self.Engine is None
@@ -179,7 +183,8 @@ class _DBManager:
 def get_db() -> Generator:
     """
     获取数据库会话，用于WEB请求
-    :return: Session
+
+    :return Generator: 数据库会话生成器
     """
     db = None
     try:
@@ -193,6 +198,11 @@ def get_db() -> Generator:
 def get_args_db(args: tuple, kwargs: dict) -> Optional[Session]:
     """
     从参数中获取数据库Session对象
+
+    :param args (Tuple): 位置参数元组
+    :param kwargs (Dict): 关键字参数字典
+
+    :return Session: 数据库会话对象，未找到返回 None
     """
     db = None
     if args:
@@ -210,7 +220,15 @@ def get_args_db(args: tuple, kwargs: dict) -> Optional[Session]:
 
 def update_args_db(args: tuple, kwargs: dict, db: Session) -> Tuple[tuple, dict]:
     """
-    更新参数中的数据库Session对象，关键字传参时更新db的值，否则更新第1或第2个参数
+    更新参数中的数据库Session对象
+
+    关键字传参时更新db的值，否则更新第1或第2个参数
+
+    :param args (Tuple): 位置参数元组
+    :param kwargs (Dict): 关键字参数字典
+    :param db (Session): 数据库会话对象
+
+    :return Tuple: 更新后的 (args, kwargs)
     """
     if kwargs and "db" in kwargs:
         kwargs["db"] = db
@@ -225,6 +243,10 @@ def update_args_db(args: tuple, kwargs: dict, db: Session) -> Tuple[tuple, dict]
 def init_database() -> bool:
     """
     初始化数据库操作
+
+    :return bool: 初始化成功返回 True
+
+    :raises RuntimeError: 数据库会话工厂初始化失败时抛出
     """
     # 自动初始化数据库管理器
     if not ct_db_manager.is_initialized():
@@ -266,7 +288,9 @@ def db_update(func):
 
         :param args: 原始位置参数
         :param kwargs: 原始关键字参数
+
         :return: 被装饰函数的返回值
+
         :raises OperationalError: 重试耗尽后仍无法获取数据库锁时抛出
         """
         # 是否关闭数据库会话
@@ -334,6 +358,7 @@ def db_query(func):
 
         :param args: 原始位置参数
         :param kwargs: 原始关键字参数
+
         :return: 被装饰函数的返回值
         """
         # 是否关闭数据库会话
@@ -375,7 +400,7 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         创建新记录并添加到数据库
 
-        :param db: 数据库会话
+        :param db (Session): 数据库会话
         """
         db.add(self)
 
@@ -385,9 +410,10 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         根据主键 ID 查询单条记录
 
-        :param db: 数据库会话
-        :param rid: 记录 ID
-        :return: 匹配的模型实例，未找到时返回 None
+        :param db (Session): 数据库会话
+        :param rid (int): 记录 ID
+
+        :return Self: 匹配的模型实例，未找到时返回 None
         """
         return db.query(cls).filter(and_(cls.id == rid)).first()
 
@@ -396,8 +422,8 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         更新当前记录的部分字段
 
-        :param db: 数据库会话
-        :param payload: 要更新的字段字典，值为 None 的键会被过滤
+        :param db (Session): 数据库会话
+        :param payload (Dict): 要更新的字段字典，值为 None 的键会被过滤
         """
         payload = {k: v for k, v in payload.items() if v is not None}
         for key, value in payload.items():
@@ -411,8 +437,8 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         根据主键 ID 删除记录
 
-        :param db: 数据库会话
-        :param rid: 记录 ID
+        :param db (Session): 数据库会话
+        :param rid (int): 记录 ID
         """
         db.query(cls).filter(and_(cls.id == rid)).delete()
 
@@ -422,7 +448,7 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         清空当前模型对应的数据库表所有记录
 
-        :param db: 数据库会话
+        :param db (Session): 数据库会话
         """
         db.query(cls).delete()
 
@@ -432,8 +458,9 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         查询当前模型的所有记录
 
-        :param db: 数据库会话
-        :return: 所有记录列表
+        :param db (Session): 数据库会话
+
+        :return List: 所有记录列表
         """
         result = db.query(cls).all()
         return list(result)
@@ -442,7 +469,7 @@ class P115StrmHelperBase(DeclarativeBase):
         """
         将模型实例的所有数据库列转换为字典
 
-        :return: 列名到列值的字典映射
+        :return Dict: 列名到列值的字典映射
         """
         return {c.name: getattr(self, c.name, None) for c in self.__table__.columns}  # noqa
 
@@ -459,6 +486,11 @@ class DbOper:
     _db: Session = None
 
     def __init__(self, db: Session = None):
+        """
+        初始化数据库操作基类
+
+        :param db (Session): 数据库会话，可选
+        """
         self._db = db
 
 
