@@ -1123,6 +1123,120 @@ class HDHivePlaywrightClient:
 
         return True, clean
 
+    @staticmethod
+    def _find_checkin_btn_by_font_decode(
+        page: Any,
+        label: str,
+        debug: "_CheckinDebugSession",
+    ) -> Optional[Any]:
+        """
+        字体解码兜底：通过浏览器 canvas 逐字渲染比对，在保护字体混淆的菜单中定位目标按钮
+
+        站点用 protected-action 自定义字体把菜单文本映射到 PUA 字符，且每次打开菜单位置随机，
+        此方法用浏览器自身渲染能力对 PUA 字符和候选汉字做像素 MSE 比对，无需外部库或参考字体文件
+
+        :param page: 浏览器页面对象
+        :param label (str): 目标签到标签（「每日签到」或「赌狗签到」）
+        :param debug: Debug 会话
+        :return: ElementHandle（找到的按钮）；失败时为 None
+        """
+        try:
+            font_family: Optional[str] = page.evaluate(
+                """
+                () => {
+                    try {
+                        for (const sheet of document.styleSheets) {
+                            try {
+                                for (const rule of sheet.cssRules) {
+                                    if (rule.constructor.name !== 'CSSFontFaceRule') continue;
+                                    const fam = rule.style.getPropertyValue('font-family')
+                                        .replace(/['"]/g, '').trim();
+                                    if (fam.startsWith('protected-action')) return fam;
+                                }
+                            } catch (e) {}
+                        }
+                    } catch (e) {}
+                    return null;
+                }
+                """
+            )
+            if not font_family:
+                debug.log("  字体解码兜底：未找到 protected-action 字体声明")
+                return None
+            debug.log(f"  字体解码兜底：保护字体={font_family!r}  目标={label!r}")
+
+            handle = page.evaluate_handle(
+                """
+                async ([label, fontFamily]) => {
+                    // 收集所有含保护字体 span 的菜单按钮
+                    const candidates = [];
+                    for (const btn of document.querySelectorAll('button[type="button"]')) {
+                        const span = btn.querySelector('span[style*="protected-action"]');
+                        if (!span) continue;
+                        const text = span.textContent;
+                        if (!text || !text.trim()) continue;
+                        candidates.push({ btn, text: text.trim() });
+                    }
+                    if (!candidates.length) return null;
+
+                    const SIZE = 128, FS = 80;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = SIZE; canvas.height = SIZE;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+                    function renderChar(char, family) {
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(0, 0, SIZE, SIZE);
+                        ctx.font = FS + 'px "' + family + '"';
+                        ctx.fillStyle = 'black';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(char, SIZE / 2, SIZE / 2);
+                        const d = ctx.getImageData(0, 0, SIZE, SIZE).data;
+                        const g = new Float32Array(SIZE * SIZE);
+                        for (let i = 0; i < g.length; i++) g[i] = d[i * 4];
+                        return g;
+                    }
+
+                    function mse(a, b) {
+                        let s = 0;
+                        for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; }
+                        return s / a.length;
+                    }
+
+                    // 等待保护字体就绪
+                    try { await document.fonts.load(FS + 'px "' + fontFamily + '"'); } catch (e) {}
+
+                    const labelChars = Array.from(label);
+                    // 用系统字体预渲染目标文本各字符
+                    const refImgs = labelChars.map(ch => renderChar(ch, 'sans-serif'));
+
+                    let bestBtn = null, bestScore = Infinity;
+                    for (const { btn, text } of candidates) {
+                        const puaChars = Array.from(text);
+                        if (puaChars.length !== labelChars.length) continue;
+                        let total = 0;
+                        for (let i = 0; i < puaChars.length; i++) {
+                            total += mse(renderChar(puaChars[i], fontFamily), refImgs[i]);
+                        }
+                        const score = total / puaChars.length;
+                        if (score < bestScore) { bestScore = score; bestBtn = btn; }
+                    }
+                    return bestBtn;
+                }
+                """,
+                [label, font_family],
+            )
+            elem = handle.as_element() if handle else None
+            if elem:
+                debug.log("  字体解码兜底：成功匹配签到按钮")
+                return elem
+            debug.log("  字体解码兜底：无候选按钮匹配（字符数不符或菜单未出现）")
+            return None
+        except Exception as e:
+            debug.log(f"  字体解码兜底异常: {e}")
+            return None
+
     def _checkin_via_browser(self, gamble: bool) -> Tuple[bool, str]:
         """
         模拟签到
@@ -1210,28 +1324,46 @@ class HDHivePlaywrightClient:
                 debug.save_html(page, "avatar_all_failed")
                 return False, "等待头像按钮超时，可能未登录成功"
 
+            # SVG 图标识别
             _CHECKIN_SVG_ANCHOR = {
-                False: "M6.96 2c.418",
-                True: "M216 64v128",
+                False: "M6.96 2c.418",  # 每日签到 — 日历+号图标
+                True: "M216 64v128",  # 赌狗签到 — 方块图标
             }
             anchor = _CHECKIN_SVG_ANCHOR[gamble]
             debug.log(f"等待签到按钮出现 (SVG图标识别, 锚点={anchor!r})")
             btn_loc = page.locator(f"button:has(path[d^='{anchor}'])")
+            btn_elem = None
             try:
                 btn_loc.first.wait_for(state="visible", timeout=15000)
                 debug.log("签到按钮已出现（SVG图标匹配）")
                 debug.screenshot(page, "checkin_btn_visible", f"签到按钮可见: {label}")
             except PlaywrightTimeoutError:
-                debug.log("等待签到按钮超时！SVG图标未匹配（菜单未出现或图标已变更）")
-                debug.screenshot(page, "checkin_btn_timeout", "签到按钮等待超时")
-                debug.save_html(page, "checkin_btn_timeout")
-                return False, f"等待{label}按钮超时，用户菜单未出现"
+                debug.log("SVG图标超时，启动字体解码兜底...")
+                debug.screenshot(
+                    page, "checkin_btn_svg_timeout", "SVG匹配超时，尝试字体解码"
+                )
+                btn_elem = HDHivePlaywrightClient._find_checkin_btn_by_font_decode(
+                    page, label, debug
+                )
+                if btn_elem is None:
+                    debug.log("字体解码兜底失败，签到流程终止")
+                    debug.screenshot(page, "checkin_btn_timeout", "签到按钮等待超时")
+                    debug.save_html(page, "checkin_btn_timeout")
+                    return False, f"等待{label}按钮超时，用户菜单未出现"
+                btn_loc = None
+                debug.screenshot(
+                    page, "checkin_btn_found_by_font", "字体解码找到签到按钮"
+                )
 
             debug.log("等待签到按钮位置稳定（bounding box）")
             _prev_box: dict = {}
             for i in range(20):
                 try:
-                    _box = btn_loc.first.bounding_box() or {}
+                    _box = (
+                        btn_loc.first.bounding_box()
+                        if btn_loc
+                        else btn_elem.bounding_box()
+                    ) or {}
                 except Exception:
                     _box = {}
                 if _box and _box == _prev_box:
@@ -1273,7 +1405,10 @@ class HDHivePlaywrightClient:
             """)
 
             debug.log("点击签到按钮")
-            btn_loc.first.click()
+            if btn_loc:
+                btn_loc.first.click()
+            else:
+                btn_elem.click()
             debug.screenshot(page, "after_checkin_click", "签到按钮点击后")
 
             cf_container_sel = "div#cf-turnstile"
