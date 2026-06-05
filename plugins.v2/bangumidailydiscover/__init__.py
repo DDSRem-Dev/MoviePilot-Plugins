@@ -44,7 +44,7 @@ class BangumiDailyDiscover(_PluginBase):
     # 插件图标
     plugin_icon = "Bangumi_A.png"
     # 插件版本
-    plugin_version = "1.0.7"
+    plugin_version = "1.0.8"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -155,7 +155,10 @@ class BangumiDailyDiscover(_PluginBase):
         :return: 成功时为每日条目列表，失败时为 None
         """
         try:
-            res = RequestUtils(headers=BANGUMI_HEADERS).get_res(BANGUMI_API_URL)
+            res = RequestUtils(
+                headers=BANGUMI_HEADERS,
+                proxies=settings.PROXY,
+            ).get_res(BANGUMI_API_URL)
             if res is None:
                 logger.error("无法连接Bangumi每日放送，请检查网络连接！")
                 return None

@@ -58,11 +58,12 @@
         "name": "Bangumi每日放送探索",
         "description": "让探索支持Bangumi每日放送的数据浏览。",
         "labels": "探索",
-        "version": "1.0.7",
+        "version": "1.0.8",
         "icon": "Bangumi_A.png",
         "author": "DDSRem",
         "level": 1,
         "history": {
+            "v1.0.8": "支持使用主程序代理访问 Bangumi API",
             "v1.0.7": "优化插件稳定性",
             "v1.0.6": "修复已知问题，增强稳定性",
             "v1.0.5": "统一使用MP缓存模块，要求版本v2.7.4+",
