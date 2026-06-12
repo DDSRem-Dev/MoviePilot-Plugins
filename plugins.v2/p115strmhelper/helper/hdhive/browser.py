@@ -2233,10 +2233,19 @@ class HDHivePlaywrightClient:
 
         _EXTRACT_URL_JS = r"""
             () => {
+                const urlPrefixRe = /^https?:\/\/(115cdn|115)\.com\//;
                 // Check input fields first (shown in the unlocked state)
                 for (const el of document.querySelectorAll('input')) {
                     const v = (el.value || '').trim();
-                    if (/https?:\/\/(115cdn|115)\.com\/\S+/.test(v)) return v;
+                    if (urlPrefixRe.test(v)) return v;
+                }
+                // Look for a leaf element (no child elements) whose text content
+                // is the resource link, e.g.
+                // <div class="MuiBox-root mui-xxxxxx">https://115cdn.com/s/xxx?password=yyy&</div>
+                for (const el of document.querySelectorAll('div, span, p, a, code')) {
+                    if (el.children.length > 0) continue;
+                    const t = (el.textContent || '').trim();
+                    if (urlPrefixRe.test(t)) return t;
                 }
                 // Fallback: scan visible text for a 115 URL
                 const m = (document.body?.innerText || '').match(
@@ -2281,39 +2290,50 @@ class HDHivePlaywrightClient:
                     login_redirect=True,
                 )
 
-            existing = page.evaluate(_EXTRACT_URL_JS)
+            confirm_loc = page.get_by_text("确定解锁", exact=True)
+            existing: Optional[str] = None
+            has_confirm = False
+            deadline = time() + 15
+            while time() < deadline:
+                try:
+                    existing = page.evaluate(_EXTRACT_URL_JS)
+                except Exception:
+                    existing = None
+                if existing:
+                    break
+                if confirm_loc.first.is_visible():
+                    has_confirm = True
+                    break
+                page.wait_for_timeout(500)
+
             if existing:
                 return {"url": existing, "full_url": existing, "already_owned": True}
 
-            confirm_loc = page.get_by_text("确定解锁", exact=True)
-            try:
-                confirm_loc.first.wait_for(state="visible", timeout=8000)
-                confirm_loc.first.click()
-            except PlaywrightTimeoutError:
+            if not has_confirm:
                 raise HDHiveBrowserError(
-                    f"未找到「确定解锁」按钮，页面可能未正确加载（URL: {page.url}）"
+                    f"未找到资源链接或「确定解锁」按钮，页面可能未正确加载（URL: {page.url}）"
                 )
 
-            try:
-                page.wait_for_load_state("load", timeout=15000)
-            except PlaywrightTimeoutError:
-                pass
-            page.wait_for_timeout(1000)
+            confirm_loc.first.click()
 
-            final_url = page.url
-            if search(r"(115cdn|115)\.com", final_url):
-                return {"url": final_url, "full_url": final_url, "already_owned": False}
-
-            url: Optional[str] = captured_url
-            if not url:
+            url: Optional[str] = None
+            deadline = time() + 20
+            while time() < deadline:
+                if captured_url:
+                    url = captured_url
+                    break
+                if search(r"(115cdn|115)\.com", page.url):
+                    url = page.url
+                    break
                 try:
-                    url = page.evaluate(_EXTRACT_URL_JS)
+                    extracted = page.evaluate(_EXTRACT_URL_JS)
                 except Exception:
-                    pass
-            if not url:
-                current = page.url
-                if search(r"(115cdn|115)\.com", current):
-                    url = current
+                    extracted = None
+                if extracted:
+                    url = extracted
+                    break
+                page.wait_for_timeout(500)
+
             if not url:
                 raise HDHiveBrowserError(
                     f"解锁后未能获取 115 链接（当前 URL: {page.url}）"
