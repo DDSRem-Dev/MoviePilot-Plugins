@@ -2,7 +2,7 @@ orjson~=3.11.7
 p115client==0.0.8.5.1.1
 p115rsacipher==0.0.1
 http_client_request==0.1.3.1
-python-argtools==0.0.2
+python-argtools==0.0.3
 python-filewrap==0.2.9.1
 python-httpfile==0.0.5.4
 python-iterutils==0.2.10.2
