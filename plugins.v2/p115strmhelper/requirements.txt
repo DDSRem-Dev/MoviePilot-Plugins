@@ -8,7 +8,7 @@ python-httpfile==0.0.5.4
 python-iterutils==0.2.10.2
 python-urlopen==0.1.7.1
 python-sqlitedict==0.0.3
-sentry-sdk~=2.62.0
+sentry-sdk~=2.63.0
 aligo~=6.2.8
 qrcode_terminal~=0.8
 pyahocorasick~=2.3.0
