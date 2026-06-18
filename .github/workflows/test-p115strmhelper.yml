@@ -52,16 +52,16 @@ jobs:
 
     steps:
       - name: Checkout plugin code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Checkout MoviePilot
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: jxxghp/MoviePilot
           path: MoviePilot
 
       - name: Checkout MoviePilot resources
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: jxxghp/MoviePilot-Resources
           path: MoviePilot-Resources

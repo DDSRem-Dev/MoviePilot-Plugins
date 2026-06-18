@@ -44,7 +44,7 @@ jobs:
       matrix: ${{ steps.detector.outputs.plugins }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         if: ${{ hashFiles(format('frontend/{0}/package.json', matrix.plugin.backend_path)) != '' }}

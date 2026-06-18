@@ -102,7 +102,7 @@ jobs:
     steps:
       # 步骤1：检出代码库
       - name: 检出代码
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # 步骤2：下载并解压源码包
       - name: 下载并解压源码包
@@ -160,7 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: 确定最终提交目录
         id: set_path
