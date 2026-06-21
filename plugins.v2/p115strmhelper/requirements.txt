@@ -22,4 +22,4 @@ txt_tree_storage==0.2.0
 share_strm_scan==0.2.1
 numpy
 httpx[http2]
-urllib3_future_request==0.0.1.4
+urllib3_future_request==0.0.2
