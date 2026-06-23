@@ -1,27 +1,27 @@
+from datetime import datetime, timezone
 from pathlib import Path
-from queue import Queue, Empty
+from queue import Empty, Queue
 from re import match
 from threading import Lock, Thread
 from time import sleep
-from datetime import datetime, timezone
-from typing import Optional, Literal
+from typing import Literal, Optional
 
+from p115center import P115Center
+from p115center.schemas import ShareInfo
 from p115client import P115Client
 from p115client.tool.iterdir import share_iterdir
 from p115client.util import share_extract_payload
-from p115center import P115Center
-from p115center.schemas import ShareInfo
 
-from app.log import logger
-from app.core.metainfo import MetaInfo
-from app.core.context import MediaInfo
 from app.chain.media import MediaChain
+from app.core.context import MediaInfo
+from app.core.metainfo import MetaInfo
+from app.log import logger
 from app.utils.string import StringUtils
 
-from ...core.config import configer
-from ...core.message import post_message
-from ...core.i18n import i18n
 from ...core.aliyunpan import BAligo
+from ...core.config import configer
+from ...core.i18n import i18n
+from ...core.message import post_message
 from ...core.p115 import get_pid_by_path
 from ...helper.ali2115 import Ali2115Helper
 from ...utils.sentry import sentry_manager
@@ -61,25 +61,19 @@ class ShareTransferHelper:
         """
         while True:
             try:
-                # 获取任务，设置超时避免永久阻塞
-                task = self._add_share_queue.get(timeout=60)  # 60秒无任务则退出
-                url, channel, source, userid, pan_path = task
-
-                # 执行任务
-                self.__add_share(url, channel, source, userid, pan_path)
-
-                # 任务间隔
-                sleep(3)
-
-                # 标记任务完成
-                self._add_share_queue.task_done()
-
+                task = self._add_share_queue.get(timeout=60)
             except Empty:
                 logger.debug("【分享转存】释放分享转存队列任务")
                 break
+
+            url, channel, source, userid, pan_path = task
+            try:
+                self.__add_share(url, channel, source, userid, pan_path)
             except Exception as e:
-                logger.error(f"【分享转存】任务处理异常: {e}")
-                sleep(5)
+                logger.error(f"【分享转存】任务处理异常: {e}", exc_info=True)
+            finally:
+                self._add_share_queue.task_done()
+                sleep(3)
 
     @staticmethod
     def send_notify(
@@ -103,30 +97,44 @@ class ShareTransferHelper:
                 userid=userid,
             )
 
-    def add_share_recognize_mediainfo(self, share_code: str, receive_code: str):
+    def add_share_recognize_mediainfo(
+        self, share_code: str, receive_code: str
+    ) -> Optional[MediaInfo]:
         """
         分享转存识别媒体信息
+
+        :param share_code (str): 分享码
+        :param receive_code (str): 接收码
+
+        :return MediaInfo: 识别成功返回媒体信息，失败返回 None
         """
         file_num = 0
         file_mediainfo = None
         item_name = None
-        for item in share_iterdir(
-            self.client,
-            receive_code=receive_code,
-            share_code=share_code,
-            cid=0,
-            app="web",
-            **configer.get_ios_ua_app(app=False),
-        ):
+        try:
+            for item in share_iterdir(
+                self.client,
+                receive_code=receive_code,
+                share_code=share_code,
+                cid=0,
+                app="web",
+                **configer.get_ios_ua_app(app=False),
+            ):
+                if file_num == 1:
+                    file_num = 2
+                    break
+                item_name = item["name"]
+                file_num += 1
             if file_num == 1:
-                file_num = 2
-                break
-            item_name = item["name"]
-            file_num += 1
-        if file_num == 1:
-            mediachain = MediaChain()
-            file_meta = MetaInfo(title=item_name)
-            file_mediainfo = mediachain.recognize_by_meta(file_meta)
+                mediachain = MediaChain()
+                file_meta = MetaInfo(title=item_name)
+                file_mediainfo = mediachain.recognize_by_meta(file_meta)
+        except Exception as e:
+            logger.warning(
+                f"【分享转存】识别媒体信息失败，继续转存: {e}",
+                exc_info=True,
+            )
+            return None
         return file_mediainfo
 
     @staticmethod
@@ -309,9 +317,14 @@ class ShareTransferHelper:
             "cid": 0,
         }
         size = "未知"
-        resp = self.client.share_snap(payload, **configer.get_ios_ua_app(app=False))
-        if resp["state"]:
-            size = StringUtils.str_filesize(resp["data"]["shareinfo"]["file_size"])
+        try:
+            resp = self.client.share_snap(payload, **configer.get_ios_ua_app(app=False))
+            if resp["state"]:
+                size = StringUtils.str_filesize(resp["data"]["shareinfo"]["file_size"])
+        except Exception as e:
+            logger.warning(
+                f"【分享转存】获取分享大小失败，继续转存: {e}", exc_info=True
+            )
 
         payload = {
             "share_code": share_code,
@@ -406,7 +419,7 @@ class ShareTransferHelper:
             else:
                 self.add_share_115(url, channel, source, userid, True, pan_path)
         except Exception as e:
-            logger.error(f"【分享转存】运行失败: {e}")
+            logger.error(f"【分享转存】运行失败: {e}", exc_info=True)
             self.send_notify(
                 channel=channel,
                 source=source,
