@@ -1105,7 +1105,9 @@ def create_app(
                 },
             )
 
-        excluded = HOP_BY_HOP_HEADERS | {"content-encoding", "content-length"}
+        excluded = HOP_BY_HOP_HEADERS | {"content-encoding"}
+        if resp.headers.get("content-encoding"):
+            excluded = excluded | {"content-length"}
         resp_headers = {
             k: v for k, v in resp.headers.multi_items() if k.lower() not in excluded
         }
