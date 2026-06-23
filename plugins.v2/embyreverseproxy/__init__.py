@@ -58,7 +58,7 @@ class EmbyReverseProxy(_PluginBase):
         "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用。"
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png"
-    plugin_version = "0.2.3"
+    plugin_version = "0.2.4"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "embyreverseproxy_"
