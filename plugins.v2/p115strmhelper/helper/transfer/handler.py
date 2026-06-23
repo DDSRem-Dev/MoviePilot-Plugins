@@ -945,18 +945,18 @@ class TransferHandler:
                     logger.debug(f"【整理接管】目录 {target_dir} 中没有文件")
                     continue
 
-                # 收集需要删除的文件（按季集分组）
+                # 收集需要删除的文件（按季集 Part 分组）
                 files_to_delete_by_se: Dict[
-                    Tuple[Optional[str], Optional[str]], List[FileItem]
+                    Tuple[Optional[str], Optional[str], Optional[str]], List[FileItem]
                 ] = defaultdict(list)
 
-                # 收集所有目标文件的季集信息
-                target_seasons_episodes: Set[Tuple[Optional[str], Optional[str]]] = (
-                    set()
-                )
+                # 收集所有目标文件的季集 Part 信息
+                target_seasons_episodes: Set[
+                    Tuple[Optional[str], Optional[str], Optional[str]]
+                ] = set()
                 for target_path, _ in tasks:
                     meta = MetaInfoPath(target_path)
-                    target_seasons_episodes.add((meta.season, meta.episode))
+                    target_seasons_episodes.add((meta.season, meta.episode, meta.part))
 
                 if not target_seasons_episodes:
                     logger.debug(
@@ -979,14 +979,15 @@ class TransferHandler:
                     if file_ext not in settings.RMT_MEDIAEXT:
                         continue
 
-                    # 识别文件中的季集信息
+                    # 识别文件中的季集 Part 信息
                     file_meta = MetaInfoPath(Path(file.path))
-                    file_se: Tuple[Optional[str], Optional[str]] = (
+                    file_se: Tuple[Optional[str], Optional[str], Optional[str]] = (
                         file_meta.season,
                         file_meta.episode,
+                        file_meta.part,
                     )
 
-                    # 检查是否与任何目标文件的季集匹配
+                    # 检查是否与任何目标文件的季集 Part 匹配
                     if file_se in target_seasons_episodes:
                         # 检查是否为目标文件本身（通过路径匹配）
                         is_target_file = False
@@ -1916,6 +1917,7 @@ class TransferHandler:
                         else None,
                         username=task.username,
                         link=settings.MP_DOMAIN("#/history"),
+                        save_history=False,
                     )
                 )
             except Exception as e:

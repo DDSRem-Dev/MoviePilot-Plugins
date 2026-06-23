@@ -185,6 +185,7 @@ class TransferChainPatcher:
                             buttons=chain_self.build_failed_transfer_buttons(
                                 his.id if his else None
                             ),
+                            save_history=False,
                         )
                     )
                     # 任务失败，直接移除task
