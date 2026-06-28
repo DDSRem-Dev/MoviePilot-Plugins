@@ -19,7 +19,7 @@ SLOW_METHODS = {
     "share_receive",
     "life_behavior_detail",
     "life_behavior_detail_app",
-    "offline_add_urls",
+    "clouddownload_task_add_urls",
 }
 
 NO_TIMEOUT_METHODS = {

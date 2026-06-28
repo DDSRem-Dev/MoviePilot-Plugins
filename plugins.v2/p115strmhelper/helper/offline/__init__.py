@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from p115center import P115Center, OfflineInfo
 from p115client import P115Client
-from p115client.tool.offline import offline_iter
+from p115client.tool.clouddownload import clouddownload_iter
 from p115client.tool.attr import get_attr
 
 from app.log import logger
@@ -120,7 +120,7 @@ class OfflineDownloadHelper:
         添加一组任务
         """
         payload = self.build_offline_urls_payload(urls=url_list, wp_path_id=cid)
-        return self.client.offline_add_urls(
+        return self.client.clouddownload_task_add_urls(
             payload, **configer.get_ios_ua_app(app=False)
         )
 
@@ -128,7 +128,7 @@ class OfflineDownloadHelper:
         """
         获取当前所有任务
         """
-        return offline_iter(
+        return clouddownload_iter(
             self.client, cooldown=2, type="web", **configer.get_ios_ua_app(app=False)
         )
 
