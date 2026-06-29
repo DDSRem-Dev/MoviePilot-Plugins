@@ -1,7 +1,6 @@
 {
   "top_level_packages": [
     "p115client",
-    "p115rsacipher",
     "qrcode_terminal",
     "qrcode-terminal"
   ],

@@ -13,10 +13,10 @@ from urllib.parse import parse_qsl, unquote, urlsplit, urlencode
 
 from httpx import AsyncClient, Limits, Timeout
 from orjson import dumps, loads
+from p115cipher import rsa_decrypt, rsa_encrypt
 from p115client import P115Client
 from p115client import check_response as p115_check_response
 from p115pickcode import to_id
-from p115rsacipher import encrypt, decrypt
 
 from app.log import logger
 
@@ -232,7 +232,9 @@ class Redirect:
         resp = await self.http_client().post(
             "http://proapi.115.com/android/2.0/ufile/download",
             data={
-                "data": encrypt(f'{{"pick_code":"{post_pickcode}"}}').decode("utf-8")
+                "data": rsa_encrypt(
+                    f'{{"pick_code":"{post_pickcode}"}}'.encode("utf-8")
+                ).decode("utf-8")
             },
             headers={
                 "User-Agent": user_agent,
@@ -242,7 +244,7 @@ class Redirect:
         json = loads(cast(bytes, resp.content))
         if not json["state"]:
             raise OSError(EIO, json)
-        data = json["data"] = loads(decrypt(json["data"]))
+        data = json["data"] = loads(rsa_decrypt(json["data"]))
         data["file_name"] = unquote(urlsplit(data["url"]).path.rpartition("/")[-1])
         url = Url.of(data["url"], data)
 
@@ -340,7 +342,7 @@ class Redirect:
         }
         resp = await self.http_client().post(
             "http://proapi.115.com/app/share/downurl",
-            data={"data": encrypt(dumps(payload)).decode("utf-8")},
+            data={"data": rsa_encrypt(dumps(payload)).decode("utf-8")},
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))
@@ -349,7 +351,7 @@ class Redirect:
                 receive_code = await self.get_receive_code(share_code)
                 return await self.get_share_downurl(share_code, receive_code, file_id)
             raise OSError(EIO, json)
-        data = json["data"] = loads(decrypt(json["data"]))
+        data = json["data"] = loads(rsa_decrypt(json["data"]))
         if not (data and (url_info := data["url"])):
             raise FileNotFoundError(ENOENT, json)
         data["file_id"] = data.pop("fid")
