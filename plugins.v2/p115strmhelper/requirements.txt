@@ -1,4 +1,3 @@
-orjson~=3.11.7
 p115client==0.0.9.0.2
 p115rsacipher==0.0.1
 python-sqlitedict==0.0.3
@@ -11,8 +10,11 @@ zstandard~=0.25.0
 mfusepy~=3.1.0
 p115center-sdk==0.0.17
 slippers-proxy~=0.3.0
+orjson
+numpy
+httpx[http2]
+
+# Rust Mode
 full_strm_sync==0.1.5
 txt_tree_storage==0.2.0
 share_strm_scan==0.2.1
-numpy
-httpx[http2]
