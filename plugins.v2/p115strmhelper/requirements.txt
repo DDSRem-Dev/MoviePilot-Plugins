@@ -1,4 +1,4 @@
-p115client==0.0.9.0.2
+p115client==0.0.9.3.6
 sentry-sdk~=2.64.0
 aligo~=6.2.8
 qrcode_terminal~=0.8
