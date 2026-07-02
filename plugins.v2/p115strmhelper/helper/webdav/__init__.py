@@ -20,11 +20,11 @@ from p115client.tool import (
     traverse_tree_with_path,
     P115QueryDB,
 )
-from sqlitedict import SqliteTableDict
 from yarl import URL
 
 from app.log import logger
 
+from ._sqlitedict import SqliteTableDict
 from ...core.config import configer
 from ...utils.time import TimeUtils
 
