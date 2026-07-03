@@ -393,12 +393,66 @@ def iter_life_behavior_once(
     """
     if isinstance(client, (str, PathLike)):
         client = P115Client(client, check_for_relogin=True)
-    life_behavior_detail_cycle = cycle(
-        [
-            partial(client.life_behavior_detail, **request_kwargs),
-            partial(client.life_behavior_detail_app, app=app, **request_kwargs),
-        ]
-    )
+    
+    # 405 容错：当某个端点返回 HTTP 405 时自动切换到另一个
+    # 115 可能在 2026-07 变更了 /behavior/detail 接口为 POST-only
+    _405_disabled: Dict[str, bool] = {"webapi": False, "proapi": False}
+    
+    def _safe_call(detail_func, endpoint_name, payload, async_):
+        """安全调用，405 时自动回退"""
+        if _405_disabled.get(endpoint_name):
+            return None
+        
+        try:
+            return detail_func(payload, async_=async_)
+        except Exception as e:
+            err_str = str(e)
+            if "405" in err_str or "Method Not Allowed" in err_str:
+                _405_disabled[endpoint_name] = True
+                appender = "app" if endpoint_name == "webapi" else "webapi"
+                from app.log import logger
+                logger.warn(
+                    f"【p115strmhelper】{endpoint_name} /behavior/detail 返回 405，"
+                    f"自动切换到 {appender} 端点"
+                )
+                return None
+            raise
+    
+    def _build_detail_func(is_webapi, app_name):
+        """构建带容错的 detail 调用"""
+        
+        def detail_func(payload, async_=False):
+            if is_webapi:
+                result = _safe_call(
+                    client.life_behavior_detail, "webapi", payload, async_
+                )
+                if result is not None:
+                    return result
+                if _405_disabled["proapi"]:
+                    raise Exception("Both webapi and proapi endpoints returned 405")
+                return _safe_call(
+                    partial(client.life_behavior_detail_app, app=app_name, **request_kwargs),
+                    "proapi", payload, async_
+                )
+            else:
+                result = _safe_call(
+                    partial(client.life_behavior_detail_app, app=app_name, **request_kwargs),
+                    "proapi", payload, async_
+                )
+                if result is not None:
+                    return result
+                if _405_disabled["webapi"]:
+                    raise Exception("Both webapi and proapi endpoints returned 405")
+                return _safe_call(
+                    client.life_behavior_detail, "webapi", payload, async_
+                )
+        
+        return detail_func
+    
+    webapi_detail = _build_detail_func(True, app)
+    proapi_detail = _build_detail_func(False, app)
+    
+    life_behavior_detail_cycle = cycle([webapi_detail, proapi_detail])
     if first_batch_size <= 0:
         first_batch_size = 64 if from_time or from_id else 1000
     if from_id and not from_time:
