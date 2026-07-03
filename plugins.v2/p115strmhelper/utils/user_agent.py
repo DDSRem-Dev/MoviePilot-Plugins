@@ -11,6 +11,21 @@ class UserAgentUtils:
     """
 
     @staticmethod
+    @cached(region="p115strmhelper_util_real_app_ver", ttl=60 * 60, skip_none=True)
+    def get_real_app_ver() -> str:
+        """
+        获取 115 Android 端真实版本号
+
+        :return str: 形如 "37.2.5" 的版本号
+        """
+        try:
+            resp = P115Client.app_version_list2()
+            check_response(resp)
+            return resp["data"]["Android"]["version_code"]
+        except Exception:
+            return "37.2.5"
+
+    @staticmethod
     @cached(
         region="p115strmhelper_util_user_agent_u115_ios", ttl=60 * 60, skip_none=True
     )

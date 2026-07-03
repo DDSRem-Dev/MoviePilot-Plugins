@@ -53,6 +53,7 @@ from .db_manager.init import init_db, migration_db, init_migration_scripts
 from .mcp import MCPManager
 from .patch.u115_open import U115Patcher
 from .patch.p115disk_upload import P115DiskPatcher
+from .patch.app_ver import AppVerPatcher
 from .core.message import UploadNotifyAggregator
 from .interactive.framework.callbacks import decode_action, Action
 from .interactive.framework.manager import BaseSessionManager
@@ -202,6 +203,7 @@ class P115StrmHelper(_PluginBase):
 
             U115Patcher().enable()
             P115DiskPatcher().enable()
+            AppVerPatcher().enable()
 
             # 目录上传监控服务
             servicer.start_directory_upload()
@@ -2148,6 +2150,7 @@ class P115StrmHelper(_PluginBase):
         ct_db_manager.close_database()
         U115Patcher().disable()
         P115DiskPatcher().disable()
+        AppVerPatcher().disable()
         UploadNotifyAggregator.shutdown()
 
     async def _save_config_api(self, request: Request) -> Dict:
