@@ -57,19 +57,8 @@ def run_hdhive_checkin_once(
         logger.info("【HDHive 签到】手动触发：每日/赌狗均未开启，按每日签到执行")
 
     client = HDHivePlaywrightClient(headless=True)
+    client.set_credentials(user, pwd)
     try:
-        login_result = client.login(username=user, password=pwd)
-        if not login_result:
-            err = "登录失败（未返回 Cookie）"
-            logger.error("【HDHive 签到】%s", err)
-            if send_notify and configer.notify:
-                post_message(
-                    mtype=NotificationType.Plugin,
-                    title="HDHive 签到失败",
-                    text="\n" + err + "\n",
-                )
-            return False, err
-
         label = "赌狗签到" if gamble else "每日签到"
         ok = False
         detail = ""

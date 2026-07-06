@@ -7,7 +7,6 @@ __all__ = [
     "is_hdhive_search_ready",
 ]
 
-from base64 import urlsafe_b64decode
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +22,7 @@ from socket import (
 )
 from sys import platform
 from time import sleep, time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 from urllib.request import Request as _UrlRequest
 from urllib.request import urlopen as _urlopen
@@ -31,7 +30,6 @@ from urllib.request import urlopen as _urlopen
 from orjson import dumps, loads
 
 from app.core.config import settings
-from app.log import logger
 
 from ...core.config import configer
 from ...utils.sentry import sentry_manager
@@ -99,9 +97,6 @@ class HDHiveBrowserError(HDHiveError):
     """
     HDHive 页面操作或浏览器自动化失败
     """
-
-
-_T = TypeVar("_T")
 
 
 class _CheckinDebugSession:
@@ -762,33 +757,27 @@ class HDHivePlaywrightClient:
                         browser.close()
 
     @contextmanager
-    def _page_with_cookies(self, cookies: Dict[str, str], domain: str) -> Iterator[Any]:
+    def _page_with_login(self) -> Iterator[Any]:
         """
-        创建已注入 Cookie 的浏览器页面，自动管理上下文生命周期
+        创建「已在同一上下文内真实登录」的浏览器页面，自动管理上下文生命周期
 
-        :param cookies (Dict): name → value Cookie 映射
-        :param domain (str): Cookie 所属域名
-        :yields Any: 已注入 Cookie 的页面对象
+        :yields Any: 已登录的页面对象
+        :raises HDHiveLoginError: 未配置账号密码或登录失败
         """
+        if not self._username or not self._password:
+            raise HDHiveLoginError(
+                "未配置账号密码，无法登录（会话需绑定用户）",
+                login_redirect=True,
+            )
         with self._fresh_context() as context:
-            self._inject_cookies(context, cookies, domain)
-            yield context.new_page()
-
-    @staticmethod
-    def _inject_cookies(context: Any, cookies: Dict[str, str], domain: str) -> None:
-        """
-        将 Cookie 字典批量注入浏览器上下文
-
-        :param context (Any): 浏览器上下文
-        :param cookies (Dict): name → value 映射
-        :param domain (str): Cookie 所属域名
-        """
-        context.add_cookies(
-            [
-                {"name": n, "value": v, "domain": domain, "path": "/"}
-                for n, v in cookies.items()
-            ]
-        )
+            page = context.new_page()
+            if not self._fill_and_submit(page, self._username, self._password):
+                raise HDHiveLoginError("登录失败（未离开登录页）", login_redirect=True)
+            try:
+                self._build_cookie_str_from_raw(context.cookies())
+            except Exception:
+                pass
+            yield page
 
     @staticmethod
     def _parse_cookie_str(cookie_str: str) -> dict[str, str]:
@@ -909,82 +898,6 @@ class HDHivePlaywrightClient:
         self._username = username.strip()
         self._password = password.strip()
         return self
-
-    @staticmethod
-    def _parse_jwt_exp(token: str) -> Optional[int]:
-        """
-        从 JWT token 字符串解析 ``exp`` 字段（UNIX 时间戳）
-
-        :return int: 过期时间戳；无法解析时为 None
-        """
-        try:
-            parts = token.split(".")
-            if len(parts) != 3:
-                return None
-            payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
-            payload = loads(urlsafe_b64decode(payload_b64))
-            exp = payload.get("exp")
-            return int(exp) if exp is not None else None
-        except Exception:
-            return None
-
-    def _is_token_valid(self, buffer_secs: int = 300) -> bool:
-        """
-        检查当前 Cookie 中的 JWT token 是否仍在有效期内
-
-        :param buffer_secs (int): 提前多少秒视为「即将过期」（默认 5 分钟）
-        :return bool: 有效返回 True；过期、无 token 或无法解析返回 False
-        """
-        if not self._cookie_str:
-            return False
-        token = self._parse_cookie_str(self._cookie_str).get("token", "")
-        if not token:
-            return False
-        exp = self._parse_jwt_exp(token)
-        if exp is None:
-            return True
-
-        return time() + buffer_secs < exp
-
-    def _relogin(self) -> bool:
-        """
-        使用存储的账号密码重新进行浏览器登录，成功后更新持久化 Cookie
-
-        :return bool: 重新登录是否成功
-        """
-        if not self._username or not self._password:
-            return False
-        try:
-            self.clear_saved_cookie()
-            return (
-                self.login(username=self._username, password=self._password) is not None
-            )
-        except Exception:
-            return False
-
-    def _execute_with_auth_retry(self, run: Callable[[], _T]) -> _T:
-        """
-        在 token 有效前提下执行浏览器任务，必要时自动重新登录并重试一次
-
-        :param run (Callable): 单次浏览器会话 Callable
-        :return Any: run() 的返回值
-        :raises HDHiveLoginError: 认证失败且无法自动重新登录
-        :raises HDHiveBrowserError: 浏览器操作失败
-        """
-        if not self._is_token_valid():
-            if not self._relogin():
-                raise HDHiveLoginError("Cookie 已过期，请配置账号密码以自动重新登录")
-
-        try:
-            return run()
-        except HDHiveLoginError as e:
-            if not e.login_redirect:
-                raise
-            if not self._relogin():
-                raise HDHiveLoginError(
-                    "Cookie 被服务器拒绝，无法自动重新登录（请检查账号密码）",
-                ) from e
-            return run()
 
     def _fill_and_submit(
         self,
@@ -1389,12 +1302,10 @@ class HDHivePlaywrightClient:
 
         :return Tuple: (是否成功, 展示用文案或错误信息)
         """
-        if not self._cookie_str:
-            return False, "请先 login 或传入 Cookie"
+        if not self._username or not self._password:
+            return False, "未配置 HDHive 账号密码"
 
         root = self.DEFAULT_BASE_URL
-        cookies = self._parse_cookie_str(self._cookie_str)
-        domain = root.replace("https://", "").replace("http://", "")
         label = "赌狗签到" if gamble else "每日签到"
 
         debug = _CheckinDebugSession(label)
@@ -1402,7 +1313,7 @@ class HDHivePlaywrightClient:
         proxy_url = self._proxy_url_from_settings()
         debug.log(f"后端: {backend}")
         debug.log(f"代理配置: {proxy_url if proxy_url else '无'}")
-        debug.log(f"Cookie 数量: {len(cookies)}  键名: {list(cookies.keys())}")
+        debug.log("凭据: 账号密码已配置")
         debug.log(f"headless: {self._headless}")
 
         def _do_checkin(page: Any) -> Tuple[bool, str]:
@@ -1418,6 +1329,12 @@ class HDHivePlaywrightClient:
                 debug.log("发现关闭弹窗按钮，开始关闭")
                 debug.screenshot(page, "dismiss_btn_visible", "关闭弹窗按钮出现")
                 for attempt in range(20):
+                    if (
+                        urlparse(page.url).path.rstrip("/")
+                        == HDHivePlaywrightClient.LOGIN_PAGE
+                    ):
+                        debug.log("  检测到跳转登录页，停止关闭弹窗重试")
+                        break
                     try:
                         dismiss_loc.first.click()
                         debug.log(f"  第 {attempt + 1} 次点击关闭弹窗")
@@ -1433,6 +1350,15 @@ class HDHivePlaywrightClient:
             except Exception as e:
                 debug.log(f"未检测到关闭弹窗或已关闭: {e}")
                 debug.screenshot(page, "no_dismiss_btn", "无关闭弹窗按钮")
+
+            if urlparse(page.url).path.rstrip("/") == HDHivePlaywrightClient.LOGIN_PAGE:
+                debug.log(f"检测到登录页重定向，Cookie 已失效: {page.url}")
+                debug.screenshot(page, "login_redirect", "被重定向到登录页")
+                debug.save_html(page, "login_redirect")
+                raise HDHiveLoginError(
+                    "Cookie 已失效（被重定向到登录页），请重新登录",
+                    login_redirect=True,
+                )
 
             debug.log("开始查找头像按钮")
             clicked_avatar = False
@@ -1906,9 +1832,14 @@ class HDHivePlaywrightClient:
             debug.save_html(page, "result_timeout")
             return False, f"{label}：等待结果超时"
 
+        def _run_session() -> Tuple[bool, str]:
+            with self._page_with_login() as page:
+                return _do_checkin(page)
+
         try:
-            with self._page_with_cookies(cookies, domain) as page:
-                result = _do_checkin(page)
+            result = _run_session()
+        except HDHiveLoginError as e:
+            result = (False, str(e))
         except PlaywrightTimeoutError as e:
             result = (False, f"{label}操作超时: {e}")
         except Exception as e:
@@ -2095,7 +2026,6 @@ class HDHivePlaywrightClient:
         :raises HDHiveBrowserError: 浏览器页面操作失败
         """
         root = self.DEFAULT_BASE_URL
-        domain = root.replace("https://", "").replace("http://", "")
         detail_url = f"{root}/tmdb/{media_type}/{tmdb_id}"
 
         def _do_fetch(page: Any) -> List[Dict[str, Any]]:
@@ -2181,18 +2111,15 @@ class HDHivePlaywrightClient:
             return dom_data or []
 
         def _run_session() -> List[Dict[str, Any]]:
-            cookies = (
-                self._parse_cookie_str(self._cookie_str) if self._cookie_str else {}
-            )
             try:
-                with self._page_with_cookies(cookies, domain) as page:
+                with self._page_with_login() as page:
                     return _do_fetch(page)
             except HDHiveError:
                 raise
             except Exception as e:
                 raise HDHiveBrowserError(f"资源搜索浏览器操作失败: {e}") from e
 
-        return self._execute_with_auth_retry(_run_session)
+        return _run_session()
 
     def get_resources(
         self,
@@ -2224,11 +2151,10 @@ class HDHivePlaywrightClient:
         :raises HDHiveLoginError: 未登录或认证失效且无法自动重新登录
         :raises HDHiveBrowserError: 浏览器页面操作失败
         """
-        if not self._cookie_str:
-            raise HDHiveLoginError("请先调用 login() 或 load_saved_cookie()")
+        if not self._username or not self._password:
+            raise HDHiveLoginError("未配置账号密码，无法解锁（会话需绑定用户）")
 
         root = self.DEFAULT_BASE_URL
-        domain = root.replace("https://", "").replace("http://", "")
         resource_url = f"{root}/resource/115/{slug}"
 
         _EXTRACT_URL_JS = r"""
@@ -2342,25 +2268,23 @@ class HDHivePlaywrightClient:
             return {"url": url, "full_url": url, "already_owned": False}
 
         def _run_session() -> Dict[str, Any]:
-            cookies = (
-                self._parse_cookie_str(self._cookie_str) if self._cookie_str else {}
-            )
             try:
-                with self._page_with_cookies(cookies, domain) as page:
+                with self._page_with_login() as page:
                     return _do_unlock(page)
             except HDHiveError:
                 raise
             except Exception as e:
                 raise HDHiveBrowserError(f"解锁浏览器操作失败: {e}") from e
 
-        return self._execute_with_auth_retry(_run_session)
+        return _run_session()
 
 
 def is_hdhive_search_ready() -> bool:
     """
     判断 HDHive 频道搜索是否已配置且可用
 
-    需开启 hdhive_search_enabled，且已填写账户密码或存在持久化 Cookie
+    HDHive 已上线加密会话绑定，认证操作必须在同一上下文内真实登录，因此必须配置
+    账户密码（仅有持久化 Cookie 已不足以维持登录）
 
     :return bool: 可用返回 True
     """
@@ -2368,31 +2292,23 @@ def is_hdhive_search_ready() -> bool:
         return False
     user = (configer.hdhive_checkin_username or "").strip()
     pwd = (configer.hdhive_checkin_password or "").strip()
-    if user and pwd:
-        return True
-    return HDHivePlaywrightClient._cookie_file_path().exists()
+    return bool(user and pwd)
 
 
 def get_hdhive_browser_client() -> Optional[HDHivePlaywrightClient]:
     """
-    获取已登录的 HDHive 浏览器客户端：优先持久化 Cookie，否则用配置账号密码登录
+    获取已配置凭据的 HDHive 浏览器客户端
 
-    按环境自动选用 cloakbrowser 或 Playwright 后端；始终注入凭据以支持 Cookie 过期后自动刷新
+    按环境自动选用 cloakbrowser 或 Playwright 后端。认证操作会在各自的浏览器上下文内
+    用账号密码真实登录以绑定加密会话，因此此处只需注入凭据即可；未配置账号密码时不可用。
 
-    :return Any: 已就绪的客户端；无法就绪时为 None
+    :return Any: 已就绪的客户端；未配置账号密码时为 None
     """
     user = (configer.hdhive_checkin_username or "").strip()
     pwd = (configer.hdhive_checkin_password or "").strip()
-    client = HDHivePlaywrightClient()
-    if user and pwd:
-        client.set_credentials(user, pwd)
-    if client.load_saved_cookie():
-        return client
     if not user or not pwd:
         return None
-    try:
-        if client.login(username=user, password=pwd):
-            return client
-    except HDHiveError as e:
-        logger.warning("【HDHive】浏览器登录失败: %s", e)
-    return None
+    client = HDHivePlaywrightClient()
+    client.set_credentials(user, pwd)
+    client.load_saved_cookie()
+    return client
