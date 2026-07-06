@@ -14,16 +14,16 @@ class UserAgentUtils:
     @cached(region="p115strmhelper_util_real_app_ver", ttl=60 * 60, skip_none=True)
     def get_real_app_ver() -> str:
         """
-        获取 115 Android 端真实版本号
+        获取 115 iOS 端真实版本号
 
-        :return str: 形如 "37.2.5" 的版本号
+        :return str: 形如 "38.0.2" 的版本号
         """
         try:
             resp = P115Client.app_version_list2()
             check_response(resp)
-            return resp["data"]["Android"]["version_code"]
+            return resp["data"]["iOS-iPhone"]["version_code"]
         except Exception:
-            return "37.2.5"
+            return "38.0.2"
 
     @staticmethod
     @cached(
@@ -41,7 +41,7 @@ class UserAgentUtils:
             udown_version = resp["data"]["iOS-iPhone"]["version_code"]
             wangpan_version = resp["data"]["115wangpan_iOS"]["version_code"]
         except Exception:
-            udown_version = "37.0.7"
+            udown_version = "38.0.2"
             wangpan_version = "36.2.20"
         ios_versions = [
             "15_0",
