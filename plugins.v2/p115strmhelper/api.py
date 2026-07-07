@@ -302,17 +302,19 @@ class Api:
     @cached(
         region="p115strmhelper_api_get_user_storage_status", ttl=60 * 60, skip_none=True
     )
-    def get_user_storage_status(self) -> UserStorageStatusResponse:
+    def _get_user_storage_status_data(self) -> Optional[Dict[str, Any]]:
         """
-        获取 115 用户基本信息和空间使用情况
+        获取 115 用户基本信息和空间使用情况（返回可缓存字典）
+
+        :return Dict: 可缓存的用户存储状态字典
         """
         if not configer.get_config("cookies"):
-            return UserStorageStatusResponse(
-                success=False,
-                error_message="115 Cookies 未配置，无法获取信息。",
-                storage_info=None,
-                user_info=None,
-            )
+            return {
+                "success": False,
+                "error_message": "115 Cookies 未配置，无法获取信息。",
+                "storage_info": None,
+                "user_info": None,
+            }
 
         try:
             _temp_client = self._client
@@ -322,12 +324,12 @@ class Api:
                     logger.info("【用户存储状态】P115Client 初始化成功")
                 except Exception as e:
                     logger.error(f"【用户存储状态】P115Client 初始化失败: {e}")
-                    return UserStorageStatusResponse(
-                        success=False,
-                        error_message=f"115客户端初始化失败: {e}",
-                        storage_info=None,
-                        user_info=None,
-                    )
+                    return {
+                        "success": False,
+                        "error_message": f"115客户端初始化失败: {e}",
+                        "storage_info": None,
+                        "user_info": None,
+                    }
 
             # 获取用户信息
             user_info_resp = _temp_client.user_my_info()
@@ -354,12 +356,12 @@ class Api:
                     else "获取用户信息响应为空"
                 )
                 logger.error(f"【用户存储状态】获取用户信息失败: {error_msg}")
-                return UserStorageStatusResponse(
-                    success=False,
-                    error_message=f"获取115用户信息失败: {error_msg}",
-                    storage_info=None,
-                    user_info=None,
-                )
+                return {
+                    "success": False,
+                    "error_message": f"获取115用户信息失败: {error_msg}",
+                    "storage_info": None,
+                    "user_info": None,
+                }
 
             # 获取空间信息
             space_info_resp = _temp_client.fs_index_info(payload=0)
@@ -380,20 +382,18 @@ class Api:
                     else "获取空间信息响应为空"
                 )
                 logger.error(f"【用户存储状态】获取空间信息失败: {error_msg}")
-                return UserStorageStatusResponse(
-                    success=False,
-                    error_message=f"获取115空间信息失败: {error_msg}",
-                    user_info=UserInfo.model_validate(user_details_dict),
-                    storage_info=None,
-                )
+                return {
+                    "success": False,
+                    "error_message": f"获取115空间信息失败: {error_msg}",
+                    "user_info": user_details_dict,
+                    "storage_info": None,
+                }
 
-            return UserStorageStatusResponse(
-                success=True,
-                user_info=UserInfo.model_validate(user_details_dict),
-                storage_info=StorageInfo.model_validate(storage_details_dict)
-                if storage_details_dict
-                else None,
-            )
+            return {
+                "success": True,
+                "user_info": user_details_dict,
+                "storage_info": storage_details_dict if storage_details_dict else None,
+            }
 
         except Exception as e:
             logger.error(f"【用户存储状态】获取信息时发生意外错误: {e}", exc_info=True)
@@ -415,12 +415,28 @@ class Api:
             else:
                 specific_error_message = f"处理请求时发生错误: {str(e)}"
 
+            return {
+                "success": False,
+                "error_message": specific_error_message,
+                "storage_info": None,
+                "user_info": None,
+            }
+
+    def get_user_storage_status(self) -> UserStorageStatusResponse:
+        """
+        获取 115 用户基本信息和空间使用情况
+
+        :return UserStorageStatusResponse: 用户存储状态响应
+        """
+        data = self._get_user_storage_status_data()
+        if data is None:
             return UserStorageStatusResponse(
                 success=False,
-                error_message=specific_error_message,
+                error_message="缓存数据为空",
                 storage_info=None,
                 user_info=None,
             )
+        return UserStorageStatusResponse.model_validate(data)
 
     def browse_dir_api(
         self, params: BrowseDirParams = Depends()
@@ -631,7 +647,7 @@ class Api:
                             default_timeout=configer.get_default_timeout(),
                             slow_timeout=configer.get_slow_timeout(),
                         )
-                        self.get_user_storage_status.cache_clear()
+                        self._get_user_storage_status_data.cache_clear()
                         return ApiResponse(
                             data=CheckQRCodeData(
                                 status="success", msg="登录成功", cookie=_cookies
