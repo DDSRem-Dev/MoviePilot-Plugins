@@ -78,6 +78,7 @@ class MonitorLife:
 
     WAIT_TIME_OUT: int = 15
     SLEEP_TIME: int = 10
+    WEB_FALLBACK_DURATION: int = 24 * 60 * 60
 
     def __init__(
         self,
@@ -1881,6 +1882,59 @@ class MonitorLife:
             return "405" in message or "Method Not Allowed" in message
         return False
 
+    def _get_life_event_app(self) -> str:
+        """
+        获取当前应使用的生活事件拉取 app
+
+        若处于 web fallback 窗口期内则返回 web，否则返回 ios
+        """
+        state = configer.get_plugin_data("monitor_life_app_fallback") or {}
+        fallback_until = state.get("web_fallback_until")
+        if fallback_until and time() < fallback_until:
+            return "web"
+        if fallback_until:
+            state.pop("web_fallback_until", None)
+            configer.save_plugin_data("monitor_life_app_fallback", state)
+        return "ios"
+
+    def _reset_ios_405_count(self) -> None:
+        """
+        ios 拉取成功时清空 405 计数
+        """
+        state = configer.get_plugin_data("monitor_life_app_fallback") or {}
+        if state.get("ios_405_count"):
+            state["ios_405_count"] = 0
+            configer.save_plugin_data("monitor_life_app_fallback", state)
+
+    def _clear_web_fallback(self) -> None:
+        """
+        清理 web fallback 状态
+        """
+        state = configer.get_plugin_data("monitor_life_app_fallback") or {}
+        if state.pop("web_fallback_until", None):
+            configer.save_plugin_data("monitor_life_app_fallback", state)
+
+    def _record_ios_405(self) -> None:
+        """
+        记录一次 ios 405 且 web 成功，连续 3 次后 24h 内默认使用 web
+        """
+        state = configer.get_plugin_data("monitor_life_app_fallback") or {}
+        count = state.get("ios_405_count", 0) + 1
+        if count >= 3:
+            configer.save_plugin_data(
+                "monitor_life_app_fallback",
+                {
+                    "ios_405_count": 0,
+                    "web_fallback_until": int(time()) + self.WEB_FALLBACK_DURATION,
+                },
+            )
+            logger.warning(
+                "【监控生活事件】proapi 连续 3 次 405 且 webapi 正常，24h 内切换为 webapi 拉取"
+            )
+        else:
+            state["ios_405_count"] = count
+            configer.save_plugin_data("monitor_life_app_fallback", state)
+
     def _pull_life_events(self, from_time: float, from_id: int, app: str) -> List:
         """
         单次拉取生活事件
@@ -1949,20 +2003,43 @@ class MonitorLife:
         if self._wait_for_transfer_complete():
             return from_time, from_id
 
+        app = self._get_life_event_app()
+        method = "webapi" if app == "web" else "proapi"
+        logger.debug("【监控生活事件】当前使用接口: %s", method)
+
         try:
             events_batch: List = self._pull_life_events(
-                from_time=from_time, from_id=from_id, app="ios"
+                from_time=from_time, from_id=from_id, app=app
             )
+            if app == "ios":
+                self._reset_ios_405_count()
         except (HTTPError, P115OSError) as e:
-            if self._is_405_error(e):
+            if app == "web":
+                if not self._is_405_error(e):
+                    raise
+                logger.warning(
+                    "【监控生活事件】webapi 拉取返回 405，尝试 proapi: %s",
+                    e,
+                )
+                self._clear_web_fallback()
+                events_batch: List = self._pull_life_events(
+                    from_time=from_time, from_id=from_id, app="ios"
+                )
+                self._reset_ios_405_count()
+            elif not self._is_405_error(e):
+                raise
+            else:
                 logger.warning(
                     "【监控生活事件】proapi 拉取返回 405，尝试切换到 webapi 重试"
                 )
-                events_batch: List = self._pull_life_events(
-                    from_time=from_time, from_id=from_id, app="web"
-                )
-            else:
-                raise
+                try:
+                    events_batch: List = self._pull_life_events(
+                        from_time=from_time, from_id=from_id, app="web"
+                    )
+                except (HTTPError, P115OSError):
+                    raise
+
+                self._record_ios_405()
 
         if not events_batch:
             if self.stop_event and self.stop_event.wait(timeout=self.WAIT_TIME_OUT):
