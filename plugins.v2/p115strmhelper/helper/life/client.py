@@ -341,6 +341,7 @@ class MonitorLife:
                     cid=int(file_id),
                     with_ancestors=True,
                     cooldown=2,
+                    use_media_api=True,
                     **configer.get_ios_ua_app(),
                 ):
                     try:
@@ -549,6 +550,7 @@ class MonitorLife:
                     cid=int(file_id),
                     with_ancestors=True,
                     cooldown=2,
+                    use_media_api=True,
                     **configer.get_ios_ua_app(),
                 ),
                 7_000,

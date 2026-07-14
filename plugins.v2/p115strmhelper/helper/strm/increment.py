@@ -1,7 +1,7 @@
 from sys import platform as sys_platform
 from collections import deque
 from functools import partial
-from itertools import batched
+from itertools import batched, cycle
 from os import close, O_CREAT, O_RDWR, open as os_open
 from pathlib import Path
 from threading import Thread
@@ -131,6 +131,7 @@ class IncrementSyncStrmHelper:
         self.strm_exec_history_kind: Optional[str] = None
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = []
+        self._iterdir_app_cycle = cycle([False, True])
 
         self.pan_transfer_enabled = configer.pan_transfer_enabled
         self.pan_transfer_paths = configer.pan_transfer_paths
@@ -351,7 +352,11 @@ class IncrementSyncStrmHelper:
         """
         logger.debug(f"【增量STRM生成】迭代网盘目录: {cid} {path}")
         for batch in iter_fs_files(
-            self.client, cid, cooldown=2, **configer.get_ios_ua_app(app=False)
+            self.client,
+            cid,
+            cooldown=2,
+            use_media_api=True,
+            **configer.get_ios_ua_app(app=next(self._iterdir_app_cycle)),
         ):
             self.api_count += 1
             for item in batch.get("data", []):
