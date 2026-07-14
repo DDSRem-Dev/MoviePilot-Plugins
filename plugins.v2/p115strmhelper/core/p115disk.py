@@ -163,7 +163,11 @@ class P115DiskCore:
         target_path = Path(target_dir.path) / target_name
 
         # 获取目标目录ID
-        target_pid = target_dir.fileid
+        target_dir_item = self._p115_api.get_folder(path=Path(target_dir.path))
+        if not target_dir_item:
+            logger.error(f"【P115Disk】获取网盘目标目录 ID 失败: {target_dir.path}")
+            return None
+        target_pid = target_dir_item.fileid
 
         # 计算文件特征值
         file_size = local_path.stat().st_size
