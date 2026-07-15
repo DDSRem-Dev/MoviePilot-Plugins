@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard-widget dashboard-widget--strm">
-    <v-card :flat="!config?.attrs?.border" class="strm-dash-card fill-height d-flex flex-column">
+    <v-card :flat="!config?.attrs?.border" class="strm-dash-card fill-height d-flex flex-column dashboard-grid-fill">
       <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="strm-dash-card__head pb-2">
         <v-card-title class="d-flex flex-wrap align-center gap-2 ps-0">
           <v-icon icon="mdi-sync" color="primary" size="small" />
@@ -17,14 +17,14 @@
               size="small"
               variant="text"
               color="error"
-              class="mr-1"
+              class="mr-1 dashboard-grid-no-drag"
               prepend-icon="mdi-delete-sweep"
               :loading="deletingAllStrm"
               @click="confirmDeleteAllStrm"
             >
               清空
             </v-btn>
-            <v-btn icon size="small" variant="text" :loading="strmHistoryLoading" @click="loadStrmHistory">
+            <v-btn icon size="small" variant="text" class="dashboard-grid-no-drag" :loading="strmHistoryLoading" @click="loadStrmHistory">
               <v-icon>mdi-refresh</v-icon>
             </v-btn>
           </div>
@@ -65,7 +65,7 @@
               hide-details
               clearable
               variant="outlined"
-              class="strm-kind-field"
+              class="strm-kind-field dashboard-grid-no-drag"
               @update:model-value="applyStrmFilter"
             />
           </div>
@@ -110,6 +110,7 @@
                     icon
                     size="small"
                     variant="text"
+                    class="dashboard-grid-no-drag"
                     color="error"
                     :loading="deletingStrmId === row.unique"
                     :disabled="!row.unique"
@@ -141,7 +142,7 @@
                       :href="ex.href"
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="text-primary ms-1"
+                      class="text-primary ms-1 dashboard-grid-no-drag"
                       >{{ ex.display }}</a
                     >
                     <span v-else class="ms-1 text-high-emphasis" :title="ex.full">{{ ex.display }}</span>
@@ -173,6 +174,7 @@
               :length="strmPaginationLength"
               :total-visible="7"
               density="comfortable"
+              class="dashboard-grid-no-drag"
               @update:model-value="loadStrmHistory"
             />
           </div>
@@ -183,7 +185,7 @@
       <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
         <span class="text-caption text-disabled">{{ lastRefreshedTimeDisplay }}</span>
         <v-spacer />
-        <v-btn icon variant="text" size="small" :loading="strmHistoryLoading" @click="loadStrmHistory">
+        <v-btn icon variant="text" size="small" class="dashboard-grid-no-drag" :loading="strmHistoryLoading" @click="loadStrmHistory">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </v-card-actions>
@@ -198,10 +200,10 @@
         <v-card-text>确定删除这条 STRM 执行历史吗？</v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="grey" variant="text" :disabled="deletingStrmId" @click="deleteStrmConfirm.show = false">
+          <v-btn color="grey" variant="text" class="dashboard-grid-no-drag" :disabled="deletingStrmId" @click="deleteStrmConfirm.show = false">
             取消
           </v-btn>
-          <v-btn color="error" variant="text" :loading="deletingStrmId" @click="handleConfirmDeleteStrm">
+          <v-btn color="error" variant="text" class="dashboard-grid-no-drag" :loading="deletingStrmId" @click="handleConfirmDeleteStrm">
             删除
           </v-btn>
         </v-card-actions>
@@ -222,10 +224,10 @@
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="grey" variant="text" :disabled="deletingAllStrm" @click="deleteAllStrmConfirm = false">
+          <v-btn color="grey" variant="text" class="dashboard-grid-no-drag" :disabled="deletingAllStrm" @click="deleteAllStrmConfirm = false">
             取消
           </v-btn>
-          <v-btn color="error" variant="text" :loading="deletingAllStrm" @click="handleConfirmDeleteAllStrm">
+          <v-btn color="error" variant="text" class="dashboard-grid-no-drag" :loading="deletingAllStrm" @click="handleConfirmDeleteAllStrm">
             确认清空
           </v-btn>
         </v-card-actions>

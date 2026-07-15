@@ -2,7 +2,7 @@
   <div class="dashboard-widget dashboard-widget--sync-del">
     <v-card
       :flat="!config?.attrs?.border"
-      class="strm-dash-card sync-del-dash-card fill-height d-flex flex-column"
+      class="strm-dash-card sync-del-dash-card fill-height d-flex flex-column dashboard-grid-fill"
     >
       <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="strm-dash-card__head pb-2">
         <v-card-title class="d-flex flex-wrap align-center gap-2 ps-0">
@@ -20,14 +20,14 @@
               size="small"
               variant="text"
               color="error"
-              class="mr-1"
+              class="mr-1 dashboard-grid-no-drag"
               prepend-icon="mdi-delete-sweep"
               :loading="deletingAllSyncDel"
               @click="confirmDeleteAllSyncDel"
             >
               清空
             </v-btn>
-            <v-btn icon size="small" variant="text" :loading="syncDelHistoryLoading" @click="loadSyncDelHistory">
+            <v-btn icon size="small" variant="text" class="dashboard-grid-no-drag" :loading="syncDelHistoryLoading" @click="loadSyncDelHistory">
               <v-icon>mdi-refresh</v-icon>
             </v-btn>
           </div>
@@ -95,6 +95,7 @@
                       icon
                       size="small"
                       variant="text"
+                      class="dashboard-grid-no-drag"
                       color="error"
                       :loading="deletingSyncDelId === item.unique"
                       :disabled="!item.unique"
@@ -121,6 +122,7 @@
               :length="syncDelPaginationLength"
               :total-visible="7"
               density="comfortable"
+              class="dashboard-grid-no-drag"
               @update:model-value="loadSyncDelHistory"
             />
           </div>
@@ -131,7 +133,7 @@
       <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
         <span class="text-caption text-disabled">{{ lastRefreshedTimeDisplaySyncDel }}</span>
         <v-spacer />
-        <v-btn icon variant="text" size="small" :loading="syncDelHistoryLoading" @click="loadSyncDelHistory">
+        <v-btn icon variant="text" size="small" class="dashboard-grid-no-drag" :loading="syncDelHistoryLoading" @click="loadSyncDelHistory">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </v-card-actions>
@@ -146,10 +148,10 @@
         <v-card-text>确定删除这条同步删除历史吗？</v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="grey" variant="text" :disabled="deletingSyncDelId" @click="deleteSyncDelConfirm.show = false">
+          <v-btn color="grey" variant="text" class="dashboard-grid-no-drag" :disabled="deletingSyncDelId" @click="deleteSyncDelConfirm.show = false">
             取消
           </v-btn>
-          <v-btn color="error" variant="text" :loading="deletingSyncDelId" @click="handleConfirmDeleteSyncDel">
+          <v-btn color="error" variant="text" class="dashboard-grid-no-drag" :loading="deletingSyncDelId" @click="handleConfirmDeleteSyncDel">
             删除
           </v-btn>
         </v-card-actions>
@@ -170,10 +172,10 @@
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="grey" variant="text" :disabled="deletingAllSyncDel" @click="deleteAllSyncDelConfirm = false">
+          <v-btn color="grey" variant="text" class="dashboard-grid-no-drag" :disabled="deletingAllSyncDel" @click="deleteAllSyncDelConfirm = false">
             取消
           </v-btn>
-          <v-btn color="error" variant="text" :loading="deletingAllSyncDel" @click="handleConfirmDeleteAllSyncDel">
+          <v-btn color="error" variant="text" class="dashboard-grid-no-drag" :loading="deletingAllSyncDel" @click="handleConfirmDeleteAllSyncDel">
             确认清空
           </v-btn>
         </v-card-actions>
