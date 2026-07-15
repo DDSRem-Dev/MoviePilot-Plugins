@@ -3,7 +3,7 @@
     <v-card
       :flat="!config?.attrs?.border"
       :loading="loading"
-      class="status-dash-card fill-height d-flex flex-column"
+      class="status-dash-card dashboard-grid-fill fill-height d-flex flex-column"
     >
       <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="pb-2">
         <v-card-title>{{ config?.attrs?.title || "115网盘STRM助手" }}</v-card-title>
@@ -168,7 +168,7 @@
       <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
         <span class="text-caption text-disabled">{{ lastRefreshedTimeDisplay }}</span>
         <v-spacer />
-        <v-btn icon variant="text" size="small" @click="fetchStatusData" :loading="loading">
+        <v-btn class="dashboard-grid-no-drag" icon variant="text" size="small" @click="fetchStatusData" :loading="loading">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </v-card-actions>

@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard-widget dashboard-widget--transfer-mini">
-    <v-card :flat="!config?.attrs?.border" class="strm-dash-card transfer-mini-card h-100 d-flex flex-column">
+    <v-card :flat="!config?.attrs?.border" class="strm-dash-card transfer-mini-card dashboard-grid-fill h-100 d-flex flex-column">
       <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="pb-2">
         <v-card-title class="d-flex flex-wrap align-center gap-2 ps-0 text-subtitle-1">
           <v-icon icon="mdi-folder-cog" color="primary" size="small" />
@@ -8,7 +8,7 @@
         </v-card-title>
         <v-card-subtitle v-if="config?.attrs?.subtitle">{{ config.attrs.subtitle }}</v-card-subtitle>
         <template v-slot:append>
-          <v-btn icon size="small" variant="text" :loading="transferConfigLoading" @click="loadTransferConfig">
+          <v-btn class="dashboard-grid-no-drag" icon size="small" variant="text" :loading="transferConfigLoading" @click="loadTransferConfig">
             <v-icon>mdi-refresh</v-icon>
           </v-btn>
         </template>
@@ -28,8 +28,8 @@
           </v-alert>
           <template v-else>
             <v-select v-model="selectedManualPath" :items="panTransferSelectItems" item-title="title" item-value="value"
-              label="整理目录" density="compact" hide-details variant="outlined" class="mb-3" />
-            <v-btn block color="primary" variant="tonal" prepend-icon="mdi-play-circle" :disabled="!selectedManualPath"
+              label="整理目录" density="compact" hide-details variant="outlined" class="mb-3 dashboard-grid-no-drag" />
+            <v-btn class="dashboard-grid-no-drag" block color="primary" variant="tonal" prepend-icon="mdi-play-circle" :disabled="!selectedManualPath"
               @click="openManualTransferDialog">
               执行整理
             </v-btn>
@@ -41,7 +41,7 @@
       <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
         <span class="text-caption text-disabled">{{ lastRefreshedTimeDisplayTransfer }}</span>
         <v-spacer />
-        <v-btn icon variant="text" size="small" :loading="transferConfigLoading" @click="loadTransferConfig">
+        <v-btn class="dashboard-grid-no-drag" icon variant="text" size="small" :loading="transferConfigLoading" @click="loadTransferConfig">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </v-card-actions>
@@ -75,10 +75,10 @@
         <v-card-actions class="px-3 py-2">
           <v-spacer />
           <template v-if="!manualTransferDialog.loading && !manualTransferDialog.result">
-            <v-btn color="grey" variant="text" size="small" @click="closeManualTransferDialog">取消</v-btn>
-            <v-btn color="primary" variant="text" size="small" @click="confirmManualTransfer">确认执行</v-btn>
+            <v-btn class="dashboard-grid-no-drag" color="grey" variant="text" size="small" @click="closeManualTransferDialog">取消</v-btn>
+            <v-btn class="dashboard-grid-no-drag" color="primary" variant="text" size="small" @click="confirmManualTransfer">确认执行</v-btn>
           </template>
-          <v-btn v-else color="primary" variant="text" size="small" @click="closeManualTransferDialog">关闭</v-btn>
+          <v-btn v-else class="dashboard-grid-no-drag" color="primary" variant="text" size="small" @click="closeManualTransferDialog">关闭</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

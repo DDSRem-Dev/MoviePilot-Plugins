@@ -1,6 +1,6 @@
 <template>
   <div class="dashboard-widget dashboard-widget--full-sync-mini">
-    <v-card :flat="!config?.attrs?.border" class="strm-dash-card full-sync-mini-card h-100 d-flex flex-column">
+    <v-card :flat="!config?.attrs?.border" class="strm-dash-card full-sync-mini-card dashboard-grid-fill h-100 d-flex flex-column">
       <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="strm-dash-card__head pb-2">
         <v-card-title class="d-flex flex-wrap align-center gap-2 ps-0 text-subtitle-1">
           <v-icon icon="mdi-sync" color="primary" size="small" />
@@ -8,7 +8,7 @@
         </v-card-title>
         <v-card-subtitle v-if="config?.attrs?.subtitle">{{ config.attrs.subtitle }}</v-card-subtitle>
         <template v-slot:append>
-          <v-btn v-if="!allowRefresh" icon size="small" variant="text" :loading="configLoading" @click="loadConfig">
+          <v-btn v-if="!allowRefresh" class="dashboard-grid-no-drag" icon size="small" variant="text" :loading="configLoading" @click="loadConfig">
             <v-icon>mdi-refresh</v-icon>
           </v-btn>
         </template>
@@ -27,11 +27,11 @@
           </v-alert>
           <template v-else>
             <div class="d-flex flex-column gap-3 full-sync-mini-card__primary">
-              <v-btn block color="primary" variant="tonal" prepend-icon="mdi-sync" :disabled="!canTriggerFullSync"
+              <v-btn class="dashboard-grid-no-drag" block color="primary" variant="tonal" prepend-icon="mdi-sync" :disabled="!canTriggerFullSync"
                 @click="fullSyncConfirmOpen = true">
                 全量同步
               </v-btn>
-              <v-btn block color="primary" variant="outlined" prepend-icon="mdi-database-sync"
+              <v-btn class="dashboard-grid-no-drag" block color="primary" variant="outlined" prepend-icon="mdi-database-sync"
                 :disabled="!canTriggerFullSyncDb" @click="fullSyncDbConfirmOpen = true">
                 全量同步数据库
               </v-btn>
@@ -47,7 +47,7 @@
                     <v-icon icon="mdi-delete-alert" color="primary" size="small" class="flex-shrink-0" />
                     <span class="text-truncate">待确认清理失效 STRM</span>
                   </div>
-                  <v-btn size="small" variant="text" density="compact" class="flex-shrink-0" prepend-icon="mdi-refresh"
+                  <v-btn size="small" variant="text" density="compact" class="flex-shrink-0 dashboard-grid-no-drag" prepend-icon="mdi-refresh"
                     :loading="pendingLoading" @click="loadPendingBatches">
                     刷新
                   </v-btn>
@@ -69,12 +69,12 @@
                         {{ formatPreview(b.path_preview) }}
                       </div>
                       <div class="d-flex gap-2 mt-2">
-                        <v-btn size="small" color="error" variant="tonal"
+                        <v-btn class="dashboard-grid-no-drag" size="small" color="error" variant="tonal"
                           :loading="pendingAction === `${b.request_id}:exec`" :disabled="!!pendingAction"
                           @click="executePendingCleanup(b.request_id)">
                           确认删除
                         </v-btn>
-                        <v-btn size="small" variant="text" :loading="pendingAction === `${b.request_id}:cancel`"
+                        <v-btn class="dashboard-grid-no-drag" size="small" variant="text" :loading="pendingAction === `${b.request_id}:cancel`"
                           :disabled="!!pendingAction" @click="cancelPendingCleanup(b.request_id)">
                           取消
                         </v-btn>
@@ -92,7 +92,7 @@
       <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
         <span class="text-caption text-disabled">{{ lastRefreshedDisplay }}</span>
         <v-spacer />
-        <v-btn icon variant="text" size="small" :loading="configLoading" @click="loadConfig">
+        <v-btn class="dashboard-grid-no-drag" icon variant="text" size="small" :loading="configLoading" @click="loadConfig">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </v-card-actions>
@@ -112,10 +112,10 @@
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn color="grey" variant="text" :disabled="syncDbLoading" @click="fullSyncDbConfirmOpen = false">
+          <v-btn class="dashboard-grid-no-drag" color="grey" variant="text" :disabled="syncDbLoading" @click="fullSyncDbConfirmOpen = false">
             取消
           </v-btn>
-          <v-btn color="primary" variant="text" :loading="syncDbLoading" @click="onConfirmFullSyncDb">
+          <v-btn class="dashboard-grid-no-drag" color="primary" variant="text" :loading="syncDbLoading" @click="onConfirmFullSyncDb">
             确认执行
           </v-btn>
         </v-card-actions>
