@@ -135,7 +135,12 @@ class TransferChainPatcher:
                 if download_history:
                     task.username = download_history.username
                     # 识别媒体信息
-                    if download_history.tmdbid or download_history.doubanid:
+                    history_year_conflict = cls._is_movie_year_conflict(
+                        task.meta, download_history
+                    )
+                    if (
+                        download_history.tmdbid or download_history.doubanid
+                    ) and not history_year_conflict:
                         # 下载记录中已存在识别信息
                         mediainfo: Optional[MediaInfo] = chain_self.recognize_media(
                             mtype=MediaType(download_history.type),
@@ -148,6 +153,18 @@ class TransferChainPatcher:
                             # 更新自定义媒体类别
                             if download_history.media_category:
                                 mediainfo.category = download_history.media_category
+                    else:
+                        if history_year_conflict:
+                            logger.info(
+                                f"【整理接管】{task.fileitem.name} 文件年份 "
+                                f"{task.meta.year} 与下载记录年份 "
+                                f"{download_history.year} 不一致，按文件名重新识别"
+                            )
+                        mediainfo = MediaChain().recognize_by_meta(
+                            task.meta, obtain_images=True
+                        )
+                        if mediainfo and download_history.media_category:
+                            mediainfo.category = download_history.media_category
                 else:
                     # 识别媒体信息（obtain_images=True 内部已完成图片获取）
                     mediainfo = MediaChain().recognize_by_meta(
@@ -473,6 +490,25 @@ class TransferChainPatcher:
             and source_storage == cls._storage_module
             and target_storage == cls._storage_module
         )
+
+    @staticmethod
+    def _is_movie_year_conflict(file_meta, media) -> bool:
+        """
+        判断文件名年份是否与已识别电影年份冲突
+        """
+        from app.schemas.types import MediaType
+
+        file_year = getattr(file_meta, "year", None)
+        media_year = getattr(media, "year", None)
+        if not file_meta or not media or not file_year or not media_year:
+            return False
+        media_type = getattr(media, "type", None)
+        if not isinstance(media_type, MediaType):
+            try:
+                media_type = MediaType(media_type)
+            except (TypeError, ValueError):
+                return False
+        return media_type == MediaType.MOVIE and str(file_year) != str(media_year)
 
     @classmethod
     def _compute_target_path(cls, task, need_rename: bool = True) -> Optional[Path]:
