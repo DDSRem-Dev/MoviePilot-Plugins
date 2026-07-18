@@ -477,7 +477,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.1.5"
+    plugin_version = "1.1.6"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页

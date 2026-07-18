@@ -25,7 +25,7 @@ class P123Disk(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.3.4"
+    plugin_version = "1.3.5"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
