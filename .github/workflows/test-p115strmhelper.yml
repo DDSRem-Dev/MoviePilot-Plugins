@@ -67,7 +67,7 @@ jobs:
           path: MoviePilot-Resources
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -104,8 +104,7 @@ jobs:
         shell: powershell
 
       - name: Run tests
-        working-directory: plugins.v2/p115strmhelper
         env:
           PYTHONPATH: ${{ github.workspace }}/MoviePilot${{ matrix.os == 'windows-latest' && ';' || ':' }}${{ github.workspace }}/plugins.v2/p115strmhelper
         run: |
-          python -m unittest discover -s tests -v
+          python -m unittest discover -s plugins.v2/p115strmhelper/tests -v
