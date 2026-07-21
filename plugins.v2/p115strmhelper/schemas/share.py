@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from ..utils.cron import CronUtils
 
 
+ShareIterFunction = Literal["share_iter_files", "iter_share_files_with_path"]
+
+
 class ShareStrmCleanupConfig(BaseModel):
     """
     无效分享 STRM 清理（扫描根目录、定时与删除策略）
@@ -115,6 +118,9 @@ class ShareInteractiveGenStrmConfig(BaseModel):
         default=False,
         description="MP 整理时是否下载 MoviePilot 设定中 RMT 音轨与字幕后缀文件",
     )
+    iter_function: ShareIterFunction = Field(
+        default="iter_share_files_with_path", description="分享文件迭代函数"
+    )
     speed_mode: Literal[0, 1, 2, 3] = Field(default=3, description="运行速度模式")
 
     @model_validator(mode="after")
@@ -126,6 +132,9 @@ class ShareInteractiveGenStrmConfig(BaseModel):
             self.moviepilot_transfer_download_rmt_audio_sub = False
         if self.moviepilot_transfer:
             self.auto_download_mediainfo = False
+        if self.iter_function == "share_iter_files":
+            self.auto_download_mediainfo = False
+            self.moviepilot_transfer_download_rmt_audio_sub = False
         return self
 
 
@@ -154,6 +163,9 @@ class ShareStrmConfig(BaseModel):
     )
     media_server_refresh: bool = Field(default=False, description="刷新媒体服务器")
     scrape_metadata: bool = Field(default=False, description="是否刮削元数据")
+    iter_function: ShareIterFunction = Field(
+        default="iter_share_files_with_path", description="分享文件迭代函数"
+    )
     speed_mode: Literal[0, 1, 2, 3] = Field(default=3, description="运行速度模式")
 
     @model_validator(mode="after")
@@ -167,4 +179,7 @@ class ShareStrmConfig(BaseModel):
             self.auto_download_mediainfo = False
             self.media_server_refresh = False
             self.scrape_metadata = False
+        if self.iter_function == "share_iter_files":
+            self.auto_download_mediainfo = False
+            self.moviepilot_transfer_download_rmt_audio_sub = False
         return self

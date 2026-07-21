@@ -388,6 +388,7 @@ const config = reactive({
     auto_download_mediainfo: false,
     local_path: '',
     moviepilot_transfer: false,
+    iter_function: 'iter_share_files_with_path',
     speed_mode: 3,
   },
   share_strm_cleanup_config: {

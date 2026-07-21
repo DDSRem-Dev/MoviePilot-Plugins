@@ -1882,6 +1882,8 @@ class P115StrmHelper(_PluginBase):
                     return None
                 _client = P115Center()
                 _data_dict = sharestrmcacher.file_item_dict[cache_key]
+                if not _data_dict.get("sha1"):
+                    return None
                 sharestrmcacher.file_item_dict.pop(cache_key)
                 _resp = _client.download_emby_mediainfo_data(
                     [(_data_dict["sha1"], _data_dict["size"])]

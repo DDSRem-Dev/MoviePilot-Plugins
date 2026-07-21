@@ -7,9 +7,10 @@ from queue import Empty, Queue
 from tempfile import gettempdir
 from threading import Lock, Thread
 from time import perf_counter, sleep
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 from p115client import check_response
+from p115client.tool.iterdir import share_iter_files
 from p115client.util import share_extract_payload
 
 from app.chain.transfer import TransferChain
@@ -178,12 +179,14 @@ class ShareStrmHelper:
         self,
         item: Dict,
         config: ShareStrmConfig,
+        detailed_data: bool,
     ) -> None:
         """
         处理单个 STRM 文件
 
         :param item (Dict): 网盘文件信息
         :param config (ShareStrmConfig): 分享 STRM 生成配置
+        :param detailed_data (bool): 是否为详细迭代数据
         """
         file_path = item["path"]
 
@@ -208,7 +211,7 @@ class ShareStrmHelper:
         new_file_path_str = str(new_file_path)
 
         try:
-            if config.auto_download_mediainfo:
+            if detailed_data and config.auto_download_mediainfo:
                 if file_path.suffix.lower() in self.download_mediaext:
                     with self.lock:
                         self.download_mediainfo_list.append(
@@ -226,7 +229,8 @@ class ShareStrmHelper:
 
             sfx_lower = file_path.suffix.lower()
             if (
-                config.moviepilot_transfer
+                detailed_data
+                and config.moviepilot_transfer
                 and config.moviepilot_transfer_download_rmt_audio_sub
                 and (
                     sfx_lower in settings.RMT_AUDIOEXT
@@ -296,10 +300,10 @@ class ShareStrmHelper:
                     self._strm_generated_paths.add(new_file_path_str)
             logger.info("【分享STRM生成】生成 STRM 文件成功: %s", str(new_file_path))
             cache_key = f"{config.share_code}:{config.share_receive}:{item['id']}"
-            sharestrmcacher.file_item_dict[cache_key] = {
-                "sha1": item["sha1"],
-                "size": item["size"],
-            }
+            cache_data = {"size": item["size"]}
+            if detailed_data:
+                cache_data["sha1"] = item["sha1"]
+            sharestrmcacher.file_item_dict[cache_key] = cache_data
 
             if config.moviepilot_transfer:
                 self.mp_transfer_queue.append(new_file_path)
@@ -317,6 +321,38 @@ class ShareStrmHelper:
                 self.strm_fail_count += 1
                 self.strm_fail_dict[str(new_file_path)] = str(e)
             return
+
+    def _create_online_share_iterator(
+        self, config: ShareStrmConfig
+    ) -> Tuple[Iterator[Dict], bool]:
+        """
+        根据配置创建在线分享文件迭代器
+
+        :param config (ShareStrmConfig): 分享 STRM 生成配置
+
+        :return Tuple: 文件迭代器与是否为详细数据
+        """
+        if config.iter_function == "iter_share_files_with_path":
+            return (
+                iter_share_files_with_path(
+                    client=self.share_client,
+                    share_code=config.share_code,
+                    receive_code=config.share_receive,
+                    cid=0,
+                    speed_mode=config.speed_mode,
+                    **configer.get_ios_ua_app(),
+                ),
+                True,
+            )
+        return (
+            share_iter_files(
+                client=self.share_client,
+                share_code=config.share_code,
+                receive_code=config.share_receive,
+                cid=0,
+            ),
+            False,
+        )
 
     def generate_strm_files_for_configs(self, configs: List[ShareStrmConfig]) -> None:
         """
@@ -383,8 +419,9 @@ class ShareStrmHelper:
                 logger.error(f"【分享STRM生成】校验分享状态出错{comment_info}: {e}")
                 continue
 
-            # 迭代器选择
             data_collector = None
+            allow_oop_upload = False
+            detailed_data = True
             temp_file = path_join(gettempdir(), f"share_data_{batch_id}.json.gz")
             download_success = ShareOOPServerHelper.download_share_files_data(
                 share_code=config.share_code,
@@ -397,17 +434,23 @@ class ShareStrmHelper:
                     temp_file
                 )
             else:
-                logger.info(f"【分享STRM生成】数据不存在，开始收集数据{comment_info}")
-                data_iter = iter_share_files_with_path(
-                    client=self.share_client,
-                    share_code=config.share_code,
-                    receive_code=config.share_receive,
-                    cid=0,
-                    speed_mode=config.speed_mode,
-                    **configer.get_ios_ua_app(),
-                )
-                data_collector = ShareFilesDataCollector(data_iter, temp_file)
-                data_iter = data_collector
+                logger.info(f"【分享STRM生成】数据不存在，开始在线迭代{comment_info}")
+                data_iter, detailed_data = self._create_online_share_iterator(config)
+                if detailed_data:
+                    data_collector = ShareFilesDataCollector(data_iter, temp_file)
+                    data_iter = data_collector
+                    allow_oop_upload = True
+                else:
+                    logger.info(
+                        "【分享STRM生成】使用 share_iter_files 简略数据，"
+                        f"跳过 OOP 数据收集和上传{comment_info}"
+                    )
+
+            logger.info(
+                f"【分享STRM生成】数据来源: "
+                f"{'OOP 详细数据' if download_success else config.iter_function}, "
+                f"detailed_data={detailed_data}, allow_oop_upload={allow_oop_upload}"
+            )
 
             has_exception = False
             try:
@@ -419,6 +462,7 @@ class ShareStrmHelper:
                                 self.__process_single_item,
                                 item=item,
                                 config=config,
+                                detailed_data=detailed_data,
                             ): item
                             for item in batch
                         }
@@ -466,7 +510,7 @@ class ShareStrmHelper:
                     f"【分享STRM生成】使用下载数据完成，文件大小: {file_size_mb:.2f} MB{comment_info}"
                 )
                 cleanup_temp_file(temp_file)
-            else:
+            elif allow_oop_upload and data_collector is not None:
                 file_path, data_count = data_collector.get_file_info()
                 if data_count > 0:
                     file_size_mb = path_getsize(file_path) / 1024 / 1024
@@ -719,6 +763,7 @@ class ShareInteractiveGenStrmQueue:
             moviepilot_transfer_download_rmt_audio_sub=(
                 g.moviepilot_transfer_download_rmt_audio_sub
             ),
+            iter_function=g.iter_function,
             speed_mode=g.speed_mode,
             scrape_metadata=False,
             media_server_refresh=False,

@@ -787,7 +787,7 @@
   <!-- 分享同步对话框 -->
   <v-dialog v-model="shareDialog.show" max-width="900" scrollable>
     <v-card>
-      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 bg-primary-lighten-5">
+      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 dialog-title-surface">
         <v-icon icon="mdi-share-variant" class="mr-2" color="primary" size="small" />
         <span>115网盘分享同步</span>
         <v-spacer></v-spacer>
@@ -801,7 +801,7 @@
 
         <!-- 全局配置 -->
         <v-card variant="outlined" class="mb-4">
-          <v-card-title class="text-subtitle-2 px-3 py-2 bg-grey-lighten-4">
+          <v-card-title class="text-subtitle-2 px-3 py-2 section-title-surface">
             <v-icon icon="mdi-cog" size="small" class="mr-2"></v-icon>
             全局配置
           </v-card-title>
@@ -832,22 +832,33 @@
         <!-- 分享交互生成 STRM（二级折叠） -->
         <v-expansion-panels v-model="shareDialog.shareInteractiveGenStrmExpanded" variant="tonal" class="mb-4" multiple>
           <v-expansion-panel value="share-interactive-gen-strm" class="rounded border" eager>
-            <v-expansion-panel-title class="text-subtitle-2 d-flex align-center px-3 py-2 bg-grey-lighten-4">
+            <v-expansion-panel-title class="text-subtitle-2 d-flex align-center px-3 py-2 section-title-surface">
               <v-icon icon="mdi-chat-processing" size="small" class="mr-2"></v-icon>
               <span>分享交互生成 STRM</span>
               <v-chip size="x-small" class="ml-2" variant="tonal" color="primary">/p115_share_strm</v-chip>
             </v-expansion-panel-title>
             <v-expansion-panel-text class="pa-3" eager>
-              <v-alert type="info" density="compact" variant="tonal" class="mb-3">
-                <div class="text-body-2 font-weight-medium mb-1">远程命令 <code>/p115_share_strm</code> + 115
-                  分享链接，或直接转发资源消息/输入 115 分享链接</div>
-                <div class="text-caption">均会识别并加入队列串行执行；与下方「分享配置列表」批量同步相互独立</div>
-              </v-alert>
+              <div class="command-hint mb-4">
+                <v-icon icon="mdi-information-outline" size="small" color="info"></v-icon>
+                <div>
+                  <div class="text-body-2">发送 <code>/p115_share_strm</code> + 115 分享链接，或直接转发资源消息</div>
+                  <div class="text-caption text-medium-emphasis">任务会加入独立队列串行执行</div>
+                </div>
+              </div>
               <v-row>
                 <v-col cols="12" md="6">
                   <v-text-field v-model="shareDialog.interactiveGenStrm.minFileSizeFormatted" label="最小生成文件大小"
                     hint="小于此值不生成 STRM，留空不限制；如 500M、1G" persistent-hint variant="outlined" density="compact" />
                 </v-col>
+                <v-col cols="12" md="6">
+                  <v-select v-model="shareDialog.interactiveGenStrm.iterFunction" label="迭代函数" :items="shareIteratorItems"
+                    item-title="title" item-value="value" variant="outlined" density="compact" persistent-hint
+                    :hint="shareDialog.interactiveGenStrm.iterFunction === 'share_iter_files'
+                      ? '高速，仅生成 STRM；不上传共享数据'
+                      : '详细数据，支持元数据下载与共享'" />
+                </v-col>
+              </v-row>
+              <v-row v-if="shareDialog.interactiveGenStrm.iterFunction === 'iter_share_files_with_path'">
                 <v-col cols="12" md="6">
                   <v-select v-model="shareDialog.interactiveGenStrm.speedMode" label="运行速度模式" :items="speedModeItems"
                     item-title="title" item-value="value" variant="outlined" density="compact" />
@@ -864,45 +875,38 @@
                 </v-col>
               </v-row>
               <v-row class="mt-2">
-                <v-col cols="12" md="6">
+                <v-col v-if="shareDialog.interactiveGenStrm.iterFunction === 'iter_share_files_with_path'" cols="12" md="6">
                   <v-switch v-model="shareDialog.interactiveGenStrm.autoDownloadMediainfo" label="自动下载网盘元数据"
                     color="primary" density="compact" hide-details
                     :disabled="shareDialog.interactiveGenStrm.moviepilotTransfer" />
                 </v-col>
-                <v-col cols="12" md="6">
+                <v-col cols="12" :md="shareDialog.interactiveGenStrm.iterFunction === 'iter_share_files_with_path' ? 6 : 12">
                   <v-switch v-model="shareDialog.interactiveGenStrm.moviepilotTransfer" label="交由 MoviePilot 整理"
                     color="info" density="compact" hide-details />
                 </v-col>
               </v-row>
               <v-expand-transition>
-                <div v-if="shareDialog.interactiveGenStrm.moviepilotTransfer" class="mt-2">
+                <div v-if="shareDialog.interactiveGenStrm.moviepilotTransfer
+                  && shareDialog.interactiveGenStrm.iterFunction === 'iter_share_files_with_path'" class="mt-2">
                   <v-switch v-model="shareDialog.interactiveGenStrm.moviepilotTransferDownloadRmtAudioSub"
                     label="下载 MoviePilot 可整理的音轨与字幕" color="primary" density="compact" hide-details />
-                  <v-alert type="info" variant="tonal" density="compact" class="mt-2 mb-0"
-                    icon="mdi-information-outline">
-                    <ul class="text-caption mb-0 ps-4">
-                      <li>仅下载 MoviePilot 设定允许的音轨、字幕</li>
-                      <li class="mt-1">先保存到本地目录，再与 STRM 一并进入整理</li>
-                    </ul>
-                  </v-alert>
+                  <div class="text-caption text-medium-emphasis mt-1 ml-1">
+                    仅下载 MoviePilot 允许的音轨和字幕，保存后与 STRM 一并整理
+                  </div>
                 </div>
               </v-expand-transition>
               <v-expand-transition>
                 <div v-if="shareDialog.interactiveGenStrm.moviepilotTransfer">
-                  <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert-circle">
-                    <div class="text-body-2 mb-2"><strong>交由 MoviePilot 整理配置说明：</strong></div>
+                  <details class="mp-config-help mt-3">
+                    <summary>MoviePilot 整理配置说明</summary>
                     <div class="text-caption mb-2">开启 MP 整理时，「本地生成目录」为临时待整理目录，请在 MoviePilot <strong>设定 → 目录</strong>
-                      中配置：
+                      中配置
                     </div>
-                    <div class="text-caption"
-                      style="padding-left: 4px; border-left: 2px solid rgba(var(--v-theme-warning), 0.3);">
-                      <div class="mb-1">1.
-                        添加目录配置卡，按需选择媒体类型与媒体类别，资源存储选择<strong>本地</strong>，资源目录填写与本插件一致的<strong>本地生成目录</strong>路径</div>
-                      <div>2.
-                        自动整理模式选择<strong>手动整理</strong>，媒体库存储选择<strong>本地</strong>并配置媒体库路径，整理方式选择<strong>移动</strong>，分类、重命名、通知、刮削按需配置
-                      </div>
-                    </div>
-                  </v-alert>
+                    <ol class="text-caption mb-0 pl-5">
+                      <li class="mb-1">资源存储选择<strong>本地</strong>，资源目录填写本插件的<strong>本地生成目录</strong></li>
+                      <li>自动整理选择<strong>手动整理</strong>，媒体库存储选择<strong>本地</strong>，整理方式选择<strong>移动</strong></li>
+                    </ol>
+                  </details>
                 </div>
               </v-expand-transition>
             </v-expansion-panel-text>
@@ -912,7 +916,7 @@
         <!-- 无效分享 STRM 清理 -->
         <v-expansion-panels v-model="shareDialog.shareStrmCleanupExpanded" variant="tonal" class="mb-4" multiple>
           <v-expansion-panel value="share-strm-cleanup" class="rounded border" eager>
-            <v-expansion-panel-title class="text-subtitle-2 d-flex align-center px-3 py-2 bg-grey-lighten-4">
+            <v-expansion-panel-title class="text-subtitle-2 d-flex align-center px-3 py-2 section-title-surface">
               <v-icon icon="mdi-broom" size="small" class="mr-2"></v-icon>
               <span>无效分享 STRM 清理</span>
             </v-expansion-panel-title>
@@ -984,7 +988,7 @@
 
         <!-- 分享配置列表 -->
         <v-card variant="outlined">
-          <v-card-title class="text-subtitle-2 px-3 py-2 bg-grey-lighten-4 d-flex align-center">
+          <v-card-title class="text-subtitle-2 px-3 py-2 section-title-surface d-flex align-center">
             <v-icon icon="mdi-share-variant" size="small" class="mr-2"></v-icon>
             <span class="flex-grow-1">分享配置列表</span>
             <v-btn size="small" prepend-icon="mdi-delete-sweep" variant="text" color="error" @click="clearShareConfigs"
@@ -1027,7 +1031,10 @@
                           <v-icon icon="mdi-file-size" size="x-small" class="mr-1"></v-icon>
                           最小文件: {{ formatBytes(config.min_file_size) }}
                         </span>
-                        <span v-if="config.speed_mode !== undefined">
+                        <v-chip size="x-small" variant="tonal" color="info">
+                          {{ config.iter_function === 'iter_share_files_with_path' ? '详细迭代' : '高速简略' }}
+                        </v-chip>
+                        <span v-if="config.iter_function === 'iter_share_files_with_path' && config.speed_mode !== undefined">
                           <v-icon icon="mdi-speedometer" size="x-small" class="mr-1"></v-icon>
                           速度: {{ ['最快', '快', '慢', '最慢'][config.speed_mode] }}
                         </span>
@@ -1087,7 +1094,7 @@
   <!-- 分享配置编辑对话框 -->
   <v-dialog v-model="shareConfigDialog.show" max-width="700" scrollable>
     <v-card>
-      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 bg-primary-lighten-5">
+      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 dialog-title-surface">
         <v-icon icon="mdi-share-variant" class="mr-2" color="primary" size="small" />
         <span>{{ shareConfigDialog.editingIndex >= 0 ? '编辑分享配置' : '添加分享配置' }}</span>
         <v-spacer></v-spacer>
@@ -1159,6 +1166,16 @@
               prepend-inner-icon="mdi-file-document"></v-text-field>
           </v-col>
           <v-col cols="12" md="6">
+            <v-select v-model="shareConfigDialog.iterFunction" label="迭代函数" :hint="shareConfigDialog.iterFunction === 'share_iter_files'
+              ? '高速，仅生成 STRM；不上传共享数据'
+              : '详细数据，支持元数据下载与共享'" persistent-hint
+              variant="outlined" density="compact" :items="shareIteratorItems" prepend-inner-icon="mdi-file-tree"
+              item-title="title" item-value="value"></v-select>
+          </v-col>
+        </v-row>
+
+        <v-row v-if="shareConfigDialog.iterFunction === 'iter_share_files_with_path'" class="mb-2">
+          <v-col cols="12" md="6">
             <v-select v-model="shareConfigDialog.speedMode" label="运行速度模式" hint="控制API调用速率，避免触发风控" persistent-hint
               variant="outlined" density="compact" :items="speedModeItems" prepend-inner-icon="mdi-speedometer">
               <template v-slot:item="{ props, item }">
@@ -1190,7 +1207,7 @@
         <v-expand-transition>
           <div v-if="shareConfigDialog.moviepilotTransfer" class="mb-2">
             <v-row>
-              <v-col cols="12">
+              <v-col v-if="shareConfigDialog.iterFunction === 'iter_share_files_with_path'" cols="12">
                 <v-switch v-model="shareConfigDialog.moviepilotTransferDownloadRmtAudioSub" color="primary"
                   density="compact" hide-details>
                   <template v-slot:label>
@@ -1200,12 +1217,9 @@
                     </div>
                   </template>
                 </v-switch>
-                <v-alert type="info" variant="tonal" density="compact" class="mt-2 mb-0" icon="mdi-information-outline">
-                  <ul class="text-caption mb-0 ps-4">
-                    <li>仅下载 MoviePilot 设定允许的音轨、字幕</li>
-                    <li class="mt-1">先保存到本地目录，再与 STRM 一并进入整理</li>
-                  </ul>
-                </v-alert>
+                <div class="text-caption text-medium-emphasis mt-1 ml-1">
+                  仅下载 MoviePilot 允许的音轨和字幕，保存后与 STRM 一并整理
+                </div>
               </v-col>
             </v-row>
           </div>
@@ -1214,7 +1228,8 @@
         <v-expand-transition>
           <div v-if="!shareConfigDialog.moviepilotTransfer">
             <v-row class="mb-2">
-              <v-col cols="12" md="4" class="d-flex align-center">
+              <v-col v-if="shareConfigDialog.iterFunction === 'iter_share_files_with_path'" cols="12" md="4"
+                class="d-flex align-center">
                 <v-switch v-model="shareConfigDialog.autoDownloadMediainfo" color="primary" density="compact"
                   hide-details class="flex-grow-1">
                   <template v-slot:label>
@@ -1225,7 +1240,8 @@
                   </template>
                 </v-switch>
               </v-col>
-              <v-col cols="12" md="4" class="d-flex align-center">
+              <v-col cols="12" :md="shareConfigDialog.iterFunction === 'iter_share_files_with_path' ? 4 : 6"
+                class="d-flex align-center">
                 <v-switch v-model="shareConfigDialog.mediaServerRefresh" color="primary" density="compact" hide-details
                   class="flex-grow-1">
                   <template v-slot:label>
@@ -1236,7 +1252,8 @@
                   </template>
                 </v-switch>
               </v-col>
-              <v-col cols="12" md="4" class="d-flex align-center">
+              <v-col cols="12" :md="shareConfigDialog.iterFunction === 'iter_share_files_with_path' ? 4 : 6"
+                class="d-flex align-center">
                 <v-switch v-model="shareConfigDialog.scrapeMetadata" color="primary" density="compact" hide-details
                   class="flex-grow-1">
                   <template v-slot:label>
@@ -1251,16 +1268,13 @@
           </div>
         </v-expand-transition>
 
-        <v-alert type="info" variant="tonal" density="compact" class="mt-3">
-          <div class="text-caption">
-            <div class="mb-1"><strong>提示：</strong></div>
-            <ul class="ma-0 pl-4">
-              <li>分享链接/分享码和分享密码只需要二选一配置即可</li>
-              <li>同时填写分享链接、分享码和分享密码时，优先读取分享链接</li>
-              <li>当 STRM交由MoviePilot整理 关闭时，才能配置自动下载网盘元数据、刷新媒体服务器和是否刮削元数据</li>
-            </ul>
-          </div>
-        </v-alert>
+        <details class="mp-config-help mt-3">
+          <summary>配置提示</summary>
+          <ul class="text-caption ma-0 pl-5">
+            <li class="mb-1">分享链接/分享码和分享密码只需要二选一配置，同时填写时优先读取分享链接</li>
+            <li>关闭 MoviePilot 整理后，才能配置自动下载网盘元数据、刷新媒体服务器和刮削元数据</li>
+          </ul>
+        </details>
       </v-card-text>
 
       <v-divider></v-divider>
@@ -1278,7 +1292,7 @@
   <!-- 离线下载对话框 -->
   <v-dialog v-model="offlineDownloadDialog.show" max-width="800" persistent>
     <v-card>
-      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 bg-primary-lighten-5">
+      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-1 dialog-title-surface">
         <v-icon icon="mdi-cloud-download-outline" class="mr-2" color="primary" size="small" />
         <span>115离线下载</span>
         <v-spacer></v-spacer>
@@ -1974,6 +1988,7 @@ const defaultInteractiveGenStrm = () => ({
   localPath: '',
   moviepilotTransfer: false,
   moviepilotTransferDownloadRmtAudioSub: false,
+  iterFunction: 'iter_share_files_with_path',
   speedMode: 3,
 });
 
@@ -2012,6 +2027,7 @@ const shareConfigDialog = reactive({
   sharePath: '/',
   localPath: '',
   minFileSizeFormatted: '',
+  iterFunction: 'iter_share_files_with_path',
   speedMode: 3,
   moviepilotTransfer: false,
   moviepilotTransferDownloadRmtAudioSub: false,
@@ -2025,6 +2041,11 @@ const speedModeItems = [
   { title: '快', subtitle: '0.5s, 0.5s, 1.5s', value: 1 },
   { title: '慢', subtitle: '1s, 1s, 2s', value: 2 },
   { title: '最慢', subtitle: '1.5s, 1.5s, 2s (推荐)', value: 3 },
+];
+
+const shareIteratorItems = [
+  { title: 'iter_share_files_with_path（详细数据，默认）', value: 'iter_share_files_with_path' },
+  { title: 'share_iter_files（高速简略）', value: 'share_iter_files' },
 ];
 
 const mediaservers = ref([]);
@@ -2079,6 +2100,7 @@ const openShareDialog = () => {
     shareDialog.interactiveGenStrm.moviepilotTransfer = ig.moviepilot_transfer || false;
     shareDialog.interactiveGenStrm.moviepilotTransferDownloadRmtAudioSub =
       ig.moviepilot_transfer_download_rmt_audio_sub || false;
+    shareDialog.interactiveGenStrm.iterFunction = ig.iter_function || 'iter_share_files_with_path';
     shareDialog.interactiveGenStrm.speedMode = ig.speed_mode !== undefined ? ig.speed_mode : 3;
 
     const sc = props.initialConfig.share_strm_cleanup_config || {};
@@ -2098,14 +2120,16 @@ const openShareDialog = () => {
 const flushShareInteractiveGenStrmToInitialConfig = () => {
   if (!props.initialConfig) return;
   const m = shareDialog.interactiveGenStrm;
+  const detailed = m.iterFunction === 'iter_share_files_with_path';
   props.initialConfig.share_interactive_gen_strm_config = {
     min_file_size: parseSize(m.minFileSizeFormatted) || null,
-    auto_download_mediainfo: m.moviepilotTransfer ? false : m.autoDownloadMediainfo,
+    auto_download_mediainfo: detailed && !m.moviepilotTransfer ? m.autoDownloadMediainfo : false,
     local_path: m.localPath || null,
     moviepilot_transfer: m.moviepilotTransfer,
-    moviepilot_transfer_download_rmt_audio_sub: m.moviepilotTransfer
+    moviepilot_transfer_download_rmt_audio_sub: detailed && m.moviepilotTransfer
       ? m.moviepilotTransferDownloadRmtAudioSub
       : false,
+    iter_function: m.iterFunction,
     speed_mode: m.speedMode,
   };
 };
@@ -2191,6 +2215,7 @@ const addShareConfig = () => {
   shareConfigDialog.sharePath = '/';
   shareConfigDialog.localPath = '';
   shareConfigDialog.minFileSizeFormatted = '';
+  shareConfigDialog.iterFunction = 'iter_share_files_with_path';
   shareConfigDialog.speedMode = 3;
   shareConfigDialog.moviepilotTransfer = false;
   shareConfigDialog.moviepilotTransferDownloadRmtAudioSub = false;
@@ -2213,6 +2238,7 @@ const editShareConfig = (index) => {
   shareConfigDialog.sharePath = config.share_path || '/';
   shareConfigDialog.localPath = config.local_path || '';
   shareConfigDialog.minFileSizeFormatted = formatBytes(config.min_file_size || 0);
+  shareConfigDialog.iterFunction = config.iter_function || 'iter_share_files_with_path';
   shareConfigDialog.speedMode = config.speed_mode !== undefined ? config.speed_mode : 3;
   shareConfigDialog.moviepilotTransfer = config.moviepilot_transfer || false;
   shareConfigDialog.moviepilotTransferDownloadRmtAudioSub =
@@ -2285,6 +2311,7 @@ const saveShareConfig = () => {
     return;
   }
 
+  const detailed = shareConfigDialog.iterFunction === 'iter_share_files_with_path';
   const config = {
     comment: shareConfigDialog.comment || null,
     enabled: shareConfigDialog.enabled,
@@ -2294,12 +2321,15 @@ const saveShareConfig = () => {
     share_path: shareConfigDialog.sharePath || null,
     local_path: shareConfigDialog.localPath,
     min_file_size: parseSize(shareConfigDialog.minFileSizeFormatted) || null,
+    iter_function: shareConfigDialog.iterFunction,
     speed_mode: shareConfigDialog.speedMode,
     moviepilot_transfer: shareConfigDialog.moviepilotTransfer,
-    moviepilot_transfer_download_rmt_audio_sub: shareConfigDialog.moviepilotTransfer
+    moviepilot_transfer_download_rmt_audio_sub: detailed && shareConfigDialog.moviepilotTransfer
       ? shareConfigDialog.moviepilotTransferDownloadRmtAudioSub
       : false,
-    auto_download_mediainfo: shareConfigDialog.moviepilotTransfer ? false : shareConfigDialog.autoDownloadMediainfo,
+    auto_download_mediainfo: detailed && !shareConfigDialog.moviepilotTransfer
+      ? shareConfigDialog.autoDownloadMediainfo
+      : false,
     media_server_refresh: shareConfigDialog.moviepilotTransfer ? false : shareConfigDialog.mediaServerRefresh,
     scrape_metadata: shareConfigDialog.moviepilotTransfer ? false : shareConfigDialog.scrapeMetadata,
   };
@@ -2902,6 +2932,33 @@ async function fetchUserStorageStatus() {
    页面组件样式 - 镜面效果 + 蓝粉白配色
    ============================================ */
 
+.command-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid rgb(var(--v-theme-info));
+  border-radius: 6px;
+  background: rgba(var(--v-theme-info), 0.06);
+}
+
+.mp-config-help {
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 6px;
+  background: rgba(var(--v-theme-surface-variant), 0.2);
+}
+
+.mp-config-help summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.mp-config-help[open] summary {
+  margin-bottom: 10px;
+}
+
 /* 动画关键帧定义 */
 @keyframes cardEnter {
   0% {
@@ -2976,6 +3033,18 @@ async function fetchUserStorageStatus() {
 }
 
 .plugin-page {
+  --p115-surface-opacity: 0.92;
+  --p115-raised-opacity: 0.97;
+  --p115-muted-opacity: 0.06;
+  --p115-control-opacity: 0.72;
+  --p115-border-opacity: var(--v-border-opacity, 0.12);
+  --p115-surface-blur: 18px;
+  --p115-soft-shadow:
+    0 8px 28px rgba(91, 207, 250, 0.16),
+    0 2px 8px rgba(245, 171, 185, 0.1);
+  --p115-raised-shadow:
+    0 12px 32px rgba(91, 207, 250, 0.24),
+    0 4px 12px rgba(245, 171, 185, 0.16);
   padding: 12px;
   width: 100%;
   max-width: 100%;
@@ -2987,21 +3056,46 @@ async function fetchUserStorageStatus() {
   overflow: hidden;
 }
 
+:global(html[data-theme='transparent']) .plugin-page,
+:global(.v-theme--transparent) .plugin-page {
+  --p115-surface-opacity: var(--transparent-opacity, 0.3);
+  --p115-raised-opacity: var(--transparent-opacity-heavy, 0.5);
+  --p115-muted-opacity: var(--transparent-opacity-light, 0.2);
+  --p115-control-opacity: var(--transparent-opacity-light, 0.2);
+  --p115-surface-blur: var(--transparent-blur, 10px);
+  --p115-soft-shadow:
+    0 8px 28px rgba(91, 207, 250, 0.18),
+    0 2px 8px rgba(245, 171, 185, 0.12);
+  --p115-raised-shadow:
+    0 12px 36px rgba(91, 207, 250, 0.26),
+    0 4px 12px rgba(245, 171, 185, 0.18);
+}
+
+:global(html[data-theme='transparent']) {
+  --p115-surface-opacity: var(--transparent-opacity, 0.3);
+  --p115-raised-opacity: var(--transparent-opacity-heavy, 0.5);
+  --p115-muted-opacity: var(--transparent-opacity-light, 0.2);
+  --p115-control-opacity: var(--transparent-opacity-light, 0.2);
+  --p115-surface-blur: var(--transparent-blur, 10px);
+  --p115-soft-shadow:
+    0 8px 28px rgba(91, 207, 250, 0.18),
+    0 2px 8px rgba(245, 171, 185, 0.12);
+  --p115-raised-shadow:
+    0 12px 36px rgba(91, 207, 250, 0.26),
+    0 4px 12px rgba(245, 171, 185, 0.18);
+}
+
 .plugin-page :deep(.v-card) {
   border-radius: 20px !important;
   overflow: hidden;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  /* 镜面效果 - 动态适配主题 */
-  background: rgba(var(--v-theme-surface), 0.75) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  box-shadow:
-    0 8px 32px rgba(91, 207, 250, 0.2),
-    0 2px 8px rgba(245, 171, 185, 0.15),
-    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.05) !important;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
+  background: rgba(var(--v-theme-surface), var(--p115-surface-opacity)) !important;
+  backdrop-filter: blur(var(--p115-surface-blur)) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(var(--p115-surface-blur)) saturate(130%) !important;
+  box-shadow: var(--p115-soft-shadow) !important;
+  border: 1px solid rgba(91, 207, 250, 0.2) !important;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
   animation: cardEnter 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   will-change: transform, box-shadow;
@@ -3021,64 +3115,24 @@ async function fetchUserStorageStatus() {
   }
 }
 
-/* 暗色模式下的主卡片 */
-:deep(.v-theme--dark) .plugin-page .v-card,
-:deep([data-theme="dark"]) .plugin-page .v-card {
-  background: rgba(var(--v-theme-surface), 0.8) !important;
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  box-shadow:
-    0 8px 32px rgba(91, 207, 250, 0.3),
-    0 2px 8px rgba(245, 171, 185, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-}
-
 .config-card {
   border-radius: 16px !important;
-  /* 镜面效果 - 动态适配主题 */
-  background: rgba(var(--v-theme-surface), 0.7) !important;
-  backdrop-filter: blur(15px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(15px) saturate(180%) !important;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
-  box-shadow:
-    0 4px 16px rgba(91, 207, 250, 0.18),
-    0 1px 4px rgba(245, 171, 185, 0.12),
-    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.05) !important;
+  background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
+  backdrop-filter: blur(var(--p115-surface-blur)) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(var(--p115-surface-blur)) saturate(125%) !important;
+  border: 1px solid rgba(91, 207, 250, 0.18) !important;
+  box-shadow: var(--p115-soft-shadow) !important;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
   margin-bottom: 16px !important;
   overflow: hidden;
   will-change: transform, box-shadow;
 }
 
-/* 暗色模式下的配置卡片 */
-:deep(.v-theme--dark) .config-card,
-:deep([data-theme="dark"]) .config-card {
-  background: rgba(var(--v-theme-surface), 0.75) !important;
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
-  box-shadow:
-    0 4px 16px rgba(91, 207, 250, 0.25),
-    0 1px 4px rgba(245, 171, 185, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-}
-
 .config-card:hover {
-  transform: translateY(-6px) scale(1.015);
-  box-shadow:
-    0 16px 40px rgba(91, 207, 250, 0.35),
-    0 6px 16px rgba(245, 171, 185, 0.25),
-    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.1) !important;
+  transform: translateY(-3px);
+  box-shadow: var(--p115-raised-shadow) !important;
   border-color: rgba(91, 207, 250, 0.5) !important;
-  background: rgba(var(--v-theme-surface), 0.8) !important;
-}
-
-/* 暗色模式下的配置卡片悬停状态 */
-:deep(.v-theme--dark) .config-card:hover,
-:deep([data-theme="dark"]) .config-card:hover {
-  background: rgba(var(--v-theme-surface), 0.85) !important;
-  border-color: rgba(91, 207, 250, 0.6) !important;
-  box-shadow:
-    0 16px 40px rgba(91, 207, 250, 0.45),
-    0 6px 16px rgba(245, 171, 185, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
 }
 
 /* 现代字体栈 */
@@ -3720,6 +3774,249 @@ async function fetchUserStorageStatus() {
   :deep(.sync-del-history-content .v-list) {
     max-height: none !important;
     overflow-y: visible !important;
+  }
+}
+
+.dialog-title-surface,
+.section-title-surface {
+  color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity)) !important;
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.14),
+      rgba(245, 171, 185, 0.1)),
+    rgba(var(--v-theme-surface), var(--p115-surface-opacity)) !important;
+  border-bottom: 1px solid rgba(91, 207, 250, 0.22);
+}
+
+.bg-primary-gradient {
+  color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity)) !important;
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.2),
+      rgba(245, 171, 185, 0.16)),
+    rgba(var(--v-theme-surface), var(--p115-surface-opacity)) !important;
+  border-bottom-color: rgba(91, 207, 250, 0.24) !important;
+  box-shadow: inset 0 1px 0 rgba(245, 171, 185, 0.12) !important;
+}
+
+.command-hint,
+.mp-config-help {
+  color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity));
+  background: rgba(var(--v-theme-surface), var(--p115-control-opacity));
+  border-color: rgba(91, 207, 250, 0.22);
+  backdrop-filter: blur(var(--p115-surface-blur));
+  -webkit-backdrop-filter: blur(var(--p115-surface-blur));
+}
+
+.command-hint {
+  border-left-color: rgb(91, 207, 250);
+}
+
+.plugin-page :deep(.v-expansion-panel),
+.plugin-page :deep(.v-list),
+.plugin-page :deep(.v-table),
+.plugin-page :deep(.v-data-table) {
+  color: rgb(var(--v-theme-on-surface));
+  background: rgba(var(--v-theme-surface), var(--p115-surface-opacity)) !important;
+}
+
+.plugin-page :deep(.v-field) {
+  background: rgba(var(--v-theme-surface), var(--p115-control-opacity));
+}
+
+.plugin-page :deep(.v-field--focused) {
+  box-shadow:
+    0 0 0 3px rgba(91, 207, 250, 0.18),
+    0 2px 8px rgba(245, 171, 185, 0.1) !important;
+}
+
+.plugin-page :deep(.v-chip) {
+  color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity)) !important;
+  background: rgba(var(--v-theme-surface), var(--p115-control-opacity)) !important;
+  border-color: rgba(var(--v-border-color), var(--p115-border-opacity)) !important;
+  box-shadow: none !important;
+}
+
+.plugin-page :deep(.v-chip--selected),
+.plugin-page :deep(.v-chip:hover) {
+  color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity)) !important;
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.2),
+      rgba(245, 171, 185, 0.16)) !important;
+  border-color: rgba(91, 207, 250, 0.36) !important;
+  box-shadow: 0 4px 12px rgba(91, 207, 250, 0.18) !important;
+}
+
+.plugin-page :deep(.v-list-item:hover) {
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.14),
+      rgba(245, 171, 185, 0.1)) !important;
+  box-shadow: inset 2px 0 0 rgba(91, 207, 250, 0.42) !important;
+}
+
+.plugin-page :deep(.v-btn) {
+  box-shadow: none !important;
+}
+
+.plugin-page :deep(.v-btn:hover) {
+  box-shadow:
+    0 6px 16px rgba(91, 207, 250, 0.22),
+    0 2px 8px rgba(245, 171, 185, 0.14) !important;
+}
+
+.plugin-page :deep(.v-btn--variant-elevated),
+.plugin-page :deep(.v-btn--variant-flat) {
+  background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
+}
+
+.plugin-page :deep(.v-alert) {
+  background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
+  border-color: rgba(91, 207, 250, 0.2) !important;
+  border-inline-start: 3px solid currentColor !important;
+  box-shadow: none !important;
+}
+
+.plugin-page :deep(.v-alert:hover) {
+  box-shadow: var(--p115-soft-shadow) !important;
+}
+
+.sticky-actions {
+  background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
+  border-top-color: rgba(91, 207, 250, 0.22) !important;
+  box-shadow:
+    0 -8px 24px rgba(91, 207, 250, 0.16),
+    0 -2px 8px rgba(245, 171, 185, 0.1) !important;
+  backdrop-filter: blur(var(--p115-surface-blur)) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(var(--p115-surface-blur)) saturate(130%) !important;
+}
+
+@media (max-width: 768px) {
+  .plugin-page :deep(.v-dialog > .v-card) {
+    color: rgb(var(--v-theme-on-surface));
+    background: rgba(var(--v-theme-surface), var(--p115-raised-opacity)) !important;
+    border-color: rgba(var(--v-border-color), var(--p115-border-opacity)) !important;
+    box-shadow: var(--p115-raised-shadow) !important;
+  }
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-card) {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  box-shadow:
+    0 8px 32px rgba(91, 207, 250, 0.2),
+    0 2px 8px rgba(245, 171, 185, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+:global(html[data-theme='light']) .config-card {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow:
+    0 4px 16px rgba(91, 207, 250, 0.18),
+    0 1px 4px rgba(245, 171, 185, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+:global(html[data-theme='light']) .config-card:hover {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-color: rgba(91, 207, 250, 0.5) !important;
+  box-shadow:
+    0 14px 36px rgba(91, 207, 250, 0.3),
+    0 5px 14px rgba(245, 171, 185, 0.22) !important;
+}
+
+:global(html[data-theme='light']) .bg-primary-gradient,
+:global(html[data-theme='light']) .dialog-title-surface {
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.25),
+      rgba(245, 171, 185, 0.2) 55%,
+      rgba(255, 184, 201, 0.15)) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.45) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+:global(html[data-theme='light']) .section-title-surface {
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.12),
+      rgba(245, 171, 185, 0.09)),
+    rgba(255, 255, 255, 0.62) !important;
+  border-bottom-color: rgba(91, 207, 250, 0.18) !important;
+}
+
+:global(html[data-theme='light']) .command-hint,
+:global(html[data-theme='light']) .mp-config-help {
+  background: rgba(255, 255, 255, 0.66);
+  border-color: rgba(91, 207, 250, 0.22);
+}
+
+:global(html[data-theme='light']) .command-hint {
+  border-left-color: rgb(91, 207, 250);
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-expansion-panel),
+:global(html[data-theme='light']) .plugin-page :deep(.v-list),
+:global(html[data-theme='light']) .plugin-page :deep(.v-table),
+:global(html[data-theme='light']) .plugin-page :deep(.v-data-table) {
+  background: rgba(255, 255, 255, 0.68) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-field) {
+  background: rgba(255, 255, 255, 0.58);
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-field--focused) {
+  box-shadow: 0 0 0 3px rgba(91, 207, 250, 0.2) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-chip) {
+  background: rgba(255, 255, 255, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.48) !important;
+  box-shadow:
+    0 2px 6px rgba(91, 207, 250, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-chip--selected),
+:global(html[data-theme='light']) .plugin-page :deep(.v-chip:hover) {
+  color: rgba(var(--v-theme-on-surface), 0.87) !important;
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.25),
+      rgba(245, 171, 185, 0.2)) !important;
+  border-color: rgba(91, 207, 250, 0.32) !important;
+  box-shadow: 0 4px 12px rgba(91, 207, 250, 0.25) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-list-item:hover) {
+  background: linear-gradient(135deg,
+      rgba(91, 207, 250, 0.16),
+      rgba(245, 171, 185, 0.11)) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-btn:hover) {
+  box-shadow:
+    0 6px 16px rgba(91, 207, 250, 0.3),
+    0 2px 8px rgba(245, 171, 185, 0.24) !important;
+}
+
+:global(html[data-theme='light']) .plugin-page :deep(.v-btn--variant-elevated),
+:global(html[data-theme='light']) .plugin-page :deep(.v-btn--variant-flat),
+:global(html[data-theme='light']) .plugin-page :deep(.v-alert) {
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+
+:global(html[data-theme='light']) .sticky-actions {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-top-color: rgba(91, 207, 250, 0.2) !important;
+  box-shadow:
+    0 -4px 16px rgba(91, 207, 250, 0.22),
+    0 -2px 8px rgba(245, 171, 185, 0.16) !important;
+}
+
+@media (max-width: 768px) {
+  :global(html[data-theme='light']) .plugin-page :deep(.v-dialog > .v-card) {
+    background: rgba(255, 255, 255, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    box-shadow:
+      0 12px 48px rgba(91, 207, 250, 0.28),
+      0 4px 16px rgba(245, 171, 185, 0.22) !important;
   }
 }
 </style>
