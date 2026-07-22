@@ -2027,6 +2027,12 @@ class P115StrmHelper(_PluginBase):
         if data.cancel:
             return
 
+        fileitem = data.fileitem
+        if fileitem.type == "file" and fileitem.extension:
+            extension = f".{fileitem.extension.lower()}"
+            if extension in settings.RMT_SUBEXT or extension in settings.RMT_AUDIOEXT:
+                return
+
         mediainfo = data.mediainfo
         if not mediainfo:
             return
