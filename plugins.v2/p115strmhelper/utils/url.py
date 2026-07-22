@@ -2,7 +2,7 @@ __all__ = ["Url", "UrlUtils"]
 
 
 from typing import Any, Dict, Self
-from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 class Url(str):
@@ -96,29 +96,15 @@ class UrlUtils:
     @staticmethod
     def encode_url_fully(url: str) -> str:
         """
-        对标准 URL 的路径、query、fragment 做百分号编码
+        对 URL 中的非 ASCII 字符和空白字符做百分号编码
+
+        保留 URL 保留字符和已有百分号转义，避免改变签名查询串
 
         :param url (str): 完整 URL
 
-        :return str: 编码后的 URL；解析或编码失败时返回原字符串
+        :return str: 编码后的 URL
         """
-        try:
-            parsed_url = urlparse(url)
-            encoded_path = quote(parsed_url.path, safe="/")
-            query_dict = parse_qs(parsed_url.query, keep_blank_values=True)
-            encoded_query = urlencode(query_dict, doseq=True)
-            encoded_fragment = quote(parsed_url.fragment)
-            encoded_url_parts = (
-                parsed_url.scheme,
-                parsed_url.netloc,
-                encoded_path,
-                parsed_url.params,
-                encoded_query,
-                encoded_fragment,
-            )
-            return urlunparse(encoded_url_parts)
-        except Exception:
-            return url
+        return quote(url, safe=":/?#@!$&'()*+,;=%")
 
     @staticmethod
     def parse_query_params(url: str) -> Dict[str, str]:

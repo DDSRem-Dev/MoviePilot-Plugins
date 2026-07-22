@@ -117,6 +117,21 @@ class TestEncodeUrlFully(TestCase):
         self.assertIn("example.com:8080", result)
         self.assertNotIn(" ", result)  # 空格应被编码
 
+    def test_non_ascii_url_is_header_safe(self):
+        """测试非 ASCII URL 可安全写入响应头"""
+        url = "https://example.com/国产剧/生命树.mkv?name=生命树"
+        result = UrlUtils.encode_url_fully(url)
+
+        result.encode("ascii")
+        self.assertIn("%E5%9B%BD%E4%BA%A7%E5%89%A7", result)
+        self.assertIn("name=%E7%94%9F%E5%91%BD%E6%A0%91", result)
+
+    def test_signed_query_is_preserved(self):
+        """测试签名查询串及已有转义保持不变"""
+        url = "https://example.com/file.mkv?t=123&sign=a%2Fb%2Bc%3D"
+
+        self.assertEqual(UrlUtils.encode_url_fully(url), url)
+
     def test_invalid_url_fallback(self):
         """测试无效 URL 回退"""
         # URL 编码函数会尝试解析并编码，如果完全无法解析则返回原值

@@ -87,6 +87,7 @@ from .schemas.strm_exec_history import DeleteStrmSyncHistoryPayload
 from .core.history import StrmExecHistoryManager
 from .schemas.fuse import FuseMountPayload, FuseStatusData
 from .utils.sentry import sentry_manager
+from .utils.url import UrlUtils
 
 from app.log import logger
 from app.core.cache import cached, TTLCache
@@ -842,10 +843,11 @@ class Api:
             encoded_filename = quote(file_name, safe="")
             content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
 
+        redirect_url = UrlUtils.encode_url_fully(str(url))
         return Response(
             status_code=status.HTTP_302_FOUND,
             headers={
-                "Location": url,
+                "Location": redirect_url,
                 "Content-Disposition": content_disposition,
             },
             media_type="application/json; charset=utf-8",
