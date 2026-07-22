@@ -6,7 +6,6 @@ from pathlib import Path
 from re import search as re_search
 from typing import Any, List, Dict, Tuple, Optional, Union
 
-from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
@@ -45,7 +44,11 @@ from .api import Api
 from .service import servicer
 from .service.hdhive_checkin.job import run_hdhive_checkin_once
 from .service.p115_checkin.job import run_p115_checkin_once
-from .core.cache import pantransfercacher, sharestrmcacher
+from .core.cache import (
+    pantransfercacher,
+    rename_media_fields_cacher,
+    sharestrmcacher,
+)
 from .core.config import configer
 from .core.i18n import i18n
 from .core.message import post_message
@@ -115,9 +118,7 @@ class P115StrmHelper(_PluginBase):
 
     api = None
     mcp_manager = None
-    _rename_media_fields_cache = TTLCache(
-        region="p115strmhelper_rename_media_fields", maxsize=2048, ttl=3600
-    )
+    _rename_media_fields_cache = rename_media_fields_cacher
 
     @staticmethod
     def logs_oper(oper_name: str):

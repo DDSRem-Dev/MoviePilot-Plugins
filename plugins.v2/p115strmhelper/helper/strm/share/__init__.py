@@ -52,6 +52,7 @@
 - 数据上传仅在成功处理所有文件且无异常时执行
 """
 
+from .audit_download_queue import share_audit_download_queue
 from .cleaner import (
     share_strm_cleaner,
     share_strm_cleanup_summary_store,
@@ -63,6 +64,7 @@ from .create import ShareStrmHelper, ShareInteractiveGenStrmQueue
 __all__ = [
     "ShareInteractiveGenStrmQueue",
     "ShareStrmHelper",
+    "share_audit_download_queue",
     "share_strm_cleaner",
     "share_strm_cleanup_summary_store",
     "share_strm_missing_media_store",

@@ -31,7 +31,7 @@ from ..helper.strm import (
     ShareInteractiveGenStrmQueue,
     ShareStrmHelper,
 )
-from ..helper.strm.share import share_strm_cleaner
+from ..helper.strm.share import share_audit_download_queue, share_strm_cleaner
 from ..helper.transfer import TransferTaskManager, TransferHandler
 from ..helper.webdav import WebdavCore
 from ..helper.mediaserver import emby_mediainfo_queue
@@ -142,6 +142,7 @@ class ServiceHelper:
             self.share_interactive_gen_strm_queue.bind_mediainfodownloader(
                 self.mediainfodownloader
             )
+            share_audit_download_queue.bind_downloader(self.mediainfodownloader)
 
             # 生活事件监控初始化
             self.monitorlife = MonitorLife(
@@ -182,6 +183,9 @@ class ServiceHelper:
 
             # 启动 Emby 媒体信息提取全局队列 worker
             emby_mediainfo_queue.start()
+
+            if configer.share_audit_queue_enabled:
+                share_audit_download_queue.start()
 
             return True
         except Exception as e:
@@ -827,6 +831,10 @@ class ServiceHelper:
                 sync_del_webhook_queue.stop()
             except Exception as e:
                 logger.debug(f"【同步删除 Webhook 队列】停止 worker 异常: {e}")
+            try:
+                share_audit_download_queue.stop()
+            except Exception as e:
+                logger.debug(f"【分享审核下载】停止 worker 异常: {e}")
             try:
                 TransferChainPatcher.disable()
             except Exception as e:

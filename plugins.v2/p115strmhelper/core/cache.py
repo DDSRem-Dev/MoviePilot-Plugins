@@ -2,6 +2,7 @@ __all__ = [
     "idpathcacher",
     "pantransfercacher",
     "sharestrmcacher",
+    "rename_media_fields_cacher",
     "r302cacher",
     "DirectoryCache",
     "OofFastMiCache",
@@ -554,3 +555,6 @@ idpathcacher = IdPathCache(maxsize=4096)
 pantransfercacher = PanTransferCache()
 sharestrmcacher = ShareStrmCache()
 r302cacher = R302Cache(maxsize=8096)
+rename_media_fields_cacher = TTLCache(
+    region="p115strmhelper_rename_media_fields", maxsize=2048, ttl=36000
+)

@@ -278,6 +278,15 @@ class ConfigManager(BaseModel):
             self.hdhive_checkin_gamble_enabled = False
         return self
 
+    @model_validator(mode="after")
+    def _validate_share_audit_wait(self) -> "ConfigManager":
+        """
+        校验分享审核重试间隔不超过最长等待时间
+        """
+        if self.share_audit_retry_interval_seconds > self.share_audit_max_wait_seconds:
+            raise ValueError("分享审核重试间隔不能超过最长等待时间")
+        return self
+
     PLUSIN_NAME: str = Field(
         default="P115StrmHelper", min_length=1, description="插件名称"
     )
@@ -569,6 +578,21 @@ class ConfigManager(BaseModel):
     )
     share_strm_mp_mediaserver_paths: Optional[str] = Field(
         default=None, description="MP-媒体库 目录转换"
+    )
+    share_audit_queue_enabled: bool = Field(
+        default=True, description="分享文件审核等待队列开关"
+    )
+    share_audit_max_wait_seconds: int = Field(
+        default=6 * 60 * 60,
+        ge=60,
+        le=7 * 24 * 60 * 60,
+        description="分享文件审核最长等待时间（秒）",
+    )
+    share_audit_retry_interval_seconds: int = Field(
+        default=30 * 60,
+        ge=60,
+        le=6 * 60 * 60,
+        description="分享文件审核重试间隔（秒）",
     )
     share_interactive_gen_strm_config: ShareInteractiveGenStrmConfig = Field(
         default_factory=ShareInteractiveGenStrmConfig,

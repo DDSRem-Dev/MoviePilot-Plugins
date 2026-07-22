@@ -122,9 +122,9 @@ class MediaInfoDownloader:
                 self._record_mediainfo_failure(Path(path).as_posix())
 
     @staticmethod
-    async def async_is_file_leq_1k(file_path: str | Path) -> bool:
+    async def async_is_file_leq_100b(file_path: str | Path) -> bool:
         """
-        判断文件是否小于等于 100B
+        判断文件是否小于等于 100 B
 
         如果文件不存在，返回 True
         """
@@ -314,7 +314,7 @@ class MediaInfoDownloader:
                                 await f.write(chunk)
                                 file_content_buffer.extend(chunk)
 
-                    if await self.async_is_file_leq_1k(file_path):
+                    if await self.async_is_file_leq_100b(file_path):
                         raise DownloadValidationFail(
                             f"【媒体信息文件下载】文件 {file_name} 在下载后验证失败"
                         )

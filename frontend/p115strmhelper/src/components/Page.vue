@@ -826,6 +826,27 @@
                   auto-grow placeholder="例如:&#10;/media#/mp&#10;/nas#/movie"></v-textarea>
               </v-col>
             </v-row>
+            <v-divider class="my-4"></v-divider>
+            <v-row>
+              <v-col cols="12">
+                <v-switch v-model="shareDialog.auditQueueEnabled" label="启用分享文件审核等待队列" color="primary"
+                  density="compact" hint="分享文件仍在审核时转入后台队列，审核通过后自动下载" persistent-hint />
+              </v-col>
+            </v-row>
+            <v-expand-transition>
+              <v-row v-if="shareDialog.auditQueueEnabled" class="mt-2">
+                <v-col cols="12" md="6">
+                  <v-text-field v-model.number="shareDialog.auditMaxWaitHours" label="最长审核等待时间(小时)" type="number"
+                    min="1" max="168" density="compact" hint="超过该时间后终止等待并记录失败" persistent-hint
+                    variant="outlined" />
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field v-model.number="shareDialog.auditRetryIntervalMinutes" label="审核检查间隔(分钟)" type="number"
+                    min="1" max="360" density="compact" hint="默认每 30 分钟检查一次" persistent-hint
+                    variant="outlined" />
+                </v-col>
+              </v-row>
+            </v-expand-transition>
           </v-card-text>
         </v-card>
 
@@ -1999,6 +2020,9 @@ const shareDialog = reactive({
   globalMediaservers: [],
   globalMediaServerRefreshDelay: 0,
   globalMpMediaserverPaths: '',
+  auditQueueEnabled: true,
+  auditMaxWaitHours: 6,
+  auditRetryIntervalMinutes: 30,
   interactiveGenStrm: defaultInteractiveGenStrm(),
   /** 分享同步对话框内「分享交互生成 STRM」折叠面板展开项 */
   shareInteractiveGenStrmExpanded: [],
@@ -2092,6 +2116,15 @@ const openShareDialog = () => {
       : [];
     shareDialog.globalMpMediaserverPaths = props.initialConfig.share_strm_mp_mediaserver_paths || '';
     shareDialog.globalMediaServerRefreshDelay = props.initialConfig.share_strm_media_server_refresh_delay || 0;
+    shareDialog.auditQueueEnabled = props.initialConfig.share_audit_queue_enabled !== false;
+    shareDialog.auditMaxWaitHours = Math.max(
+      1,
+      Math.round((props.initialConfig.share_audit_max_wait_seconds || 21600) / 3600),
+    );
+    shareDialog.auditRetryIntervalMinutes = Math.max(
+      1,
+      Math.round((props.initialConfig.share_audit_retry_interval_seconds || 1800) / 60),
+    );
 
     const ig = props.initialConfig.share_interactive_gen_strm_config || {};
     shareDialog.interactiveGenStrm.minFileSizeFormatted = formatBytes(ig.min_file_size || 0);
@@ -2132,6 +2165,21 @@ const flushShareInteractiveGenStrmToInitialConfig = () => {
     iter_function: m.iterFunction,
     speed_mode: m.speedMode,
   };
+};
+
+const flushShareAuditQueueToInitialConfig = () => {
+  if (!props.initialConfig) return;
+  const maxWaitHours = Math.max(1, Number(shareDialog.auditMaxWaitHours) || 6);
+  const retryIntervalMinutes = Math.max(
+    1,
+    Number(shareDialog.auditRetryIntervalMinutes) || 30,
+  );
+  if (retryIntervalMinutes * 60 > maxWaitHours * 3600) {
+    throw new Error('审核检查间隔不能超过最长审核等待时间');
+  }
+  props.initialConfig.share_audit_queue_enabled = shareDialog.auditQueueEnabled;
+  props.initialConfig.share_audit_max_wait_seconds = maxWaitHours * 3600;
+  props.initialConfig.share_audit_retry_interval_seconds = retryIntervalMinutes * 60;
 };
 
 const flushShareStrmCleanupToInitialConfig = () => {
@@ -2275,6 +2323,7 @@ const saveShareConfigs = async () => {
         : null;
       props.initialConfig.share_strm_mp_mediaserver_paths = shareDialog.globalMpMediaserverPaths || null;
       props.initialConfig.share_strm_media_server_refresh_delay = shareDialog.globalMediaServerRefreshDelay || 0;
+      flushShareAuditQueueToInitialConfig();
       flushShareInteractiveGenStrmToInitialConfig();
       flushShareStrmCleanupToInitialConfig();
 
@@ -2500,6 +2549,7 @@ const executeShareSync = async () => {
         : null;
       props.initialConfig.share_strm_mp_mediaserver_paths = shareDialog.globalMpMediaserverPaths || null;
       props.initialConfig.share_strm_media_server_refresh_delay = shareDialog.globalMediaServerRefreshDelay || 0;
+      flushShareAuditQueueToInitialConfig();
       flushShareInteractiveGenStrmToInitialConfig();
       flushShareStrmCleanupToInitialConfig();
 
