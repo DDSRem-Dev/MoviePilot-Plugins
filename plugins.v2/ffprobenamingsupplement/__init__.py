@@ -1,3 +1,4 @@
+from hashlib import sha256
 from json import JSONDecodeError, loads
 from pathlib import Path
 from re import IGNORECASE, search as re_search
@@ -20,9 +21,11 @@ class FFprobeNamingSupplement(_PluginBase):
     """
 
     plugin_name = "ffprobe命名补充"
-    plugin_desc = "整理重命名时调用 ffprobe，补全命名模板中的 videoFormat、videoCodec、videoBit、audioCodec、fps、effect，支持 STRM "
+    plugin_desc = (
+        "整理重命名时调用 ffprobe，统一补全视频及关联字幕、音轨的媒体参数，支持 STRM "
+    )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/ffmpeg.png"
-    plugin_version = "0.1.9"
+    plugin_version = "0.2.0"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "ffprobenamingsupplement_"
@@ -124,7 +127,53 @@ class FFprobeNamingSupplement(_PluginBase):
 
     _DV_CODEC_TAGS = frozenset({"dvh1", "dvhe", "dva1", "dvav"})
 
+    _SUBTITLE_STEM_TAGS = frozenset(
+        {
+            "cc",
+            "chi",
+            "chs",
+            "cht",
+            "cn",
+            "default",
+            "en",
+            "eng",
+            "english",
+            "forced",
+            "gb",
+            "gb2312",
+            "hk",
+            "ja",
+            "jap",
+            "japanese",
+            "jp",
+            "jpn",
+            "sc",
+            "sdh",
+            "tc",
+            "zh",
+            "zh-cn",
+            "zh-hans",
+            "zh-hant",
+            "zh-tw",
+            "zh_cn",
+            "zh_hans",
+            "zh_hant",
+            "zh_tw",
+            "zho",
+            "中英",
+            "中字",
+            "双语",
+            "简中",
+            "简体",
+            "繁中",
+            "繁体",
+        }
+    )
+
     _probe_cache = TTLCache(region="ffprobe_naming", maxsize=2048, ttl=3600)
+    _media_fields_cache = TTLCache(
+        region="ffprobe_naming_media_fields", maxsize=2048, ttl=3600
+    )
 
     def __init__(self) -> None:
         """
@@ -253,6 +302,8 @@ class FFprobeNamingSupplement(_PluginBase):
                                                 },
                                                 "text": (
                                                     "说明：仅在整理源文件位于本地存储时，才会调用 ffprobe 读取媒体信息；"
+                                                    "关联字幕和外挂音轨会复用同目录唯一同名视频的探测结果，"
+                                                    "无论视频或伴随文件先进入整理队列，均会生成一致的技术参数命名；"
                                                     "若来源为网盘等非本地路径，无法访问媒体流，将跳过补全"
                                                 ),
                                             },
@@ -358,8 +409,86 @@ class FFprobeNamingSupplement(_PluginBase):
         """
         try:
             cls._probe_cache.clear()
+            cls._media_fields_cache.clear()
         except Exception as e:
             logger.debug("【ffprobe命名补充】清理探测缓存失败 %s", e)
+
+    @classmethod
+    def _get_media_relation_key(cls, source_path: str, extension: str) -> str:
+        """
+        生成视频与同名伴随文件的源路径关联键
+
+        :param source_path (str): 当前整理源文件路径
+        :param extension (str): 当前文件扩展名
+
+        :return str: 源目录和主干名组成的关联键
+        """
+        parent = Path(source_path).parent.as_posix().casefold()
+        media_stem = cls._get_extra_media_stem(source_path, extension)
+        raw_key = f"{parent}\0{media_stem}"
+        return f"source:{sha256(raw_key.encode('utf-8')).hexdigest()}"
+
+    @classmethod
+    def _get_extra_media_stem(cls, source_path: str, extension: str) -> str:
+        """
+        获取字幕或外挂音轨对应的视频主干名
+
+        字幕会剥离语言、默认和强制字幕尾标，音轨沿用完整主干名
+
+        :param source_path (str): 伴随文件路径
+        :param extension (str): 伴随文件扩展名
+
+        :return str: 用于匹配主视频的主干名
+        """
+        current_stem = Path(source_path).stem.casefold()
+        if extension not in settings.RMT_SUBEXT:
+            return current_stem
+        while current_stem:
+            media_stem, separator, suffix = current_stem.rpartition(".")
+            if not separator or suffix not in cls._SUBTITLE_STEM_TAGS:
+                break
+            current_stem = media_stem
+        return current_stem
+
+    @classmethod
+    def _find_related_media_path(
+        cls, source_path: str, extension: str
+    ) -> Optional[str]:
+        """
+        在本地同目录查找与伴随文件唯一同名的主视频
+
+        :param source_path (str): 伴随文件路径
+        :param extension (str): 伴随文件扩展名
+
+        :return str: 唯一匹配的视频路径，未匹配或存在歧义时返回 None
+        """
+        extra_path = Path(source_path)
+        media_stem = cls._get_extra_media_stem(source_path, extension)
+        if not media_stem:
+            return None
+        try:
+            candidates = [
+                item
+                for item in extra_path.parent.iterdir()
+                if item.is_file()
+                and item.suffix.lower() in settings.RMT_MEDIAEXT
+                and item.stem.casefold() == media_stem
+            ]
+        except OSError as e:
+            logger.debug(
+                "【ffprobe命名补充】读取伴随文件目录失败 path=%s error=%s",
+                extra_path.parent,
+                e,
+            )
+            return None
+        if len(candidates) != 1:
+            if len(candidates) > 1:
+                logger.debug(
+                    "【ffprobe命名补充】伴随文件匹配到多个主视频，跳过补全 path=%s",
+                    source_path,
+                )
+            return None
+        return candidates[0].as_posix()
 
     @classmethod
     def _parse_frame_rate(cls, rate: Optional[str]) -> Optional[str]:
@@ -830,6 +959,26 @@ class FFprobeNamingSupplement(_PluginBase):
             logger.warning("【ffprobe命名补充】ffprobe JSON 解析失败: %s", e)
             return None
 
+    @classmethod
+    def _probe_media_fields(cls, source_path: str) -> Dict[str, str]:
+        """
+        探测媒体文件并返回重命名字段
+
+        :param source_path (str): 可由 ffprobe 读取的媒体或 STRM 文件路径
+
+        :return Dict: ffprobe 提取的重命名字段
+        """
+        probe_target = cls._resolve_probe_target(source_path)
+        if not probe_target:
+            return {}
+        probe_json = cls._probe_cache.get(probe_target)
+        if probe_json is None:
+            probe_json = cls._run_ffprobe(probe_target)
+            if probe_json is None:
+                return {}
+            cls._probe_cache.set(probe_target, probe_json)
+        return cls._probe_to_rename_fields(probe_json)
+
     @eventmanager.register(ChainEventType.TransferRenameBuild)
     def on_transfer_rename_build(self, event: Event) -> None:
         """
@@ -867,28 +1016,36 @@ class FFprobeNamingSupplement(_PluginBase):
             logger.debug("【ffprobe命名补充】圆盘整理跳过本次重命名补全")
             return
 
-        if Path(source_path).suffix.lower() not in settings.RMT_MEDIAEXT:
-            logger.debug("【ffprobe命名补充】文件后缀不是媒体文件，跳过本次重命名补全")
+        extension = Path(source_path).suffix.lower()
+        is_media = extension in settings.RMT_MEDIAEXT
+        is_extra = extension in settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+        if not is_media and not is_extra:
+            logger.debug("【ffprobe命名补充】文件后缀不受支持，跳过本次重命名补全")
             return
 
         cls = type(self)
-        probe_target = cls._resolve_probe_target(source_path)
-        if not probe_target:
-            return
-
-        probe_json = self._probe_cache.get(probe_target)
-        if probe_json is None:
-            probe_json = cls._run_ffprobe(probe_target)
-            if probe_json is None:
-                return
-            self._probe_cache.set(probe_target, probe_json)
-
-        fields = cls._probe_to_rename_fields(probe_json)
+        relation_key = cls._get_media_relation_key(source_path, extension)
+        fields: Dict[str, str] = {}
+        if is_media:
+            fields = cls._probe_media_fields(source_path)
+        else:
+            cached_fields = cls._media_fields_cache.get(relation_key)
+            if isinstance(cached_fields, dict):
+                fields = cached_fields
+            if not fields:
+                related_media_path = cls._find_related_media_path(
+                    source_path, extension
+                )
+                if related_media_path:
+                    fields = cls._probe_media_fields(related_media_path)
         if not fields:
             logger.debug(
-                "【ffprobe命名补充】未解析到可用媒体信息 target=%s", probe_target
+                "【ffprobe命名补充】未找到关联媒体或未解析到可用媒体信息 source=%s",
+                source_path,
             )
             return
+
+        cls._media_fields_cache.set(relation_key, fields)
 
         for key, val in fields.items():
             if cls._should_apply_key(self._overwrite_mode, key, rename_dict, val):

@@ -1,10 +1,11 @@
 __all__ = ["RenameDictUtils"]
 
-from re import IGNORECASE, search as re_search
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from hashlib import sha256
 from pathlib import Path
-from urllib.parse import unquote
+from re import IGNORECASE, search as re_search
 from subprocess import run, TimeoutExpired
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 from orjson import loads, JSONDecodeError
 
@@ -105,6 +106,138 @@ class RenameDictUtils:
     )
 
     _DV_CODEC_TAGS = frozenset({"dvh1", "dvhe", "dva1", "dvav"})
+
+    _SUBTITLE_STEM_TAGS = frozenset(
+        {
+            "cc",
+            "chi",
+            "chs",
+            "cht",
+            "cn",
+            "default",
+            "en",
+            "eng",
+            "english",
+            "forced",
+            "gb",
+            "gb2312",
+            "hk",
+            "ja",
+            "jap",
+            "japanese",
+            "jp",
+            "jpn",
+            "sc",
+            "sdh",
+            "tc",
+            "zh",
+            "zh-cn",
+            "zh-hans",
+            "zh-hant",
+            "zh-tw",
+            "zh_cn",
+            "zh_hans",
+            "zh_hant",
+            "zh_tw",
+            "zho",
+            "中英",
+            "中字",
+            "双语",
+            "简中",
+            "简体",
+            "繁中",
+            "繁体",
+        }
+    )
+
+    @classmethod
+    def get_extra_media_stem(
+        cls, source_path: str, extension: str, subtitle_exts: List[str]
+    ) -> str:
+        """
+        获取字幕或外挂音轨对应的视频主干名
+
+        :param source_path (str): 伴随文件路径
+        :param extension (str): 伴随文件扩展名
+        :param subtitle_exts (List): 字幕扩展名列表
+
+        :return str: 用于匹配主视频的主干名
+        """
+        current_stem = Path(source_path).stem.casefold()
+        if extension not in subtitle_exts:
+            return current_stem
+        while current_stem:
+            media_stem, separator, suffix = current_stem.rpartition(".")
+            if not separator or suffix not in cls._SUBTITLE_STEM_TAGS:
+                break
+            current_stem = media_stem
+        return current_stem
+
+    @classmethod
+    def get_media_relation_key(
+        cls,
+        source_path: str,
+        extension: str,
+        subtitle_exts: List[str],
+        storage: Optional[str] = None,
+    ) -> str:
+        """
+        生成视频与同名伴随文件的源路径关联键
+
+        :param source_path (str): 当前整理源文件路径
+        :param extension (str): 当前文件扩展名
+        :param subtitle_exts (List): 字幕扩展名列表
+        :param storage (str): 当前文件存储类型
+
+        :return str: 源目录和主干名组成的关联键
+        """
+        parent = Path(source_path).parent.as_posix().casefold()
+        media_stem = cls.get_extra_media_stem(source_path, extension, subtitle_exts)
+        storage_key = str(storage or "local").strip().casefold()
+        raw_key = f"{storage_key}\0{parent}\0{media_stem}"
+        return f"source:{sha256(raw_key.encode('utf-8')).hexdigest()}"
+
+    @classmethod
+    def find_related_media_item(
+        cls,
+        source_path: str,
+        extension: str,
+        sibling_items: List[Any],
+        media_exts: List[str],
+        subtitle_exts: List[str],
+    ) -> Optional[Any]:
+        """
+        从同目录文件中查找与伴随文件唯一同名的主视频
+
+        :param source_path (str): 伴随文件路径
+        :param extension (str): 伴随文件扩展名
+        :param sibling_items (List): 同目录文件项列表
+        :param media_exts (List): 主视频扩展名列表
+        :param subtitle_exts (List): 字幕扩展名列表
+
+        :return Any: 唯一匹配的视频文件项，未匹配或存在歧义时返回 None
+        """
+        media_stem = cls.get_extra_media_stem(source_path, extension, subtitle_exts)
+        if not media_stem:
+            return None
+        candidates = []
+        for item in sibling_items or []:
+            if not item or getattr(item, "type", None) != "file":
+                continue
+            item_path = Path(str(getattr(item, "path", "") or ""))
+            item_extension = getattr(item, "extension", None)
+            item_suffix = (
+                f".{str(item_extension).lower().lstrip('.')}"
+                if item_extension
+                else item_path.suffix.lower()
+            )
+            item_name = getattr(item, "name", None) or item_path.name
+            if (
+                item_suffix in media_exts
+                and Path(item_name).stem.casefold() == media_stem
+            ):
+                candidates.append(item)
+        return candidates[0] if len(candidates) == 1 else None
 
     @staticmethod
     def _parse_frame_rate(rate: Optional[str]) -> Optional[str]:

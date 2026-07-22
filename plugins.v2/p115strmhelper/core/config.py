@@ -746,7 +746,7 @@ class ConfigManager(BaseModel):
     )
     rename_dict_supplement_enabled: bool = Field(
         default=False,
-        description="媒体元数据补充",
+        description="媒体元数据补充，关联字幕和外挂音轨自动复用同名视频参数",
     )
     rename_dict_supplement_overwrite_mode: Literal["fill_missing", "always"] = Field(
         default="fill_missing",

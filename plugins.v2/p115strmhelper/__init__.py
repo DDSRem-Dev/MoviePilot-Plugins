@@ -6,6 +6,7 @@ from pathlib import Path
 from re import search as re_search
 from typing import Any, List, Dict, Tuple, Optional, Union
 
+from app.core.cache import TTLCache
 from app.core.config import settings
 from app.core.event import eventmanager, Event
 from app.log import logger
@@ -114,6 +115,9 @@ class P115StrmHelper(_PluginBase):
 
     api = None
     mcp_manager = None
+    _rename_media_fields_cache = TTLCache(
+        region="p115strmhelper_rename_media_fields", maxsize=2048, ttl=3600
+    )
 
     @staticmethod
     def logs_oper(oper_name: str):
@@ -1841,8 +1845,12 @@ class P115StrmHelper(_PluginBase):
             logger.debug("【媒体数据补充】圆盘整理跳过本次重命名补全")
             return
 
-        if Path(source_path).suffix.lower() not in settings.RMT_MEDIAEXT:
-            logger.debug("【媒体数据补充】文件后缀不是媒体文件，跳过本次重命名补全")
+        source_path = str(source_path).strip()
+        extension = Path(source_path).suffix.lower()
+        is_media = extension in settings.RMT_MEDIAEXT
+        is_extra = extension in settings.RMT_SUBEXT + settings.RMT_AUDIOEXT
+        if not is_media and not is_extra:
+            logger.debug("【媒体数据补充】文件后缀不受支持，跳过本次重命名补全")
             return
 
         def share_strm_center(url: str) -> Optional[Dict[str, Any]]:
@@ -1881,52 +1889,107 @@ class P115StrmHelper(_PluginBase):
                 logger.warning(f"【媒体数据补充】{url} 中心化获取媒体信息失败: {e}")
                 return None
 
-        media_info: Dict[str, Any] = {}
+        def resolve_media_info(media_path: str, media_item: FileItem) -> Dict[str, Any]:
+            """
+            按原有中心化优先、ffprobe 兜底策略获取主视频媒体信息
 
-        params: Dict[str, Any] = {"strm_resolve_media_info": share_strm_center}
-        need_ffprobe = True
-        if source_item.storage == "local":
-            params["source_path"] = source_path
-        elif source_item.storage in ["u115", "115网盘Plus"]:
-            if source_item.fileid in pantransfercacher.file_item_dict:
-                client = P115Center()
-                data_dict = pantransfercacher.file_item_dict[source_item.fileid]
-                try:
-                    resp = client.download_emby_mediainfo_data(
-                        [(data_dict["sha1"], data_dict["size"])]
-                    )
-                    media_info = RenameDictUtils.emby_mediainfo_to_rename_fields(
-                        resp[data_dict["sha1"].upper()]
-                    )
-                    pantransfercacher.file_item_dict.pop(source_item.fileid)
-                    if media_info:
-                        logger.info(
-                            f"【媒体数据补充】中心化获取媒体信息: {source_path}"
+            :param media_path (str): 主视频源路径
+            :param media_item (FileItem): 主视频文件项
+
+            :return Dict: 媒体命名字段
+            """
+            resolved_info: Dict[str, Any] = {}
+            params: Dict[str, Any] = {"strm_resolve_media_info": share_strm_center}
+            need_ffprobe = True
+            if media_item.storage == "local":
+                params["source_path"] = media_path
+            elif media_item.storage in ["u115", "115网盘Plus"]:
+                if media_item.fileid in pantransfercacher.file_item_dict:
+                    client = P115Center()
+                    data_dict = pantransfercacher.file_item_dict[media_item.fileid]
+                    try:
+                        resp = client.download_emby_mediainfo_data(
+                            [(data_dict["sha1"], data_dict["size"])]
                         )
-                        need_ffprobe = False
-                    else:
+                        resolved_info = RenameDictUtils.emby_mediainfo_to_rename_fields(
+                            resp[data_dict["sha1"].upper()]
+                        )
+                        pantransfercacher.file_item_dict.pop(media_item.fileid)
+                        if resolved_info:
+                            logger.info(
+                                f"【媒体数据补充】中心化获取媒体信息: {media_path}"
+                            )
+                            need_ffprobe = False
+                        else:
+                            logger.warning(
+                                f"【媒体数据补充】{media_path} 中心化获取媒体信息为空"
+                            )
+                    except Exception as e:
                         logger.warning(
-                            f"【媒体数据补充】{source_path} 中心化获取媒体信息为空"
+                            f"【媒体数据补充】{media_path} 中心化获取媒体信息失败: {e}"
                         )
-                except Exception as e:
-                    logger.warning(
-                        f"【媒体数据补充】{source_path} 中心化获取媒体信息失败: {e}"
+                params["url"] = (
+                    f"http://127.0.0.1:{settings.PORT}/api/v1/plugin/"
+                    f"P115StrmHelper/redirect_url/{media_item.fileid}"
+                )
+            elif media_item.storage == "CloudDrive储存":
+                params["url"] = (
+                    f"http://127.0.0.1:{settings.PORT}/api/v1/plugin/"
+                    f"P115StrmHelper/redirect_url/{media_item.fileid}"
+                )
+            else:
+                logger.error(f"【媒体数据补充】不支持的存储类型: {media_item.storage}")
+                return {}
+            if need_ffprobe:
+                resolved_info, error_message = RenameDictUtils.ffprobe_get_media_info(
+                    **params
+                )
+                if not resolved_info:
+                    logger.error(f"【媒体数据补充】获取媒体信息失败: {error_message}")
+                    return {}
+            return resolved_info
+
+        relation_key = RenameDictUtils.get_media_relation_key(
+            source_path,
+            extension,
+            settings.RMT_SUBEXT,
+            storage=source_item.storage,
+        )
+        media_info = type(self)._rename_media_fields_cache.get(relation_key)
+        if not isinstance(media_info, dict):
+            media_info = {}
+
+        if not media_info:
+            probe_path = source_path
+            probe_item = source_item
+            if is_extra:
+                try:
+                    storagechain = StorageChain()
+                    parent_item = storagechain.get_parent_item(source_item)
+                    sibling_items = (
+                        storagechain.list_files(parent_item, recursion=False)
+                        if parent_item
+                        else []
                     )
-            params["url"] = (
-                f"http://127.0.0.1:{settings.PORT}/api/v1/plugin/P115StrmHelper/redirect_url/{source_item.fileid}"
-            )
-        elif source_item.storage == "CloudDrive储存":
-            params["url"] = (
-                f"http://127.0.0.1:{settings.PORT}/api/v1/plugin/P115StrmHelper/redirect_url/{source_item.fileid}"
-            )
-        else:
-            logger.error(f"【媒体数据补充】不支持的存储类型: {source_item.storage}")
-            return
-        if need_ffprobe:
-            media_info, error_message = RenameDictUtils.ffprobe_get_media_info(**params)
+                except Exception as e:
+                    logger.warning(f"【媒体数据补充】读取伴随文件同目录列表失败: {e}")
+                    sibling_items = []
+                probe_item = RenameDictUtils.find_related_media_item(
+                    source_path=source_path,
+                    extension=extension,
+                    sibling_items=sibling_items or [],
+                    media_exts=settings.RMT_MEDIAEXT,
+                    subtitle_exts=settings.RMT_SUBEXT,
+                )
+                if not probe_item:
+                    logger.debug(f"【媒体数据补充】未找到唯一同名主视频: {source_path}")
+                    return
+                probe_path = str(probe_item.path)
+            media_info = resolve_media_info(probe_path, probe_item)
             if not media_info:
-                logger.error(f"【媒体数据补充】获取媒体信息失败: {error_message}")
                 return
+            type(self)._rename_media_fields_cache.set(relation_key, media_info)
+
         overwrite_mode = configer.rename_dict_supplement_overwrite_mode
         if overwrite_mode not in ("fill_missing", "always"):
             overwrite_mode = "fill_missing"
@@ -2142,6 +2205,7 @@ class P115StrmHelper(_PluginBase):
         """
         退出插件
         """
+        type(self)._rename_media_fields_cache.clear()
         servicer.stop()
         ct_db_manager.close_database()
         U115Patcher().disable()
