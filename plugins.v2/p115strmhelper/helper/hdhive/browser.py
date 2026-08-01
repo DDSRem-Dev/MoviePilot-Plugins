@@ -32,6 +32,7 @@ from orjson import dumps, loads
 from app.core.config import settings
 
 from ...core.config import configer
+from ...utils.hdhive import extract_hdhive_resource_rows
 from ...utils.sentry import sentry_manager
 
 _CLOAKBROWSER_AVAILABLE = False
@@ -2038,27 +2039,7 @@ class HDHivePlaywrightClient:
                     if "json" not in response.headers.get("content-type", ""):
                         return
                     body = response.json()
-                    if not isinstance(body, dict):
-                        return
-                    data = body.get("data")
-                    if not isinstance(data, list) or not data:
-                        return
-                    first = data[0]
-                    if not isinstance(first, dict):
-                        return
-                    if any(
-                        k in first
-                        for k in (
-                            "size",
-                            "resolution",
-                            "video_resolution",
-                            "share_size",
-                            "source",
-                            "slug",
-                            "unlock_points",
-                        )
-                    ):
-                        captured.extend(data)
+                    captured.extend(extract_hdhive_resource_rows(body))
                 except Exception:
                     pass
 
