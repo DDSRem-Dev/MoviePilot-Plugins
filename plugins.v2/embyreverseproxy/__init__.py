@@ -51,6 +51,10 @@ def _parse_pin_rules(raw: str) -> List[Tuple[str, str]]:
 class EmbyReverseProxy(_PluginBase):
     """
     Emby 302 反向代理
+
+    Attributes:
+        _media_source_path_prefixes_raw: 媒体源隐藏前缀原始配置
+        _media_source_path_prefixes: 已拆分的媒体源隐藏前缀
     """
 
     plugin_name = "Emby 302 反向代理"
@@ -58,7 +62,7 @@ class EmbyReverseProxy(_PluginBase):
         "Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用。"
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Emby_A.png"
-    plugin_version = "0.2.4"
+    plugin_version = "0.2.5"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "embyreverseproxy_"
@@ -71,6 +75,8 @@ class EmbyReverseProxy(_PluginBase):
     _port = 8099
     _pin_rules: List[Tuple[str, str]] = []
     _pin_rules_raw = ""
+    _media_source_path_prefixes_raw = ""
+    _media_source_path_prefixes: List[str] = []
     _external_player_url = False
     _external_player_list: List[str] = []
     _server = None
@@ -92,6 +98,14 @@ class EmbyReverseProxy(_PluginBase):
                 self._port = 8099
             self._pin_rules_raw = (config.get("pin_rules") or "").strip()
             self._pin_rules = _parse_pin_rules(self._pin_rules_raw)
+            self._media_source_path_prefixes_raw = (
+                config.get("media_source_path_prefixes") or ""
+            ).strip()
+            self._media_source_path_prefixes = [
+                line.strip()
+                for line in self._media_source_path_prefixes_raw.splitlines()
+                if line.strip()
+            ]
             self._external_player_url = config.get("external_player_url", False)
             self._external_player_list = config.get("external_player_list") or []
             self._update_config()
@@ -104,6 +118,7 @@ class EmbyReverseProxy(_PluginBase):
             app = create_app(
                 self._emby_host,
                 pin_rules=self._pin_rules,
+                media_source_path_prefixes=self._media_source_path_prefixes,
                 external_player_url=self._external_player_url,
                 external_player_list=self._external_player_list,
             )
@@ -141,6 +156,7 @@ class EmbyReverseProxy(_PluginBase):
                 "host": self._host,
                 "port": self._port,
                 "pin_rules": self._pin_rules_raw,
+                "media_source_path_prefixes": self._media_source_path_prefixes_raw,
                 "external_player_url": self._external_player_url,
                 "external_player_list": self._external_player_list,
             }
@@ -234,6 +250,23 @@ class EmbyReverseProxy(_PluginBase):
                                     "model": "external_player_url",
                                     "label": "外部播放器",
                                     "hint": "在 Emby 客户端中显示「使用外部播放器打开」按钮",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
+                                    "model": "media_source_path_prefixes",
+                                    "label": "媒体源隐藏前缀（每行一个）",
+                                    "rows": 3,
+                                    "placeholder": "http://host:3000/api/.../redirect_url",
+                                    "hint": "留空关闭。填入媒体源 URL 开头要隐藏的完整部分；匹配后仅展示并解码剩余路径，不影响播放和探测",
                                     "persistent-hint": True,
                                 },
                             }
@@ -346,6 +379,7 @@ class EmbyReverseProxy(_PluginBase):
             "host": "0.0.0.0",
             "port": 8099,
             "pin_rules": "",
+            "media_source_path_prefixes": "",
             "external_player_url": False,
             "external_player_list": [],
         }

@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from hashlib import sha256
 from re import IGNORECASE, compile as re_compile, search as re_search, sub as re_sub
 from time import monotonic
-from typing import Any, List, Tuple
-from urllib.parse import quote, urlparse
+from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import quote, unquote, urlparse
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -147,9 +147,134 @@ CROSS_ORIGIN_INTERCEPT_SCRIPT = (
 )
 
 
+def _normalize_media_source_path_prefixes(prefixes: List[str]) -> List[str]:
+    """
+    校验并规范化媒体源隐藏前缀
+
+    :param prefixes (List): 用户配置的 HTTP(S) URL 前缀
+    :return List: 去重并按长度降序排列的有效前缀
+    """
+    result: List[str] = []
+    for line_number, value in enumerate(prefixes, start=1):
+        prefix = value.strip().rstrip("/")
+        try:
+            parsed = urlparse(prefix)
+            _ = parsed.port
+            _ = unquote(parsed.path, errors="strict")
+            valid = (
+                parsed.scheme.lower() in ("http", "https")
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.query
+                and not parsed.fragment
+                and not re_search(r"%(?![0-9A-Fa-f]{2})", parsed.path)
+                and not any(char.isspace() for char in prefix)
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            logger.warning("媒体源隐藏前缀第 %s 项无效，已忽略", line_number)
+            continue
+        if prefix not in result:
+            result.append(prefix)
+    return sorted(result, key=lambda prefix: len(urlparse(prefix).path), reverse=True)
+
+
+def _restore_media_source_path(
+    url_or_path: str, prefixes: List[str]
+) -> str:
+    """
+    移除媒体源 URL 中配置的隐藏前缀并还原文件路径
+
+    :param url_or_path (str): URL 或路径字符串
+    :param prefixes (List): 已规范化的媒体源隐藏前缀
+    :return str: 还原后的文件路径，未命中则返回原串
+    """
+    if not url_or_path.lower().startswith(("http://", "https://")):
+        return url_or_path
+
+    try:
+        source = urlparse(url_or_path)
+        source_port = (
+            source.port
+            if source.port is not None
+            else (80 if source.scheme.lower() == "http" else 443)
+        )
+        if not source.hostname:
+            return url_or_path
+    except ValueError:
+        return url_or_path
+
+    for prefix in prefixes:
+        target = urlparse(prefix)
+        target_port = (
+            target.port
+            if target.port is not None
+            else (80 if target.scheme.lower() == "http" else 443)
+        )
+        if (
+            source.scheme.lower() != target.scheme.lower()
+            or source.hostname.lower() != target.hostname.lower()
+            or source_port != target_port
+        ):
+            continue
+
+        target_path = target.path.rstrip("/")
+        if target_path:
+            if source.path == target_path:
+                suffix = "/"
+            elif source.path.startswith(target_path + "/"):
+                suffix = source.path[len(target_path) :]
+            else:
+                continue
+        else:
+            suffix = source.path
+        if suffix.startswith("/"):
+            if re_search(r"%(?![0-9A-Fa-f]{2})", suffix):
+                return url_or_path
+            try:
+                return unquote(suffix, errors="strict")
+            except UnicodeDecodeError:
+                return url_or_path
+    return url_or_path
+
+
+def _mask_media_source_paths(data: Any, prefixes: List[str]) -> int:
+    """
+    递归移除媒体源路径中配置的 URL 前缀
+
+    :param data (Any): Emby JSON 响应数据
+    :param prefixes (List): 已规范化的媒体源隐藏前缀
+    :return int: 被替换的媒体源路径数量
+    """
+    masked_count = 0
+    if isinstance(data, dict):
+        sources = data.get("MediaSources")
+        if isinstance(sources, list):
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                path = source.get("Path")
+                if not isinstance(path, str):
+                    continue
+                restored = _restore_media_source_path(path, prefixes)
+                if restored != path:
+                    source["Path"] = restored
+                    masked_count += 1
+        for key, value in data.items():
+            if key != "MediaSources":
+                masked_count += _mask_media_source_paths(value, prefixes)
+    elif isinstance(data, list):
+        for value in data:
+            masked_count += _mask_media_source_paths(value, prefixes)
+    return masked_count
+
+
 def create_app(
     emby_host: str,
     pin_rules: List[Tuple[str, str]] | None = None,
+    media_source_path_prefixes: Optional[List[str]] = None,
     external_player_url: bool = False,
     external_player_list: List[str] | None = None,
 ) -> FastAPI:
@@ -158,6 +283,7 @@ def create_app(
 
     :param emby_host (str): Emby 服务器根地址
     :param pin_rules (List): 顶置路径规则列表 (路径前缀, 目标URL)；命中时先替换再 302
+    :param media_source_path_prefixes (List): 要从媒体源展示路径中移除的 HTTP(S) URL 前缀
     :param external_player_url (bool): 是否启用外部播放器链接注入
     :param external_player_list (List): 要注入的外部播放器 key 列表；为空时使用全部
 
@@ -165,6 +291,9 @@ def create_app(
     """
     emby_host = emby_host.rstrip("/")
     pin_rules = pin_rules or []
+    media_source_path_prefixes = _normalize_media_source_path_prefixes(
+        media_source_path_prefixes or []
+    )
     if external_player_url:
         _player_keys = (
             [k for k in external_player_list if k in EXTERNAL_PLAYERS]
@@ -201,6 +330,21 @@ def create_app(
         :return: 不包含 accept-encoding 的头字典
         """
         return {k: v for k, v in headers.items() if k.lower() != "accept-encoding"}
+
+    def _strip_response_validators(headers: Dict[str, str]) -> Dict[str, str]:
+        """
+        移除正文变化后失效的响应校验头
+
+        :param headers (Dict): 上游响应头
+
+        :return Dict: 不含正文校验字段的响应头
+        """
+        validators = {"content-md5", "etag", "last-modified"}
+        return {
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in validators
+        }
 
     def _may_return_emby_html_shell(path: str) -> bool:
         """
@@ -935,13 +1079,26 @@ def create_app(
                 headers=_resp_headers_from_httpx(resp),
             )
 
+        mask_non_playback_paths = (
+            request.query_params.get("IsPlayback", "").lower()
+            in ("false", "0")
+        )
+
         is_strm = _media_sources_indicate_strm(data)
         is_pin = _media_sources_match_pin_rules(data, pin_rules)
         if not is_strm and not is_pin:
+            masked_count = 0
+            if mask_non_playback_paths:
+                masked_count = _mask_media_source_paths(
+                    data, media_source_path_prefixes
+                )
+            resp_headers = _resp_headers_from_httpx(resp)
+            if masked_count:
+                resp_headers = _strip_response_validators(resp_headers)
             return JSONResponse(
                 content=data,
                 status_code=200,
-                headers=_resp_headers_from_httpx(resp),
+                headers=resp_headers,
             )
 
         _apply_force_direct_play_to_media_sources(data, item_id)
@@ -979,10 +1136,12 @@ def create_app(
             reason,
             item_id,
         )
+        if mask_non_playback_paths:
+            _mask_media_source_paths(data, media_source_path_prefixes)
         return JSONResponse(
             content=data,
             status_code=200,
-            headers=_resp_headers_from_httpx(resp),
+            headers=_strip_response_validators(_resp_headers_from_httpx(resp)),
         )
 
     for _playback_path in (
@@ -1128,6 +1287,69 @@ def create_app(
             headers=resp_headers,
         )
 
+
+    def _requests_media_sources(request: Request) -> bool:
+        return any(
+            field.strip().lower() == "mediasources"
+            for key, value in request.query_params.multi_items()
+            if key.lower() == "fields"
+            for field in value.split(",")
+        )
+
+    async def _proxy_media_sources_response(
+        request: Request,
+    ) -> Union[JSONResponse, StreamingResponse, Response]:
+        """
+        代理并遮罩显式请求的 MediaSources 路径
+
+        :param request (Request): 当前请求
+        :return Response: 遮罩后的 JSON 或透传响应
+        """
+
+        path = request.scope.get("path", "/")
+        qs = str(request.url.query)
+        target_url = f"{emby_host}{path}"
+        if qs:
+            target_url += f"?{qs}"
+
+        headers = _strip_accept_encoding(_build_forward_headers(request))
+        client = request.app.state.http_client_no_follow
+        try:
+            resp = await client.get(target_url, headers=headers, timeout=30.0)
+        except Exception:
+            logger.warning("MediaSources 请求失败: %s", path, exc_info=True)
+            return JSONResponse(
+                status_code=502,
+                content={"error": "Bad Gateway"},
+            )
+
+        excluded = HOP_BY_HOP_HEADERS | {"content-encoding", "content-length"}
+        resp_headers = {
+            k: v for k, v in resp.headers.multi_items() if k.lower() not in excluded
+        }
+        if resp.status_code != 200:
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=resp_headers,
+            )
+
+        try:
+            data = resp.json()
+        except ValueError:
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=resp_headers,
+            )
+
+        resp_headers = _strip_response_validators(resp_headers)
+
+        masked_count = _mask_media_source_paths(data, media_source_path_prefixes)
+        if masked_count:
+            logger.debug("已遮罩媒体源路径: count=%s", masked_count)
+        return JSONResponse(content=data, status_code=200, headers=resp_headers)
+
     def _patch_js_response_headers(
         resp: HttpxResponse, extra: dict[str, str] | None = None
     ) -> dict[str, str]:
@@ -1256,18 +1478,18 @@ def create_app(
             _patch_plugin_js
         )
 
-    if _player_keys:
+    if _player_keys or media_source_path_prefixes:
 
         async def _items_external_player_handler(
             request: Request, user_id: str, item_id: str
         ) -> JSONResponse | StreamingResponse | Response:
             """
-            代理 /Users/{user_id}/Items/{item_id}，为含有 MediaSources 的响应注入 ExternalUrls
+            代理单项 Items 响应，按配置注入外部链接并遮罩媒体源路径 URL
 
-            :param request: 当前请求
-            :param user_id: 用户 ID
-            :param item_id: 媒体项 ID
-            :return: 注入后的 JSON 或透传响应
+            :param request (Request): 当前请求
+            :param user_id (str): 用户 ID
+            :param item_id (str): 媒体项 ID
+            :return Response: 按配置修改后的 JSON 或透传响应
             """
             path = request.scope.get("path", "/")
             qs = str(request.url.query)
@@ -1276,7 +1498,11 @@ def create_app(
                 target_url += f"?{qs}"
 
             headers = _strip_accept_encoding(_build_forward_headers(request))
-            client = request.app.state.http_client_follow
+            client = (
+                request.app.state.http_client_follow
+                if _player_keys
+                else request.app.state.http_client_no_follow
+            )
 
             try:
                 resp = await client.request(
@@ -1318,7 +1544,7 @@ def create_app(
                     },
                 )
 
-            if isinstance(data, dict):
+            if isinstance(data, dict) and _player_keys:
                 api_key = extract_api_key(request) or ""
                 if inject_external_urls(
                     data=data,
@@ -1334,10 +1560,21 @@ def create_app(
                         item_id,
                     )
 
+            if media_source_path_prefixes:
+                masked_count = _mask_media_source_paths(
+                    data, media_source_path_prefixes
+                )
+                if masked_count:
+                    logger.debug("已遮罩媒体源路径: count=%s", masked_count)
+
             excluded = HOP_BY_HOP_HEADERS | {"content-encoding", "content-length"}
-            resp_headers = {
-                k: v for k, v in resp.headers.multi_items() if k.lower() not in excluded
-            }
+            resp_headers = _strip_response_validators(
+                {
+                    k: v
+                    for k, v in resp.headers.multi_items()
+                    if k.lower() not in excluded
+                }
+            )
             return JSONResponse(content=data, status_code=200, headers=resp_headers)
 
         for _items_path in (
@@ -1385,6 +1622,12 @@ def create_app(
 
         :return Response: 流式响应或 502 JSON 错误
         """
+        if (
+            request.method == "GET"
+            and media_source_path_prefixes
+            and _requests_media_sources(request)
+        ):
+            return await _proxy_media_sources_response(request)
         return await _reverse_proxy(request)
 
     return app
