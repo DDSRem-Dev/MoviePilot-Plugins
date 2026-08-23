@@ -20,6 +20,8 @@ on:
       # utils (test_tree.py)
       - 'plugins.v2/p115strmhelper/utils/tree.py'
       - 'plugins.v2/p115strmhelper/tests/**'
+      - 'plugins.v2/p115strmhelper/requirements.txt'
+      - 'plugins.v2/p115strmhelper/rust_utils/**'
       - '.github/workflows/test-p115strmhelper.yml'
   pull_request:
     paths:
@@ -40,14 +42,25 @@ on:
       # utils (test_tree.py)
       - 'plugins.v2/p115strmhelper/utils/tree.py'
       - 'plugins.v2/p115strmhelper/tests/**'
+      - 'plugins.v2/p115strmhelper/requirements.txt'
+      - 'plugins.v2/p115strmhelper/rust_utils/**'
       - '.github/workflows/test-p115strmhelper.yml'
   workflow_dispatch:
 
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            python-version: '3.12'
+          - os: ubuntu-latest
+            python-version: '3.14'
+          - os: windows-latest
+            python-version: '3.12'
+          - os: windows-latest
+            python-version: '3.14'
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -67,10 +80,13 @@ jobs:
           repository: jxxghp/MoviePilot-Resources
           path: MoviePilot-Resources
 
-      - name: Set up Python 3.12
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
           cache-dependency-path: |
             MoviePilot/requirements.txt
@@ -80,10 +96,20 @@ jobs:
         run: |
           python -c "from pathlib import Path; from shutil import copy2; src = Path('MoviePilot-Resources/resources.v2'); dst = Path('MoviePilot/app/helper'); dst.mkdir(parents=True, exist_ok=True); [copy2(p, dst / p.name) for p in src.iterdir() if p.is_file()]"
 
+      - name: Build native dependencies for tests
+        run: |
+          python -m pip wheel --no-deps --wheel-dir plugins.v2/p115strmhelper/wheels plugins.v2/p115strmhelper/rust_utils/full_strm_sync plugins.v2/p115strmhelper/rust_utils/txt_tree_storage plugins.v2/p115strmhelper/rust_utils/share_strm_scan
+          python -m pip download --no-deps --only-binary=:all: --dest plugins.v2/p115strmhelper/wheels "pyahocorasick~=2.3.0"
+
       - name: Install dependencies
         run: |
-          pip install -r MoviePilot/requirements.txt
-          pip install --find-links plugins.v2/p115strmhelper/wheels -r plugins.v2/p115strmhelper/requirements.txt
+          python -m pip install --no-index --find-links plugins.v2/p115strmhelper/wheels full_strm_sync==0.1.6 txt_tree_storage==0.2.1 share_strm_scan==0.2.2 pyahocorasick~=2.3.0
+          python -m pip install -r MoviePilot/requirements.txt
+          python -m pip install --find-links plugins.v2/p115strmhelper/wheels -r plugins.v2/p115strmhelper/requirements.txt
+
+      - name: Verify bundled native imports
+        run: |
+          python -c "import full_strm_sync; import share_strm_scan; import txt_tree_storage; import ahocorasick"
 
       - name: Start Redis (Ubuntu)
         if: runner.os == 'Linux'

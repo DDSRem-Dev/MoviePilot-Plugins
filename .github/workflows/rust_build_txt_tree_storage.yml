@@ -5,12 +5,13 @@ on:
 
 jobs:
   parity_test:
-    name: Parity test (Python vs Rust) on ${{ matrix.os }}
+    name: Parity test (Python vs Rust) on ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.12', '3.14']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -21,7 +22,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install pytest
         run: pip install pytest
@@ -35,7 +36,7 @@ jobs:
         run: pytest tests/test_parity.py -v
 
   build_wheels:
-    name: Build wheels for ${{ matrix.target }} on ${{ matrix.os }}
+    name: Build wheels for Python ${{ matrix.python-version }} / ${{ matrix.target }} on ${{ matrix.os }}
     needs: [parity_test]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -43,12 +44,34 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            python-version: '3.12'
+          - os: ubuntu-latest
+            python-version: '3.14'
           - os: windows-latest
+            python-version: '3.12'
+          - os: windows-latest
+            python-version: '3.14'
           - os: macos-latest
+            python-version: '3.12'
+          - os: macos-latest
+            python-version: '3.14'
+          - os: macos-latest
+            python-version: '3.12'
             target: universal2-apple-darwin
           - os: macos-15
+            python-version: '3.12'
             target: x86_64-apple-darwin
           - os: ubuntu-latest
+            python-version: '3.12'
+            target: aarch64
+          - os: macos-latest
+            python-version: '3.14'
+            target: universal2-apple-darwin
+          - os: macos-15
+            python-version: '3.14'
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            python-version: '3.14'
             target: aarch64
 
     steps:
@@ -65,14 +88,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           command: build
-          args: --release --out dist -i python3.12
+          args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
           working-directory: plugins.v2/p115strmhelper/rust_utils/txt_tree_storage/
 
@@ -82,7 +105,7 @@ jobs:
         with:
           target: x86_64-unknown-linux-musl
           command: build
-          args: --release --out dist -i python3.12
+          args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
           working-directory: plugins.v2/p115strmhelper/rust_utils/txt_tree_storage/
 
@@ -92,14 +115,14 @@ jobs:
         with:
           target: aarch64-unknown-linux-musl
           command: build
-          args: --release --out dist -i python3.12
+          args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
           working-directory: plugins.v2/p115strmhelper/rust_utils/txt_tree_storage/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: wheels-txt-${{ matrix.os }}-${{ matrix.target }}
+          name: wheels-txt-${{ matrix.python-version }}-${{ matrix.os }}-${{ matrix.target }}
           path: plugins.v2/p115strmhelper/rust_utils/txt_tree_storage/dist
 
   commit_wheels:
