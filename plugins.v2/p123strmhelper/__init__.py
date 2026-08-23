@@ -1,30 +1,33 @@
 import ast
 import time
 from datetime import datetime, timedelta
-from typing import Any, List, Dict, Tuple, Optional
 from pathlib import Path
+from threading import Lock
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from urllib.parse import urlencode
 
-import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from cachetools import TTLCache, cached
+from cachetools.keys import hashkey
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
-import requests
-from cachetools import cached, TTLCache
 from p123client import check_response
 from p123client.tool import iterdir, share_iterdir
+import pytz
+import requests
 
+from app.chain.media import MediaChain
 from app.chain.storage import StorageChain
 from app.core.config import settings
-from app.core.event import eventmanager, Event
+from app.core.context import MediaInfo
+from app.core.event import Event, eventmanager
 from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfoPath
+from app.helper.mediaserver import MediaServerHelper
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas import TransferInfo, FileItem, RefreshMediaItem, ServiceInfo
-from app.core.context import MediaInfo
-from app.helper.mediaserver import MediaServerHelper
-from app.chain.media import MediaChain
+from app.schemas import FileItem, RefreshMediaItem, ServiceInfo, TransferInfo
 from app.schemas.types import EventType, MediaType
 from app.utils.system import SystemUtils
 
@@ -267,12 +270,21 @@ class FullSyncStrmHelper:
 
                         new_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-                        strm_url = (
-                            f"{self.server_address}/api/v1/plugin/P123StrmHelper/redirect_url"
-                            f"?apikey={settings.API_TOKEN}&name={item['FileName']}"
-                            f"&size={item['Size']}&md5={item['Etag']}"
-                            f"&s3_key_flag={item['S3KeyFlag']}"
+                        query = urlencode(
+                            {
+                                "apikey": settings.API_TOKEN,
+                                "name": item["FileName"],
+                                "size": item["Size"],
+                                "md5": item["Etag"],
+                                "s3_key_flag": item["S3KeyFlag"],
+                                "file_id": item["FileId"],
+                            }
                         )
+                        redirect_url = (
+                            f"{self.server_address}"
+                            "/api/v1/plugin/P123StrmHelper/redirect_url"
+                        )
+                        strm_url = f"{redirect_url}?{query}"
 
                         with open(new_file_path, "w", encoding="utf-8") as file:
                             file.write(strm_url)
@@ -320,14 +332,16 @@ class ShareStrmHelper:
 
     def __init__(
         self,
-        client,
+        client: P123AutoClient,
         user_rmt_mediaext: str,
         user_download_mediaext: str,
         share_media_path: str,
         local_media_path: str,
         server_address: str,
+        receive_path_name: str,
+        fast_upload: Callable[[str, int, str], Tuple[int, str]],
         auto_download_mediainfo: bool = False,
-    ):
+    ) -> None:
         self.rmt_mediaext = [
             f".{ext.strip()}" for ext in user_rmt_mediaext.replace("，", ",").split(",")
         ]
@@ -342,12 +356,15 @@ class ShareStrmHelper:
         self.strm_fail_count = 0
         self.mediainfo_fail_count = 0
         self.strm_fail_dict: Dict[str, str] = {}
-        self.mediainfo_fail_dict: List = []
+        self.mediainfo_fail_list: List = []
         self.share_media_path = share_media_path
         self.local_media_path = local_media_path
         self.server_address = server_address.rstrip("/")
+        self.receive_path_name = receive_path_name
+        self.fast_upload = fast_upload
         self._mediainfodownloader = MediaInfoDownloader(client=self.client)
         self.download_mediainfo_list = []
+        self.mediainfo_transfer_fail_list: List = []
 
     def has_prefix(self, full_path, prefix_path):
         """
@@ -370,6 +387,10 @@ class ShareStrmHelper:
         """
         获取分享文件，生成 STRM
         """
+        logger.info(
+            f"【分享STRM生成】分享文件播放时会先秒传到 /{self.receive_path_name} "
+            "目录取链，可在清理页配置定期清空该目录"
+        )
         for item in share_iterdir(
             client=self.client,
             share_key=share_code,
@@ -399,19 +420,31 @@ class ShareStrmHelper:
             try:
                 if self.auto_download_mediainfo:
                     if file_path.suffix in self.download_mediaext:
-                        self.download_mediainfo_list.append(
-                            [
-                                {
-                                    "Etag": item["Etag"],
-                                    "FileID": int(item["FileId"]),
-                                    "FileName": item["FileName"],
-                                    "S3KeyFlag": item["S3KeyFlag"],
-                                    "Size": int(item["Size"]),
-                                },
-                                str(file_path),
-                            ]
-                        )
-                        continue
+                        try:
+                            file_id, s3_key_flag = self.fast_upload(
+                                item["FileName"], int(item["Size"]), item["Etag"]
+                            )
+                        except Exception as e:
+                            logger.error(
+                                "【分享STRM生成】%s 秒传转存失败，无法下载该文件: %s",
+                                item["FileName"],
+                                e,
+                            )
+                            self.mediainfo_transfer_fail_list.append(str(file_path))
+                        else:
+                            self.download_mediainfo_list.append(
+                                [
+                                    {
+                                        "Etag": item["Etag"],
+                                        "FileID": file_id,
+                                        "FileName": item["FileName"],
+                                        "S3KeyFlag": s3_key_flag,
+                                        "Size": int(item["Size"]),
+                                    },
+                                    str(file_path),
+                                ]
+                            )
+                            continue
 
                 if file_path.suffix not in self.rmt_mediaext:
                     logger.warn(
@@ -422,12 +455,19 @@ class ShareStrmHelper:
 
                 new_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-                strm_url = (
-                    f"{self.server_address}/api/v1/plugin/P123StrmHelper/redirect_url"
-                    f"?apikey={settings.API_TOKEN}&name={item['FileName']}"
-                    f"&size={item['Size']}&md5={item['Etag']}"
-                    f"&s3_key_flag={item['S3KeyFlag']}"
+                # 分享来源的文件标识在本账号下无效，播放时由 302 接口完成秒传取链
+                query = urlencode(
+                    {
+                        "apikey": settings.API_TOKEN,
+                        "name": item["FileName"],
+                        "size": item["Size"],
+                        "md5": item["Etag"],
+                    }
                 )
+                redirect_url = (
+                    f"{self.server_address}/api/v1/plugin/P123StrmHelper/redirect_url"
+                )
+                strm_url = f"{redirect_url}?{query}"
 
                 with open(new_file_path, "w", encoding="utf-8") as file:
                     file.write(strm_url)
@@ -445,16 +485,20 @@ class ShareStrmHelper:
                 self.strm_fail_dict[str(new_file_path)] = str(e)
                 continue
 
-        self.mediainfo_count, self.mediainfo_fail_count, self.mediainfo_fail_dict = (
+        self.mediainfo_count, self.mediainfo_fail_count, mediainfo_fail_list = (
             self._mediainfodownloader.auto_downloader(
                 downloads_list=self.download_mediainfo_list
             )
         )
+        self.mediainfo_fail_count += len(self.mediainfo_transfer_fail_list)
+        self.mediainfo_fail_list = (
+            mediainfo_fail_list + self.mediainfo_transfer_fail_list
+        )
         if self.strm_fail_dict:
             for path, error in self.strm_fail_dict.items():
                 logger.warn(f"【分享STRM生成】{path} 生成错误原因: {error}")
-        if self.mediainfo_fail_dict:
-            for path in self.mediainfo_fail_dict:
+        if self.mediainfo_fail_list:
+            for path in self.mediainfo_fail_list:
                 logger.warn(f"【分享STRM生成】{path} 下载错误")
         logger.info(
             f"【分享STRM生成】分享生成 STRM 文件完成，总共生成 {self.strm_count} 个 STRM 文件，下载 {self.mediainfo_count} 个媒体数据文件"
@@ -468,6 +512,13 @@ class ShareStrmHelper:
 class P123StrmHelper(_PluginBase):
     """
     123 云盘 STRM 助手：生成 STRM、监控整理入库、分享生成 STRM、空间清理一条龙服务
+
+    Attributes:
+        RECEIVE_PATH_NAME: 秒传文件接收目录名称
+        _fast_upload_cache: 秒传结果缓存
+        _fast_upload_lock: 秒传缓存访问锁
+        _download_url_cache: 文件直链缓存
+        _download_url_lock: 直链缓存访问锁
     """
 
     # 插件名称
@@ -477,7 +528,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.1.6"
+    plugin_version = "1.1.8"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -521,10 +572,72 @@ class P123StrmHelper(_PluginBase):
     _clear_receive_path_enabled = False
     _cron_clear = None
 
+    RECEIVE_PATH_NAME = "我的秒传"
+    _fast_upload_cache: TTLCache = TTLCache(maxsize=2048, ttl=30 * 60)
+    _fast_upload_lock: Lock = Lock()
+    _download_url_cache: TTLCache = TTLCache(maxsize=1024, ttl=10 * 60)
+    _download_url_lock: Lock = Lock()
+
+    @cached(
+        cache=_fast_upload_cache,
+        key=lambda self, name, size, md5: hashkey(md5, size),
+        lock=_fast_upload_lock,
+    )
+    def fast_upload_to_receive_path(
+        self, name: str, size: int, md5: str
+    ) -> Tuple[int, str]:
+        """
+        将分享文件秒传到本账号的接收目录
+
+        分享文件的标识在本账号下不可用
+        需按 MD5 与文件大小秒传后获取本账号下的文件标识
+
+        :param name (str): 文件名
+        :param size (int): 文件大小
+        :param md5 (str): 文件 MD5
+
+        :return Tuple: 本账号下的文件 ID 与 S3KeyFlag
+
+        :raises ValueError: 秒传未命中
+        """
+        resp = self._client.fs_mkdir(self.RECEIVE_PATH_NAME)
+        check_response(resp)
+        parent_id = resp["data"]["Info"]["FileId"]
+
+        resp = self._client.upload_file_fast(
+            file_md5=md5,
+            file_name=f"{md5}-{size}",
+            file_size=size,
+            parent_id=parent_id,
+            # 缓存过期后替换同名文件，避免重复副本持续累积
+            duplicate=2,
+        )
+        check_response(resp)
+        info = resp["data"]["Info"]
+        file_id = int(info.get("FileId") or info.get("FileID") or 0)
+        if not file_id:
+            raise ValueError("秒传未命中，网盘中不存在相同 MD5 与大小的文件")
+        logger.info(
+            f"【秒传转存】{name} 转存到 /{self.RECEIVE_PATH_NAME} 成功: {file_id}"
+        )
+        return file_id, info.get("S3KeyFlag") or ""
+
+    def clear_fast_upload_cache(self) -> None:
+        """
+        清空秒传转存与直链缓存
+
+        接收目录被清空后，缓存中的文件 ID 与直链均会失效
+        """
+        with self._fast_upload_lock:
+            self._fast_upload_cache.clear()
+        with self._download_url_lock:
+            self._download_url_cache.clear()
+
     def init_plugin(self, config: dict = None):
         """
         初始化插件
         """
+        self.clear_fast_upload_cache()
         if config:
             self._enabled = config.get("enabled")
             self._once_full_sync_strm = config.get("once_full_sync_strm")
@@ -667,12 +780,11 @@ class P123StrmHelper(_PluginBase):
 
     def get_api(self) -> List[Dict[str, Any]]:
         """
-        BASE_URL: {server_url}/api/v1/plugin/P123StrmHelper/redirect_url?apikey={APIKEY}
-        0. 查询带 s3_key_flag
-            url: ${BASE_URL}&name={name}&size={size}&md5={md5}&s3_key_flag={s3_key_flag}
-        1. 查询不带 s3_key_flag
-           会尝试先秒传到你的网盘的 "/我的秒传" 目录下，名字为 f"{md5}-{size}" 的文件，然后再获取下载链接
-            url: ${BASE_URL}&name={name}&size={size}&md5={md5}
+        返回 123 云盘直链跳转接口
+
+        本账号文件通过 file_id 直接取链，分享来源文件通过 MD5 与大小秒传后取链
+
+        :return List: API 配置列表
         """
         return [
             {
@@ -1116,6 +1228,13 @@ class P123StrmHelper(_PluginBase):
                             {
                                 "component": "div",
                                 "text": "同时填写分享链接，分享码和分享密码时，优先读取分享链接",
+                            },
+                            {
+                                "component": "div",
+                                "text": (
+                                    "分享文件播放时会先秒传一份到 /我的秒传 目录再获取直链，"
+                                    "可在清理页配置定期清空该目录"
+                                ),
                             },
                         ],
                     },
@@ -1624,7 +1743,51 @@ class P123StrmHelper(_PluginBase):
 
         logger.info(f"【媒体刮削】{item_name} 刮削元数据完成")
 
-    @cached(cache=TTLCache(maxsize=1, ttl=2 * 60))
+    @cached(
+        cache=_download_url_cache,
+        key=lambda self, name, size, md5, s3_key_flag, file_id, user_agent: hashkey(
+            file_id, md5, size, s3_key_flag, user_agent
+        ),
+        lock=_download_url_lock,
+    )
+    def fetch_download_url(
+        self,
+        name: str,
+        size: int,
+        md5: str,
+        s3_key_flag: str,
+        file_id: int,
+        user_agent: str,
+    ) -> str:
+        """
+        获取 123 云盘文件直链
+
+        :param name (str): 文件名
+        :param size (int): 文件大小
+        :param md5 (str): 文件 MD5
+        :param s3_key_flag (str): 文件 S3KeyFlag
+        :param file_id (int): 网盘文件 ID
+        :param user_agent (str): 客户端 UA，直链与 UA 绑定
+
+        :return str: 直链地址
+        """
+        payload = {
+            "FileID": file_id,
+            "FileName": name,
+            "Etag": md5,
+            "Size": size,
+        }
+        if s3_key_flag:
+            payload["S3KeyFlag"] = s3_key_flag
+        resp = self._client.download_info(
+            payload,
+            base_url="",
+            async_=False,
+            headers={"User-Agent": user_agent},
+        )
+        check_response(resp)
+        return resp["data"]["DownloadUrl"]
+
     def redirect_url(
         self,
         request: Request,
@@ -1632,55 +1795,61 @@ class P123StrmHelper(_PluginBase):
         size: int = 0,
         md5: str = "",
         s3_key_flag: str = "",
-    ):
+        file_id: int = 0,
+    ) -> Union[JSONResponse, RedirectResponse]:
         """
-        123云盘302跳转
+        获取 123 云盘直链并返回 302 跳转
+
+        :param request (Request): HTTP 请求
+        :param name (str): 文件名
+        :param size (int): 文件大小
+        :param md5 (str): 文件 MD5
+        :param s3_key_flag (str): 文件 S3KeyFlag
+        :param file_id (int): 网盘文件 ID，分享来源文件传 0
+
+        :return Union: 直链跳转响应或错误响应
         """
-        if not s3_key_flag:
+        if not md5 or not size:
+            return JSONResponse(
+                {"state": False, "message": "缺少 md5 或 size 参数"}, 400
+            )
+
+        requires_fast_upload = not file_id
+        if requires_fast_upload:
             try:
-                resp = self._client.fs_mkdir("我的秒传")
-                check_response(resp)
-                resp = self._client.upload_file_fast(
-                    file_md5=md5,
-                    file_name=f"{md5}-{size}",
-                    file_size=size,
-                    parent_id=resp["data"]["Info"]["FileId"],
-                    duplicate=2,
-                )
-                check_response(resp)
-                payload = resp["data"]["Info"]
-                logger.info(
-                    f"【302跳转服务】转存 {name} 文件成功: {payload['S3KeyFlag']}"
+                file_id, s3_key_flag = self.fast_upload_to_receive_path(
+                    name=name,
+                    size=size,
+                    md5=md5,
                 )
             except Exception as e:
                 logger.error(f"【302跳转服务】转存 {name} 文件失败: {e}")
                 return JSONResponse(
                     {"state": False, "message": f"转存 {name} 文件失败: {e}"}, 500
                 )
-        else:
-            payload = {
-                "S3KeyFlag": s3_key_flag,
-                "FileName": name,
-                "Etag": md5,
-                "Size": size,
-            }
+
+        user_agent = request.headers.get("User-Agent") or ""
+        logger.debug(f"【302跳转服务】获取到客户端UA: {user_agent}")
 
         try:
-            user_agent = request.headers.get("User-Agent") or b""
-            logger.debug(f"【302跳转服务】获取到客户端UA: {user_agent}")
-            resp = self._client.download_info(
-                payload,
-                base_url="",
-                async_=False,
-                headers={"User-Agent": user_agent},
+            url = self.fetch_download_url(
+                name=name,
+                size=size,
+                md5=md5,
+                s3_key_flag=s3_key_flag,
+                file_id=file_id,
+                user_agent=user_agent,
             )
-            check_response(resp)
-            url = resp["data"]["DownloadUrl"]
-            logger.info(f"【302跳转服务】获取 123 下载地址成功: {url}")
         except Exception as e:
+            if requires_fast_upload:
+                with self._fast_upload_lock:
+                    self._fast_upload_cache.pop(hashkey(md5, size), None)
             logger.error(f"【302跳转服务】获取 123 下载地址失败: {e}")
-            return JSONResponse(f"【302跳转服务】获取 123 下载地址失败: {e}")
+            return JSONResponse(
+                {"state": False, "message": f"获取 123 下载地址失败: {e}"}, 500
+            )
 
+        logger.info(f"【302跳转服务】获取 123 下载地址成功: {url}")
         return RedirectResponse(url, 302)
 
     @eventmanager.register(EventType.TransferComplete)
@@ -1786,21 +1955,30 @@ class P123StrmHelper(_PluginBase):
             return
 
         if (
-            not item_dest_info["FileName"]
-            or not item_dest_info["Size"]
-            or not item_dest_info["Etag"]
-            or not item_dest_info["S3KeyFlag"]
+            not item_dest_info.get("FileName")
+            or not item_dest_info.get("Size")
+            or not item_dest_info.get("Etag")
+            or not item_dest_info.get("S3KeyFlag")
+            or not item_dest_info.get("FileId")
         ):
             logger.error(
                 f"【监控整理STRM生成】{item_dest_name} 缺失必要文件信息，无法生成 STRM 文件: {item_dest_info}"
             )
             return
 
+        query = urlencode(
+            {
+                "apikey": settings.API_TOKEN,
+                "name": item_dest_info["FileName"],
+                "size": item_dest_info["Size"],
+                "md5": item_dest_info["Etag"],
+                "s3_key_flag": item_dest_info["S3KeyFlag"],
+                "file_id": item_dest_info["FileId"],
+            }
+        )
         strm_url = (
-            f"{self.moviepilot_address.rstrip('/')}/api/v1/plugin/P123StrmHelper/redirect_url"
-            f"?apikey={settings.API_TOKEN}&name={item_dest_info['FileName']}"
-            f"&size={item_dest_info['Size']}&md5={item_dest_info['Etag']}"
-            f"&s3_key_flag={item_dest_info['S3KeyFlag']}"
+            f"{self.moviepilot_address.rstrip('/')}"
+            f"/api/v1/plugin/P123StrmHelper/redirect_url?{query}"
         )
 
         status, strm_target_path = generate_strm_files(
@@ -1971,6 +2149,8 @@ class P123StrmHelper(_PluginBase):
                 server_address=self.moviepilot_address,
                 share_media_path=self._user_share_pan_path,
                 local_media_path=self._user_share_local_path,
+                receive_path_name=self.RECEIVE_PATH_NAME,
+                fast_upload=self.fast_upload_to_receive_path,
             )
             strm_helper.get_share_list_creata_strm(
                 parent_id=0,
@@ -2016,13 +2196,15 @@ class P123StrmHelper(_PluginBase):
             logger.info("【我的秒传清理】开始清理我的秒传")
             _storagechain = StorageChain()
             fileitem = _storagechain.get_file_item(
-                storage="123云盘", path=Path("/我的秒传")
+                storage="123云盘", path=Path(f"/{self.RECEIVE_PATH_NAME}")
             )
             if not fileitem:
+                self.clear_fast_upload_cache()
                 logger.info("【我的秒传清理】我的秒传目录为空，无需清理")
                 return
             parent_id = int(fileitem.fileid)
             logger.info(f"【我的秒传清理】我的秒传目录 ID 获取成功: {parent_id}")
+            self.clear_fast_upload_cache()
             resp = self._client.fs_trash(parent_id, event="intoRecycle")
             check_response(resp)
             logger.info("【我的秒传清理】我的秒传已清空")
