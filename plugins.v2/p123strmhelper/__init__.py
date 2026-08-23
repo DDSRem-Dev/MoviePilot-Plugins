@@ -609,7 +609,8 @@ class P123StrmHelper(_PluginBase):
             file_name=f"{md5}-{size}",
             file_size=size,
             parent_id=parent_id,
-            duplicate=1,
+            # 缓存过期后替换同名文件，避免重复副本持续累积
+            duplicate=2,
         )
         check_response(resp)
         info = resp["data"]["Info"]
@@ -636,6 +637,7 @@ class P123StrmHelper(_PluginBase):
         """
         初始化插件
         """
+        self.clear_fast_upload_cache()
         if config:
             self._enabled = config.get("enabled")
             self._once_full_sync_strm = config.get("once_full_sync_strm")
