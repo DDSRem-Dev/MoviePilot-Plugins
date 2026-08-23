@@ -1814,7 +1814,8 @@ class P123StrmHelper(_PluginBase):
                 {"state": False, "message": "缺少 md5 或 size 参数"}, 400
             )
 
-        if not file_id:
+        requires_fast_upload = not file_id
+        if requires_fast_upload:
             try:
                 file_id, s3_key_flag = self.fast_upload_to_receive_path(
                     name=name,
@@ -1840,6 +1841,9 @@ class P123StrmHelper(_PluginBase):
                 user_agent=user_agent,
             )
         except Exception as e:
+            if requires_fast_upload:
+                with self._fast_upload_lock:
+                    self._fast_upload_cache.pop(hashkey(md5, size), None)
             logger.error(f"【302跳转服务】获取 123 下载地址失败: {e}")
             return JSONResponse(
                 {"state": False, "message": f"获取 123 下载地址失败: {e}"}, 500
@@ -2200,9 +2204,9 @@ class P123StrmHelper(_PluginBase):
                 return
             parent_id = int(fileitem.fileid)
             logger.info(f"【我的秒传清理】我的秒传目录 ID 获取成功: {parent_id}")
+            self.clear_fast_upload_cache()
             resp = self._client.fs_trash(parent_id, event="intoRecycle")
             check_response(resp)
-            self.clear_fast_upload_cache()
             logger.info("【我的秒传清理】我的秒传已清空")
         except Exception as e:
             logger.error(f"【我的秒传清理】清理我的秒传运行失败: {e}")
