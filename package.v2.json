@@ -6,6 +6,7 @@
         "version": "1.2.5",
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/CCTV_A.png",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.2.5": "修复媒体详情与订阅身份识别，支持冷启动回查",
@@ -25,6 +26,7 @@
         "version": "1.0.8",
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/migu_A.png",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.0.8": "修复媒体详情与订阅身份识别，支持冷启动回查",
@@ -45,6 +47,7 @@
         "version": "1.0.7",
         "icon": "Bilibili_E.png",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.0.7": "修复媒体详情与订阅身份识别",
@@ -67,6 +70,7 @@
         "version": "1.0.10",
         "icon": "Bangumi_A.png",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.0.10": "统一探索源与卡片的Bangumi媒体身份",
@@ -89,6 +93,7 @@
         "version": "1.0.6",
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/mangguo_A.jpg",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.0.6": "修复媒体详情与订阅身份识别",
@@ -107,6 +112,7 @@
         "version": "1.0.6",
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/tencentvideo_A.png",
         "author": "DDSRem",
+        "v3": false,
         "level": 1,
         "history": {
             "v1.0.6": "修复媒体详情与订阅身份识别",

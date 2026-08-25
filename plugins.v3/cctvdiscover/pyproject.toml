@@ -1,0 +1,5 @@
+[project]
+name = "moviepilot-plugin-cctvdiscover"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = []

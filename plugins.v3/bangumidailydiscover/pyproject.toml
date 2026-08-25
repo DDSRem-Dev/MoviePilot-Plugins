@@ -1,0 +1,5 @@
+[project]
+name = "moviepilot-plugin-bangumidailydiscover"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = []

@@ -1,0 +1,7 @@
+[project]
+name = "moviepilot-plugin-tencentvideodiscover"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.32,<3",
+]
