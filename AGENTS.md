@@ -2,7 +2,95 @@ This file provides guidance to AI coding agents when working with code in this r
 
 # MoviePilot-Plugins Project Conventions
 
-## 1. Commit Conventions
+## 1. Repository and Version Layout
+
+This repository maintains MoviePilot V2 and V3 plugins as separate release
+lines. Always determine the target MoviePilot major version before editing a
+plugin.
+
+### 1.1 Directory and Manifest Mapping
+
+| Target | Source directory | Package manifest | Dependency manifest |
+|--------|------------------|------------------|---------------------|
+| MoviePilot V2 | `plugins.v2/<plugin_name>/` | `package.v2.json` | `requirements.txt` |
+| MoviePilot V3 | `plugins.v3/<plugin_name>/` | `package.v3.json` | `pyproject.toml` |
+
+- Plugin directory names are lowercase; manifest keys use the plugin class ID,
+  such as `p115disk` and `P115Disk`
+- A plugin may exist in only one source tree or in both source trees
+- The same plugin ID in V2 and V3 represents two independently maintained and
+  released implementations, not duplicate files to keep byte-identical
+- Never infer that a change to one major-version tree should be copied to the
+  other. Apply cross-version changes only when the behavior is relevant and
+  compatible, and validate each implementation separately
+- Preserve the existing version tree unless the task explicitly requests
+  migration or removal
+
+### 1.2 MoviePilot API Boundaries
+
+- V2 plugins follow the APIs and import style already established in
+  `plugins.v2/`
+- V3 plugins should use public `app.sdk.*` APIs where the V3 SDK exposes the
+  required capability
+- Direct imports from internal `app.core`, `app.helper`, or other non-SDK
+  modules in V3 require verification against the target MoviePilot V3 source;
+  do not copy a V2 import path into V3 by assumption
+- Shared schemas and plugin base classes may continue to come from their
+  canonical `app.schemas` and `app.plugins` modules when that is the V3
+  contract
+- Event payloads, module method signatures, and storage snapshot semantics can
+  differ between V2 and V3. Check the target host contract before adapting or
+  backporting code
+
+### 1.3 Version Policy
+
+- V2 plugin versions follow their existing independent release history
+- V3 plugin versions use semantic versions in the `3.x.x` range; the initial
+  V3 release is `3.0.0`
+- For every release, keep the source version, manifest `version`, and newest
+  `history` key synchronized exactly
+- The source version is `VERSION` in `version.py` when that file exists;
+  otherwise it is `plugin_version` in `__init__.py`
+- If both `version.py` and `plugin_version` exist, update both even though the
+  release script reads `version.py` first
+- `system_version` describes the minimum compatible MoviePilot host version;
+  it is not the plugin version
+- Do not renumber or copy V2 history entries into V3. Each manifest records the
+  history of its own release line
+
+### 1.4 Package Metadata and Release Behavior
+
+- Every source plugin intended for distribution must have a matching entry in
+  its versioned package manifest
+- Keep `name`, `description`, `labels`, `icon`, `author`, `level`, compatibility
+  flags, and release settings consistent with the implementation
+- For a V2 plugin that also has a dedicated V3 implementation, keep the V2
+  compatibility flag such as `"v3": false` when required by the plugin index
+- `release: true` makes a manifest entry eligible for release; it does not by
+  itself publish unchanged versions
+- Automatic releases are detected from changes to `package*.json`. A
+  source-only version change does not trigger a release
+- The release workflow maps `package.v2.json` to `plugins.v2` and
+  `package.v3.json` to `plugins.v3`, then requires the manifest and source
+  versions to match
+- Expected release tags use `<PluginId>_v<version>`, for example
+  `P115Disk_v3.0.0`
+
+### 1.5 Cross-Version Change Checklist
+
+When a plugin exists in both V2 and V3:
+
+1. Confirm whether the request targets V2, V3, or both
+2. Keep host-specific imports and contracts inside the corresponding tree
+3. Avoid sharing files by symlink or runtime import across version trees
+4. Update only the package manifest for each release line actually changed
+5. Test V2 and V3 independently with their own host and dependencies
+6. Document user-facing availability in `README.md` when adding, moving, or
+   retiring a versioned implementation
+
+---
+
+## 2. Commit Conventions
 
 Use **Conventional Commits** format for easier Changelog generation and semantic versioning.
 
@@ -58,16 +146,16 @@ Co-authored-by: Sisyphus <sisyphus@ohmyopenCode.com>
 
 ---
 
-## 2. Python Coding Conventions
+## 3. Python Coding Conventions
 
-### 1. Style and Format
+### 3.1 Style and Format
 
 - Follow **PEP 8**: 4-space indent, line length ~88–120 chars, spaces around operators, etc.
 - Strings: prefer double quotes `"`; use single quotes when embedding double quotes.
 - Trailing commas: allowed at end of multi-line structures (lists, dicts, args) for cleaner diffs.
 - **Comments** (`#` line comments) **and docstrings**: do not end a line with a terminal period (neither `.` nor Chinese `。`). Applies to summary lines and `:param` / `:return` / `:raises` lines alike.
 
-### 2. Type Annotations
+### 3.2 Type Annotations
 
 - Public functions and methods must have type annotations; internal helpers are encouraged.
 - Use `typing`: `List`, `Dict`, `Optional`, `Any`, `Union`, `Tuple`, etc.
@@ -80,7 +168,7 @@ async def run_tool(api: Any, name: str, arguments: Dict[str, Any]) -> str:
     ...
 ```
 
-### 3. Import Order
+### 3.3 Import Order
 
 1. Standard library (alphabetical)
 2. Blank line
@@ -101,7 +189,7 @@ from .mcp import MCPManager
 from .version import VERSION
 ```
 
-### 4. Naming
+### 3.4 Naming
 
 - Modules/packages: lowercase with hyphens or underscores, e.g. `db_manager`, `mcp`.
 - Classes: `CapWords`.
@@ -109,28 +197,31 @@ from .version import VERSION
 - Constants: `UPPER_SNAKE_CASE`.
 - Private implementation: single leading underscore `_internal_func`; module-level "private" may use `_`.
 
-### 5. Exceptions and Logging
+### 3.5 Exceptions and Logging
 
 - Avoid bare `except:`; use at least `except Exception` and handle at an appropriate level.
 - Use the project's shared `logger` (e.g. `from app.log import logger`) for errors and important info; use `logger.error(..., exc_info=True)` at exception sites for debugging.
 - User-facing messages should be clear and actionable; internal logs may include more technical detail.
 
-### 6. Async Code
+### 3.6 Async Code
 
 - Use `async def` for async functions; call other async APIs with `await`. Avoid blocking calls inside async functions; wrap with `asyncio.to_thread` when needed.
 - Keep the async call chain consistent; do not forget to await coroutines.
 
-### 7. Integration with MoviePilot
+### 3.7 Integration with MoviePilot
 
 - Plugin entry must inherit `_PluginBase` and implement `plugin_name`, `plugin_version`, etc. as required.
 - Use the project's config prefix (e.g. `plugin_config_prefix`), events, and message channels so the interface matches the main app.
-- Put dependencies in the plugin's `requirements.txt`; prefer `~=` for minor-version pinning.
+- Put V2 dependencies in `requirements.txt` and V3 dependencies in the
+  `[project].dependencies` array of `pyproject.toml`
+- Prefer compatible and bounded dependency constraints. Check them against the
+  target MoviePilot version to avoid overriding protected host dependencies
 
 ---
 
-## 3. Comments & Documentation Style
+## 4. Comments & Documentation Style
 
-### 3.1 Docstring Rules
+### 4.1 Docstring Rules
 
 **All public classes, methods, and functions carry a Chinese docstring.**
 Chinese is the project's working language for descriptive prose; symbol names
@@ -231,7 +322,7 @@ Requirements:
 - Yield form: `:yields Type: description`.
 - Blank line between description, params, return, raises, and yields blocks.
 
-#### 3.1.1 Docstring Type Label Convention
+#### 4.1.1 Docstring Type Label Convention
 
 Docstring type labels use only the **parent / container type**, excluding
 `Optional` wrappers and inner type parameters. This keeps docstrings concise
@@ -275,7 +366,7 @@ def iter_files(
     """
 ```
 
-#### 3.1.2 Attributes and Enum Variants
+#### 4.1.2 Attributes and Enum Variants
 
 Class attributes, dataclass fields, and enum variant docstrings **must not**
 appear as individual multiline docstrings beneath each member. Instead,
@@ -327,7 +418,7 @@ class StrmApiData(BaseModel):
 - Every `@staticmethod` on a service or API class.
 - Every Pydantic model field via `Field(description="...")`.
 
-#### 3.1.3 Usage Examples in Docstrings
+#### 4.1.3 Usage Examples in Docstrings
 
 Do **not** include code usage examples inside docstrings. They bloat the
 docstring, drift out of sync with the actual API, and distract from the
@@ -346,7 +437,7 @@ class P115Api:
     """
 ```
 
-#### 3.1.4 Line Separator Comments
+#### 4.1.4 Line Separator Comments
 
 Do **not** use line-separator comments (`# ── … ──`) to visually group
 sections inside a file. They add noise, break searchability, and duplicate
@@ -369,7 +460,7 @@ _cookie = None
   otherwise skip.
 - Trivial one-line lambdas / factories.
 
-### 3.2 Inline Comment Rules
+### 4.2 Inline Comment Rules
 
 Default to **no inline comments**. Code should explain *what* it does through
 clear names and shape. Add a comment only when the **why** is non-obvious.
@@ -386,7 +477,7 @@ Do **not** write comments that:
 - Describe the current task, PR, or reviewer handoff.
 - Mark removed code (`# was: xyz()`) — Git history is authoritative.
 
-### 3.3 Field Descriptions in Pydantic Models
+### 4.3 Field Descriptions in Pydantic Models
 
 ```python
 from typing import Optional
@@ -411,7 +502,7 @@ class StrmApiData(BaseModel):
 Descriptions are mandatory and in Chinese; they become the single source of
 truth used by docs and log-formatting helpers.
 
-### 3.4 Deprecation Markers
+### 4.4 Deprecation Markers
 
 ```python
 # @deprecated: use P115Api.create_folder instead — removal in v0.3.0.
@@ -424,14 +515,14 @@ def legacy_mkdir(...):
 - Deprecated code is removed within one minor release of the marker —
   no `// removed` tombstones left behind.
 
-### 3.5 Changelog
+### 4.5 Changelog
 
 Release notes are generated from commit messages in this repository.
 Keep commit subjects descriptive enough to be published verbatim.
 
 ---
 
-## 4. Quick Checklist
+## 5. Quick Checklist
 
 **Before committing:**
 
@@ -440,11 +531,14 @@ Keep commit subjects descriptive enough to be published verbatim.
 - [ ] New/changed public API has type annotations and docstrings
 - [ ] Imports are ordered correctly; no unused imports
 - [ ] Exception handling and logging are appropriate
+- [ ] Source version, package version, and latest history key match
+- [ ] V2 uses `requirements.txt`; V3 uses `pyproject.toml`
 
 **During review:**
 
 - [ ] Logic is correct; edge cases and error paths considered
 - [ ] No hardcoded secrets (keys, tokens)
 - [ ] Consistent with existing plugin style and MoviePilot conventions
+- [ ] V2 and V3 variants were evaluated and tested independently
 
-*Last Updated: 2026-06-04*
+*Last Updated: 2026-08-25*
