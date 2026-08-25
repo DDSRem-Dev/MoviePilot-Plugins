@@ -1,12 +1,12 @@
 from typing import List
 
-try:
-    from jieba_next import cut as jieba_cut
-except ImportError:
-    from jieba import cut as jieba_cut
-
 from app.db import DbOper
 from app.db.models.transferhistory import TransferHistory
+
+try:
+    from app.sdk.utilities import cut as jieba_cut
+except ImportError:
+    from app.utils.jieba import cut as jieba_cut
 
 
 class TransferHBOper(DbOper):
