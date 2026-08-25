@@ -828,9 +828,6 @@ class ConfigManager(BaseModel):
     sync_del_enabled: bool = Field(default=False, description="同步删除开关")
     sync_del_notify: bool = Field(default=True, description="同步删除通知开关")
     sync_del_source: bool = Field(default=False, description="同步删除源文件")
-    sync_del_delete_symlink: bool = Field(
-        default=False, description="同步删除本地 STRM 软链接"
-    )
     sync_del_p115_library_path: Optional[str] = Field(
         default=None, description="115网盘媒体库路径映射"
     )

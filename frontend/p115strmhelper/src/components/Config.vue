@@ -468,7 +468,6 @@ const config = reactive({
   sync_del_enabled: false,
   sync_del_notify: true,
   sync_del_source: false,
-  sync_del_delete_symlink: false,
   sync_del_p115_library_path: '',
   sync_del_p115_force_delete_files: false,
   sync_del_remove_versions: false,

@@ -47,11 +47,7 @@
           </v-row>
 
           <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.sync_del_delete_symlink" label="删除本地 STRM 软链接" color="error"
-                density="compact"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
+            <v-col cols="12" md="6">
               <v-switch v-model="config.sync_del_remove_versions" label="开启多版本删除" color="info" density="compact" chips
                 closable-chips hint="请查看下方警告提示了解详细说明" persistent-hint></v-switch>
             </v-col>

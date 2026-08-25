@@ -1793,7 +1793,6 @@ class P115StrmHelper(_PluginBase):
                 enabled=configer.sync_del_enabled,
                 notify=configer.sync_del_notify,
                 del_source=configer.sync_del_source,
-                delete_symlink=configer.sync_del_delete_symlink,
                 p115_library_path=configer.sync_del_p115_library_path,
                 p115_force_delete_files=configer.sync_del_p115_force_delete_files,
             )

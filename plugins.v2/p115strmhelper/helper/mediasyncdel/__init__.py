@@ -1,18 +1,18 @@
-from pathlib import Path, PurePosixPath
-from time import localtime, strftime, time
-from typing import Any, Dict, List, Optional, Tuple
+from time import strftime, localtime, time
+from typing import List, Tuple, Optional, Dict, Any
+from pathlib import Path
 
-from app.chain.storage import StorageChain
-from app.core.config import settings
 from app.core.event import Event
-from app.db.downloadhistory_oper import DownloadHistoryOper
-from app.db.models.transferhistory import TransferHistory
-from app.db.plugindata_oper import PluginDataOper
-from app.db.transferhistory_oper import TransferHistoryOper
-from app.helper.downloader import DownloaderHelper
 from app.log import logger
+from app.core.config import settings
+from app.db.models.transferhistory import TransferHistory
+from app.db.transferhistory_oper import TransferHistoryOper
+from app.db.downloadhistory_oper import DownloadHistoryOper
+from app.db.plugindata_oper import PluginDataOper
+from app.helper.downloader import DownloaderHelper
+from app.chain.storage import StorageChain
+from app.schemas.types import MediaType, MediaImageType, NotificationType
 from app.schemas.mediaserver import WebhookEventInfo
-from app.schemas.types import MediaImageType, MediaType, NotificationType
 
 from ...core.config import configer
 from ...core.i18n import i18n
@@ -20,7 +20,7 @@ from ...core.message import post_message
 from ...core.plunins import PluginChian
 from ...db_manager.oper import TransferHBOper
 from ...helper.mediaserver import EmbyOperate
-from ...utils.path import PathRemoveUtils, PathUtils
+from ...utils.path import PathUtils, PathRemoveUtils
 from ...utils.sentry import sentry_manager
 from ...utils.webhook import WebhookUtils
 
@@ -429,10 +429,7 @@ class MediaSyncDelHelper:
         if stem_suffix and stem_suffix.lstrip(".").lower() in mediaext:
             return stem_suffix.lstrip(".")
 
-        sub_paths = self.__get_unique_p115_path_mapping(
-            media_path=file_path,
-            p115_library_path=p115_library_path,
-        )
+        _, sub_paths = PathUtils.get_p115_media_path(file_path, p115_library_path)
         if not sub_paths:
             return None
         file_path = file_path.replace(sub_paths[0], sub_paths[2]).replace("\\", "/")
@@ -448,269 +445,6 @@ class MediaSyncDelHelper:
         except Exception as e:
             logger.error(f"【同步删除】获取115网盘媒体后缀失败: {e}")
         return None
-
-    @staticmethod
-    def __get_p115_path_matches(
-        media_path: str,
-        p115_library_path: str,
-        path_index: int,
-    ) -> List[List[str]]:
-        """
-        获取最长前缀匹配的 115 网盘路径映射
-
-        :param media_path (str): 待匹配路径
-        :param p115_library_path (str): 115 网盘媒体库路径映射
-        :param path_index (int): 要匹配的路径列索引
-
-        :return List: 最长前缀匹配的路径映射列表
-        """
-        matches = []
-        for mapping in p115_library_path.splitlines():
-            parts = [part.strip() for part in mapping.split("#", 2)]
-            if len(parts) != 3 or not all(parts) or path_index >= len(parts):
-                continue
-
-            if path_index == 0:
-                full_parts = PurePosixPath(media_path.replace("\\", "/")).parts
-                prefix_parts = PurePosixPath(parts[path_index].replace("\\", "/")).parts
-                is_match = full_parts[: len(prefix_parts)] == prefix_parts
-            else:
-                try:
-                    Path(media_path).resolve(strict=False).relative_to(
-                        Path(parts[path_index]).resolve(strict=False)
-                    )
-                    is_match = True
-                except (OSError, RuntimeError, ValueError):
-                    is_match = False
-
-            if is_match:
-                matches.append(parts)
-
-        if not matches:
-            return []
-
-        if path_index == 0:
-            matches_with_length = [
-                (
-                    parts,
-                    len(PurePosixPath(parts[path_index].replace("\\", "/")).parts),
-                )
-                for parts in matches
-            ]
-        else:
-            matches_with_length = [
-                (
-                    parts,
-                    len(Path(parts[path_index]).resolve(strict=False).parts),
-                )
-                for parts in matches
-            ]
-        longest_prefix_length = max(length for _, length in matches_with_length)
-        longest_matches = [
-            parts
-            for parts, length in matches_with_length
-            if length == longest_prefix_length
-        ]
-        return [list(parts) for parts in dict.fromkeys(map(tuple, longest_matches))]
-
-    def __get_unique_p115_path_mapping(
-        self,
-        media_path: str,
-        p115_library_path: str,
-        path_index: int = 0,
-    ) -> Optional[List[str]]:
-        """
-        获取最长前缀唯一匹配的 115 网盘路径映射
-
-        最长前缀对应多个不同映射时返回 None 以阻止删除
-
-        :param media_path (str): 待匹配路径
-        :param p115_library_path (str): 115 网盘媒体库路径映射
-        :param path_index (int): 要匹配的路径列索引
-
-        :return List: 唯一路径映射，未匹配或存在歧义时返回 None
-        """
-        matches = self.__get_p115_path_matches(
-            media_path=media_path,
-            p115_library_path=p115_library_path,
-            path_index=path_index,
-        )
-        if len(matches) != 1:
-            if matches:
-                logger.warning(
-                    f"【同步删除】路径 {media_path} 的最长前缀匹配到 "
-                    f"{len(matches)} 条不同的 115 网盘路径映射，"
-                    "已跳过删除以避免误删"
-                )
-            return None
-        return matches[0]
-
-    def __resolve_strm_symlink_path(
-        self,
-        media_path: str,
-        p115_library_path: str,
-    ) -> Tuple[Optional[str], bool, Optional[Path]]:
-        """
-        将媒体服务器 STRM 软链接解析为目标路径映射
-
-        仅检查已配置媒体服务器路径对应的 MoviePilot 本地路径
-        软链接目标未唯一匹配 MoviePilot 路径映射时返回空路径以阻止删除
-
-        :param media_path (str): Emby 上报的媒体路径
-        :param p115_library_path (str): 115 网盘媒体库路径映射
-
-        :return Tuple: 解析后的媒体服务器路径、是否检测到软链接及本地软链接路径
-        """
-        if Path(media_path).suffix.lower() != ".strm":
-            return media_path, False, None
-
-        source_matches = self.__get_p115_path_matches(
-            media_path=media_path,
-            p115_library_path=p115_library_path,
-            path_index=0,
-        )
-        symlink_paths = []
-        for parts in source_matches:
-            relative_path = PurePosixPath(media_path.replace("\\", "/")).relative_to(
-                PurePosixPath(parts[0].replace("\\", "/"))
-            )
-            local_path = Path(parts[1]).joinpath(*relative_path.parts)
-            if local_path.is_symlink():
-                symlink_paths.append(local_path)
-
-        if not symlink_paths:
-            return media_path, False, None
-
-        unique_symlink_paths = list(dict.fromkeys(symlink_paths))
-        if len(unique_symlink_paths) != 1:
-            logger.warning(
-                f"【同步删除】路径 {media_path} 检测到多个本地 STRM 软链接，"
-                "已跳过删除以避免误删"
-            )
-            return None, True, None
-
-        symlink_path = unique_symlink_paths[0]
-        try:
-            link_target = symlink_path.resolve(strict=False)
-        except (OSError, RuntimeError) as e:
-            logger.warning(
-                f"【同步删除】读取本地 STRM 软链接 {symlink_path} 失败，"
-                f"已跳过删除以避免误删: {e}"
-            )
-            return None, True, symlink_path
-
-        target_matches = self.__get_p115_path_matches(
-            media_path=str(link_target),
-            p115_library_path=p115_library_path,
-            path_index=1,
-        )
-        if len(target_matches) != 1:
-            logger.warning(
-                f"【同步删除】检测到软链接 {symlink_path} -> {link_target}，"
-                f"但目标匹配到 {len(target_matches)} 条 115 网盘路径映射，"
-                "已跳过删除以避免误删"
-            )
-            return None, True, symlink_path
-
-        target_parts = target_matches[0]
-        relative_target = link_target.relative_to(
-            Path(target_parts[1]).resolve(strict=False)
-        )
-        resolved_media_path = str(
-            PurePosixPath(target_parts[0].replace("\\", "/")).joinpath(
-                *relative_target.parts
-            )
-        )
-        logger.info(
-            f"【同步删除】路径追踪：Emby Item Path={media_path}，"
-            f"本地软链接={symlink_path}，软链接目标={link_target}，"
-            f"MoviePilot 映射={target_parts[1]}，115 网盘映射={target_parts[2]}"
-        )
-        return resolved_media_path, True, symlink_path
-
-    def __expand_strm_directory_paths(
-        self,
-        media_path: str,
-        p115_library_path: str,
-    ) -> Tuple[List[str], bool]:
-        """
-        将媒体服务器目录递归展开为 STRM 文件路径
-
-        仅展开唯一匹配且仍存在的 MoviePilot 本地目录
-        本地目录已被媒体服务器删除时回退到现有目录映射
-
-        :param media_path (str): Emby 上报的媒体路径
-        :param p115_library_path (str): 115 网盘媒体库路径映射
-
-        :return Tuple: 展开后的媒体服务器路径列表及是否识别到本地目录
-        """
-        source_matches = self.__get_p115_path_matches(
-            media_path=media_path,
-            p115_library_path=p115_library_path,
-            path_index=0,
-        )
-        directory_matches = []
-        normalized_media_path = PurePosixPath(media_path.replace("\\", "/"))
-        for parts in source_matches:
-            relative_path = normalized_media_path.relative_to(
-                PurePosixPath(parts[0].replace("\\", "/"))
-            )
-            local_path = Path(parts[1]).joinpath(*relative_path.parts)
-            if local_path.is_dir() and not local_path.is_symlink():
-                directory_matches.append((parts, local_path))
-
-        if not directory_matches:
-            media_suffixes = {
-                f".{suffix.lstrip('.').lower()}"
-                for suffix in settings.RMT_MEDIAEXT or []
-            }
-            media_suffixes.add(".strm")
-            if source_matches and Path(media_path).suffix.lower() not in media_suffixes:
-                logger.info(
-                    f"【同步删除】路径 {media_path} 对应本地目录已不存在，"
-                    "按目录映射继续同步删除"
-                )
-                return [media_path], False
-            return [media_path], False
-
-        if len(directory_matches) != 1:
-            logger.warning(
-                f"【同步删除】路径 {media_path} 匹配到多个不同的媒体目录映射，"
-                "已跳过删除以避免误删"
-            )
-            return [], True
-
-        _, local_directory = directory_matches[0]
-        try:
-            strm_paths = sorted(
-                (
-                    path
-                    for path in local_directory.rglob("*")
-                    if path.suffix.lower() == ".strm"
-                    and (path.is_file() or path.is_symlink())
-                ),
-                key=lambda path: str(path).casefold(),
-            )
-        except OSError as e:
-            logger.error(
-                f"【同步删除】递归读取本地媒体目录 {local_directory} 失败，"
-                f"已跳过删除以避免误删: {e}",
-                exc_info=True,
-            )
-            return [], True
-        expanded_paths = [
-            str(
-                normalized_media_path.joinpath(
-                    *strm_path.relative_to(local_directory).parts
-                )
-            )
-            for strm_path in strm_paths
-        ]
-        logger.info(
-            f"【同步删除】目录 {media_path} 递归识别到 "
-            f"{len(expanded_paths)} 个 STRM 文件"
-        )
-        return expanded_paths, True
 
     @staticmethod
     def __get_remove_type(
@@ -762,7 +496,6 @@ class MediaSyncDelHelper:
         tmdb_id: int,
         season_num: Optional[str],
         episode_num: Optional[str],
-        exact_path_only: bool = False,
     ) -> Tuple[str, List[TransferHistory]]:
         """
         查询转移记录
@@ -773,7 +506,6 @@ class MediaSyncDelHelper:
         :param tmdb_id (int): TMDB ID
         :param season_num (str): 季数
         :param episode_num (str): 集数
-        :param exact_path_only (bool): 是否仅查询目标路径完全匹配的转移记录
         """
         # 季数
         if season_num and str(season_num).isdigit():
@@ -788,13 +520,8 @@ class MediaSyncDelHelper:
 
         # 类型
         mtype = MediaType.MOVIE if media_type in ["Movie", "MOV"] else MediaType.TV
-        if exact_path_only:
-            media_type_name = "电影" if mtype == MediaType.MOVIE else "剧集"
-            msg = f"{media_type_name} {media_name} {tmdb_id}"
-            transfer_his = self.transferhis.get_by_dest(media_path)
-            transfer_history = [transfer_his] if transfer_his else []
         # 删除多版本电影
-        elif mtype == MediaType.MOVIE and configer.sync_del_remove_versions:
+        if mtype == MediaType.MOVIE and configer.sync_del_remove_versions:
             msg, transfer_history = "", []
             transfer_his = self.transferhis.get_by_dest(media_path)
             if transfer_his:
@@ -896,7 +623,6 @@ class MediaSyncDelHelper:
         del_source: bool,
         p115_library_path: Optional[str],
         p115_force_delete_files: bool,
-        delete_symlink: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         通过Webhook事件同步删除媒体
@@ -907,7 +633,6 @@ class MediaSyncDelHelper:
         :param del_source (bool): 是否删除源文件
         :param p115_library_path (str): 115 网盘媒体库路径映射
         :param p115_force_delete_files (bool): 115 网盘强制删除
-        :param delete_symlink (bool): 是否删除本地 STRM 软链接
         """
         if not enabled:
             return None
@@ -969,35 +694,15 @@ class MediaSyncDelHelper:
         if not p115_library_path:
             return None
 
-        expanded_item_paths = []
-        for item_path in item_paths:
-            paths, directory_expanded = self.__expand_strm_directory_paths(
-                media_path=item_path,
-                p115_library_path=p115_library_path,
-            )
-            expanded_item_paths.extend((path, directory_expanded) for path in paths)
-
         results = []
-        for media_path, directory_expanded in expanded_item_paths:
+        for media_path in item_paths:
             if not media_path:
                 continue
 
             media_suffix = None
 
-            media_path, symlink_detected, symlink_path = (
-                self.__resolve_strm_symlink_path(
-                    media_path=media_path,
-                    p115_library_path=p115_library_path,
-                )
-            )
-            if symlink_detected and not media_path:
-                continue
-
-            path_mapping = self.__get_unique_p115_path_mapping(
-                media_path=media_path,
-                p115_library_path=p115_library_path,
-            )
-            if not path_mapping:
+            status, _ = PathUtils.get_p115_media_path(media_path, p115_library_path)
+            if not status:
                 logger.warn(
                     f"【同步删除】{media_name} 路径 {media_path} 同步删除失败，未识别到115网盘储存类型，跳过"
                 )
@@ -1005,8 +710,7 @@ class MediaSyncDelHelper:
 
             # 对于 115 网盘文件需要获取媒体后缀名
             if Path(media_path).suffix:
-                if not directory_expanded:
-                    media_suffix = json_object.get("Item", {}).get("Container", None)
+                media_suffix = json_object.get("Item", {}).get("Container", None)
                 if not media_suffix:
                     media_suffix = self.__get_p115_media_suffix(
                         media_path, p115_library_path
@@ -1016,25 +720,6 @@ class MediaSyncDelHelper:
                             f"【同步删除】{media_name} 路径 {media_path} 同步删除失败，未识别媒体后缀名，跳过"
                         )
                         continue
-
-                if symlink_detected:
-                    symlink_parts = self.__get_unique_p115_path_mapping(
-                        media_path=media_path,
-                        p115_library_path=p115_library_path,
-                    )
-                    if not symlink_parts:
-                        logger.warning(
-                            "【同步删除】软链接路径映射丢失，已跳过删除以避免误删"
-                        )
-                        continue
-                    symlink_p115_path = media_path.replace(
-                        symlink_parts[0], symlink_parts[2]
-                    ).replace("\\", "/")
-                    symlink_p115_path, _ = PathUtils.get_media_file_paths_with_suffix(
-                        file_path=symlink_p115_path,
-                        media_suffix=media_suffix,
-                    )
-                    logger.info(f"【同步删除】软链接最终删除路径：{symlink_p115_path}")
             else:
                 logger.debug(
                     f"【同步删除】{media_name} 路径 {media_path} 跳过识别媒体后缀名"
@@ -1076,23 +761,9 @@ class MediaSyncDelHelper:
                 p115_force_delete_files=p115_force_delete_files,
                 del_source=del_source,
                 notify=notify,
-                symlink_detected=symlink_detected,
-                exact_path_only=directory_expanded,
             )
             if result:
                 results.append(result)
-                if delete_symlink and symlink_path:
-                    try:
-                        if symlink_path.is_symlink():
-                            symlink_path.unlink()
-                            logger.info(
-                                f"【同步删除】本地 STRM 软链接已删除：{symlink_path}"
-                            )
-                    except OSError as e:
-                        logger.error(
-                            f"【同步删除】删除本地 STRM 软链接 {symlink_path} 失败: {e}",
-                            exc_info=True,
-                        )
 
         return results[-1] if results else None
 
@@ -1109,8 +780,6 @@ class MediaSyncDelHelper:
         p115_force_delete_files: bool,
         del_source: bool,
         notify: bool,
-        symlink_detected: bool = False,
-        exact_path_only: bool = False,
     ) -> Dict[str, Any]:
         """
         执行同步删除
@@ -1126,8 +795,6 @@ class MediaSyncDelHelper:
         :param p115_force_delete_files (bool): 115 网盘 强制删除
         :param del_source (bool): 是否删除源文件
         :param notify (bool): 是否通知
-        :param symlink_detected (bool): 是否通过本地 STRM 软链接解析路径
-        :param exact_path_only (bool): 是否仅按单个目标路径删除
         """
         if not media_type:
             logger.error(
@@ -1143,10 +810,7 @@ class MediaSyncDelHelper:
 
         mp_media_path: Optional[Path] = None
         if p115_library_path:
-            sub_paths = self.__get_unique_p115_path_mapping(
-                media_path=media_path,
-                p115_library_path=p115_library_path,
-            )
+            _, sub_paths = PathUtils.get_p115_media_path(media_path, p115_library_path)
             if sub_paths:
                 mp_media_path = Path(
                     media_path.replace(sub_paths[0], sub_paths[1]).replace("\\", "/")
@@ -1160,12 +824,7 @@ class MediaSyncDelHelper:
             media_suffix=media_suffix,
         )
 
-        if (
-            mp_media_path
-            and mp_media_path.exists()
-            and not symlink_detected
-            and not exact_path_only
-        ):
+        if mp_media_path and mp_media_path.exists():
             logger.warn(
                 f"【同步删除】转移路径 {media_path} 未被删除或重新生成，跳过处理"
             )
@@ -1178,7 +837,6 @@ class MediaSyncDelHelper:
             tmdb_id=tmdb_id,
             season_num=season_num,
             episode_num=episode_num,
-            exact_path_only=exact_path_only,
         )
 
         if not msg:
@@ -1195,7 +853,6 @@ class MediaSyncDelHelper:
                 tmdb_id=tmdb_id,
                 season_num=season_num,
                 episode_num=episode_num,
-                exact_path_only=exact_path_only,
             )
             if not msg:
                 msg = media_name
