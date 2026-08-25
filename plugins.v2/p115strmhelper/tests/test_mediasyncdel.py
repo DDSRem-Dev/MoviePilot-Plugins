@@ -414,9 +414,11 @@ class TestMediaSyncDelHelper(TestCase):
         )
         self.assertTrue(all(call["exact_path_only"] for call in calls_by_path.values()))
 
-    def test_expand_strm_directory_paths_skips_missing_directory(self) -> None:
+    def test_expand_strm_directory_paths_falls_back_for_missing_directory(
+        self,
+    ) -> None:
         """
-        本地目录已不存在时不回退为网盘目录映射删除
+        本地目录已被 Emby 删除时回退为网盘目录映射
         """
         module = _load_mediasyncdel_module()
         helper = object.__new__(module.MediaSyncDelHelper)
@@ -428,7 +430,44 @@ class TestMediaSyncDelHelper(TestCase):
                 mappings,
             )
 
-        self.assertEqual(result, ([], True))
+        self.assertEqual(result, (["/emby-media/测试剧集"], False))
+
+    def test_sync_del_by_webhook_processes_missing_directory(self) -> None:
+        """
+        Webhook 在本地目录已被 Emby 删除后继续同步删除
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        sync_del = Mock(return_value={"deleted": True})
+        helper._MediaSyncDelHelper__sync_del = sync_del
+
+        with TemporaryDirectory() as temp_dir:
+            mappings = f"/emby-media#{Path(temp_dir) / 'media'}#/emby/整理完成"
+            event_data = SimpleNamespace(
+                event="deep.delete",
+                item_type="Series",
+                item_name="测试剧集",
+                item_path="/emby-media/测试剧集",
+                tmdb_id=123,
+                season_id=None,
+                episode_id=None,
+                json_object={"Item": {"Container": "folder"}},
+            )
+
+            result = helper.sync_del_by_webhook(
+                event_data=event_data,
+                enabled=True,
+                notify=False,
+                del_source=True,
+                delete_symlink=False,
+                p115_library_path=mappings,
+                p115_force_delete_files=True,
+            )
+
+        self.assertEqual(result, {"deleted": True})
+        sync_del.assert_called_once()
+        self.assertEqual(sync_del.call_args.kwargs["media_path"], event_data.item_path)
+        self.assertFalse(sync_del.call_args.kwargs["exact_path_only"])
 
     def test_expand_strm_directory_paths_preserves_directory_prefix(self) -> None:
         """

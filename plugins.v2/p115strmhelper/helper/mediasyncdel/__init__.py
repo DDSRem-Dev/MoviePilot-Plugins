@@ -637,7 +637,7 @@ class MediaSyncDelHelper:
         将媒体服务器目录递归展开为 STRM 文件路径
 
         仅展开唯一匹配且仍存在的 MoviePilot 本地目录
-        疑似目录但无法读取本地路径时跳过删除以避免误删
+        本地目录已被媒体服务器删除时回退到现有目录映射
 
         :param media_path (str): Emby 上报的媒体路径
         :param p115_library_path (str): 115 网盘媒体库路径映射
@@ -666,11 +666,11 @@ class MediaSyncDelHelper:
             }
             media_suffixes.add(".strm")
             if source_matches and Path(media_path).suffix.lower() not in media_suffixes:
-                logger.warning(
-                    f"【同步删除】路径 {media_path} 疑似媒体目录，"
-                    "但无法读取对应本地目录，已跳过删除以避免误删"
+                logger.info(
+                    f"【同步删除】路径 {media_path} 对应本地目录已不存在，"
+                    "按目录映射继续同步删除"
                 )
-                return [], True
+                return [media_path], False
             return [media_path], False
 
         if len(directory_matches) != 1:
