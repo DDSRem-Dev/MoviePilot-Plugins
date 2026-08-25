@@ -1,0 +1,9 @@
+[project]
+name = "moviepilot-plugin-clouddrivedisk"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "clouddrive2-client==0.3.0",
+    "grpcio~=1.80.0",
+    "protobuf>=6.31.1,<7",
+]

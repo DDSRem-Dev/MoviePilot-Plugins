@@ -1,0 +1,7 @@
+[project]
+name = "moviepilot-plugin-p123disk"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "p123client @ https://github.com/jdzjy/p123client/archive/5170035c750598015b35c5ab80afceb0de60f321.zip",
+]

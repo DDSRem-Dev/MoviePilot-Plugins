@@ -498,6 +498,7 @@
         }
     },
     "P115Disk": {
+        "v3": false,
         "name": "115网盘储存",
         "description": "更快更强的115网盘存储模块。",
         "labels": "云盘",
@@ -575,6 +576,7 @@
         }
     },
     "P123Disk": {
+        "v3": false,
         "name": "123云盘储存",
         "description": "使存储支持123云盘。",
         "labels": "云盘",
@@ -660,6 +662,7 @@
         }
     },
     "CloudDriveDisk": {
+        "v3": false,
         "name": "CloudDrive2储存",
         "description": "使存储支持 CloudDrive2，grpc 原生 API 操作。",
         "labels": "云盘",
