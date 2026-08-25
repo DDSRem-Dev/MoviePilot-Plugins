@@ -3,14 +3,14 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
-from fastapi import Request
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from p123client import check_response
 from p123client.tool import iterdir, share_iterdir
@@ -528,7 +528,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.1.8"
+    plugin_version = "1.1.9"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -1796,7 +1796,7 @@ class P123StrmHelper(_PluginBase):
         md5: str = "",
         s3_key_flag: str = "",
         file_id: int = 0,
-    ) -> Union[JSONResponse, RedirectResponse]:
+    ) -> Response:
         """
         获取 123 云盘直链并返回 302 跳转
 
@@ -1807,7 +1807,7 @@ class P123StrmHelper(_PluginBase):
         :param s3_key_flag (str): 文件 S3KeyFlag
         :param file_id (int): 网盘文件 ID，分享来源文件传 0
 
-        :return Union: 直链跳转响应或错误响应
+        :return Response: 直链跳转响应或错误响应
         """
         if not md5 or not size:
             return JSONResponse(
