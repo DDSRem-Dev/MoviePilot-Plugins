@@ -769,7 +769,7 @@ class P123Api:
         target_dir: schemas.FileItem,
         known_ids: Set[str],
         source_item: schemas.FileItem,
-        max_attempts: int = 12,
+        max_attempts: int = 20,
     ) -> Optional[schemas.FileItem]:
         for attempt in range(max_attempts):
             children = self.list(target_dir)
@@ -824,7 +824,7 @@ class P123Api:
             if existing_items is None:
                 return False
             known_ids = {item.fileid for item in existing_items if item.fileid}
-            resp = self.client.fs_copy(fileitem.fileid, parent_id=parent_id)
+            resp = self.client.fs_copy(int(fileitem.fileid), parent_id=int(parent_id))
             check_response(resp)
             logger.debug(f"【123】复制文件: {resp}")
             new_item = self._find_copied_item(
@@ -839,7 +839,8 @@ class P123Api:
                 return False
             self._id_cache[(Path(path) / new_name).as_posix()] = str(new_item.fileid)
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"【123】复制文件出错: {e}", exc_info=True)
             return False
 
     def move(self, fileitem: schemas.FileItem, path: Path, new_name: str) -> bool:
@@ -853,20 +854,28 @@ class P123Api:
         """
         try:
             resp = self.client.fs_move(
-                fileitem.fileid, parent_id=self._path_to_id(str(path))
+                int(fileitem.fileid),
+                parent_id=int(self._path_to_id(str(path))),
             )
             check_response(resp)
             logger.debug(f"【123】移动文件: {resp}")
             self._invalidate_path_cache(fileitem.path)
             new_path = Path(path) / fileitem.name
-            new_item = self.get_item(new_path)
+            new_item = None
+            for attempt in range(20):
+                new_item = self.get_item(new_path)
+                if new_item:
+                    break
+                if attempt < 19:
+                    time.sleep(0.5)
             if not new_item:
                 return False
             if new_item.name != new_name and not self.rename(new_item, new_name):
                 return False
             self._id_cache[(Path(path) / new_name).as_posix()] = str(new_item.fileid)
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"【123】移动文件出错: {e}", exc_info=True)
             return False
 
     def link(self, fileitem: schemas.FileItem, target_file: Path) -> bool:

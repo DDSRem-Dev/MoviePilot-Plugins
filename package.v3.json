@@ -3,13 +3,14 @@
         "name": "115网盘储存",
         "description": "更快更强的115网盘存储模块。",
         "labels": "云盘",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "修复清理缓存响应并适配 V3 存储管理接口",
             "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
         }
     },
@@ -17,13 +18,14 @@
         "name": "123云盘储存",
         "description": "使存储支持123云盘。",
         "labels": "云盘",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "适配 V3 存储管理接口并修复复制移动兼容性",
             "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
         }
     },
@@ -31,13 +33,14 @@
         "name": "CloudDrive2储存",
         "description": "使存储支持 CloudDrive2，grpc 原生 API 操作。",
         "labels": "云盘",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "Cloudrive_A.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "适配 MoviePilot V3 存储管理接口",
             "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
         }
     }

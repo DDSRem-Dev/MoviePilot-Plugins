@@ -26,7 +26,7 @@ class P123Disk(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -192,6 +192,7 @@ class P123Disk(_PluginBase):
         }
         """
         return {
+            "storage_manage": self.storage_manage,
             "list_files": self.list_files,
             "any_files": self.any_files,
             "download_file": self.download_file,
@@ -207,6 +208,47 @@ class P123Disk(_PluginBase):
             "get_folder": self.get_folder,
             "exists": self.exists,
             "get_item": self.get_item,
+        }
+
+    def storage_manage(
+        self, storage: str, action: str, **params: Any
+    ) -> Optional[Dict[str, Any]]:
+        """
+        处理 MoviePilot V3 统一存储管理动作
+
+        :param storage (str): 存储类型
+        :param action (str): 存储管理动作
+        :param params (Any): 动作参数
+
+        :return Dict: 统一存储管理响应，存储不匹配返回 None
+        """
+        if storage != self._disk_name:
+            return None
+
+        if action in {"save_config", "reset_config"}:
+            return {"success": True, "message": "", "data": None}
+        if action == "support_transtype":
+            return {
+                "success": True,
+                "message": "",
+                "data": {"transtype": {"move": "移动", "copy": "复制"}},
+            }
+        if action == "usage":
+            if not self._p123_api:
+                return {
+                    "success": False,
+                    "message": "插件未启用或未初始化",
+                    "data": None,
+                }
+            return {
+                "success": True,
+                "message": "",
+                "data": self._p123_api.usage().model_dump(),
+            }
+        return {
+            "success": False,
+            "message": f"123云盘 不支持 {action}",
+            "data": None,
         }
 
     @eventmanager.register(ChainEventType.StorageOperSelection)

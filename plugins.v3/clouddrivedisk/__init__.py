@@ -10,13 +10,12 @@ from pytz import timezone
 from app.plugins import _PluginBase
 from app.schemas import (
     FileItem,
-    NotificationType,
     Response,
     StorageOperSelectionEventData,
     StorageUsage,
 )
 from app.schemas.exception import StorageQueryError
-from app.schemas.types import ChainEventType, EventType
+from app.schemas.types import ChainEventType, EventType, MessageType
 from app.sdk.config import settings
 from app.sdk.events import Event, eventmanager
 from app.sdk.logging import logger
@@ -40,7 +39,7 @@ class CloudDriveDisk(_PluginBase):
     plugin_name = "CloudDrive2储存"
     plugin_desc = "使存储支持 CloudDrive2，grpc 原生 API 操作。"
     plugin_icon = "Cloudrive_A.png"
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "clouddrivedisk_"
@@ -243,10 +242,10 @@ class CloudDriveDisk(_PluginBase):
 
         :param msg (str): 通知内容
         """
-        mtype = NotificationType.Manual
+        mtype = MessageType.Manual
         if self._msgtype:
             try:
-                mtype = NotificationType.__getitem__(str(self._msgtype))
+                mtype = MessageType.__getitem__(str(self._msgtype))
             except Exception:
                 pass
         self.post_message(
@@ -436,9 +435,9 @@ class CloudDriveDisk(_PluginBase):
 
         :return Tuple: (页面配置列表, 表单默认值字典)
         """
-        # 编历 NotificationType 枚举，生成消息类型选项
+        # 编历 MessageType 枚举，生成消息类型选项
         MsgTypeOptions = []
-        for item in NotificationType:
+        for item in MessageType:
             MsgTypeOptions.append({"title": item.value, "value": item.name})
 
         return [
@@ -1360,6 +1359,7 @@ class CloudDriveDisk(_PluginBase):
         :return Dict: 储存操作函数映射字典
         """
         return {
+            "storage_manage": self.storage_manage,
             "list_files": self.list_files,
             "any_files": self.any_files,
             "download_file": self.download_file,
@@ -1375,6 +1375,52 @@ class CloudDriveDisk(_PluginBase):
             "get_folder": self.get_folder,
             "exists": self.exists,
             "get_item": self.get_item,
+        }
+
+    def storage_manage(
+        self, storage: str, action: str, **params: Any
+    ) -> Optional[Dict[str, Any]]:
+        """
+        处理 MoviePilot V3 统一存储管理动作
+
+        :param storage (str): 存储类型
+        :param action (str): 存储管理动作
+        :param params (Any): 动作参数
+
+        :return Dict: 统一存储管理响应，存储不匹配返回 None
+        """
+        if storage != self._disk_name:
+            return None
+
+        if action in {"save_config", "reset_config"}:
+            return {"success": True, "message": "", "data": None}
+        if action == "support_transtype":
+            transtype = (
+                self._clouddrive_api.transtype
+                if self._clouddrive_api
+                else {"move": "移动", "copy": "复制"}
+            )
+            return {
+                "success": True,
+                "message": "",
+                "data": {"transtype": transtype},
+            }
+        if action == "usage":
+            if not self._clouddrive_api:
+                return {
+                    "success": False,
+                    "message": "插件未启用或未初始化",
+                    "data": None,
+                }
+            return {
+                "success": True,
+                "message": "",
+                "data": self._clouddrive_api.usage().model_dump(),
+            }
+        return {
+            "success": False,
+            "message": f"CloudDrive储存 不支持 {action}",
+            "data": None,
         }
 
     @eventmanager.register(ChainEventType.StorageOperSelection)
