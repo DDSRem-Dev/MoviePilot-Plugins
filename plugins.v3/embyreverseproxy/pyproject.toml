@@ -3,5 +3,5 @@ name = "moviepilot-plugin-embyreverseproxy"
 dynamic = ["version"]
 requires-python = ">=3.12"
 dependencies = [
-    "websockets>=13,<16",
+    "websockets",
 ]
