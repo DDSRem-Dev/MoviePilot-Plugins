@@ -29,6 +29,20 @@
             "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
         }
     },
+    "P123StrmHelper": {
+        "name": "123云盘STRM助手",
+        "description": "123云盘STRM生成一条龙服务",
+        "labels": "云盘",
+        "version": "3.0.0",
+        "release": true,
+        "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/P123Disk.png",
+        "author": "DDSRem",
+        "system_version": ">=3.0.0",
+        "level": 1,
+        "history": {
+            "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
+        }
+    },
     "CloudDriveDisk": {
         "name": "CloudDrive2储存",
         "description": "使存储支持 CloudDrive2，grpc 原生 API 操作。",

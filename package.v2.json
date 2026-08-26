@@ -630,6 +630,7 @@
         }
     },
     "P123StrmHelper": {
+        "v3": false,
         "name": "123云盘STRM助手",
         "description": "123云盘STRM生成一条龙服务",
         "labels": "云盘",
