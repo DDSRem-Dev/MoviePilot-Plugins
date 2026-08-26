@@ -19,7 +19,7 @@ on:
       python_version:
         description: '用于编译的 Python 版本'
         required: true
-        default: '3.12.8'
+        default: '3.14'
         type: string
       # 输入参数：目标平台和架构
       platforms:
