@@ -23,17 +23,17 @@ Telegram 交流群: https://t.me/+1lcscM_EbqhkN2Rl
 - [123云盘储存 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/p123disk) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/p123disk)：使存储支持123云盘。
 - [123云盘STRM助手](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/p123strmhelper)：123云盘STRM生成一条龙服务。
 - [CloudDrive2储存 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/clouddrivedisk) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/clouddrivedisk)：使存储支持 CloudDrive2，grpc 原生 API 操作。
-- [Emby 302 反向代理](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/embyreverseproxy)：Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用。
+- [Emby 302 反向代理 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/embyreverseproxy) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/embyreverseproxy)：Emby 302 反向代理，自动代理 HTTP 链接，跳转最终地址，支持外部播放器调用。
 - [MediaWarp](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/mediawarp)：EmbyServer/Jellyfin 中间件：优化播放 Strm 文件、自定义前端样式、自定义允许访问客户端、嵌入脚本。
 
 #### 媒体管理类
 
-- [神医媒体文件同步删除](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/samediasyncdel)：通过神医插件通知同步删除历史记录、源文件和下载任务。
-- [ffprobe命名补充](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/ffprobenamingsupplement)：整理重命名时调用 `ffprobe`，统一补全视频及关联字幕、音轨的 `videoFormat`、`videoCodec`、`videoBit`、`audioCodec`、`fps`、`effect`，支持 STRM
+- [神医媒体文件同步删除 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/samediasyncdel) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/samediasyncdel)：通过神医插件通知同步删除历史记录、源文件和下载任务。
+- [ffprobe命名补充 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/ffprobenamingsupplement) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/ffprobenamingsupplement)：整理重命名时调用 `ffprobe`，统一补全视频及关联字幕、音轨的 `videoFormat`、`videoCodec`、`videoBit`、`audioCodec`、`fps`、`effect`，支持 STRM
 
 #### 工具类
 
-- [115订阅站点修复](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/p115subfixer)：修复115网盘订阅追更插件导致的订阅站点被篡改问题，并自动卸载该插件
+- [115订阅站点修复 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/p115subfixer) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/p115subfixer)：修复115网盘订阅追更插件导致的订阅站点被篡改问题，并自动卸载该插件
 
 ## 感谢
 
