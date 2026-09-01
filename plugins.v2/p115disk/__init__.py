@@ -27,7 +27,7 @@ class P115Disk(_PluginBase):
         "refs/heads/v2/src/assets/images/misc/u115.png"
     )
     # 插件版本
-    plugin_version = "0.2.31"
+    plugin_version = "0.2.32"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -693,7 +693,7 @@ class P115Disk(_PluginBase):
                         return
 
                     if (
-                        self.snapshot_check_folder_modtime  # noqa
+                        getattr(self, "snapshot_check_folder_modtime", False)
                         and last_snapshot_time
                         and _fileitm.modify_time
                         and _fileitm.modify_time <= last_snapshot_time
