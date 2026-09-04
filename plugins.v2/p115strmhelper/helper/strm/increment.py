@@ -772,6 +772,10 @@ class IncrementSyncStrmHelper:
         """
         立即删除单个无效 STRM 文件
         """
+        # 扫描后路径可能变成目录，不能按文件删除或递归清理其内容
+        if Path(remove_path).is_dir():
+            logger.warning(f"【增量STRM生成】跳过目录路径: {remove_path}")
+            return
         logger.info(f"【增量STRM生成】清理无效 STRM 文件: {remove_path}")
         Path(remove_path).unlink(missing_ok=True)
         if self.remove_unless_file:
