@@ -1,0 +1,21 @@
+services:
+  plex-mediainfo-helper:
+    build: .
+    image: plex-mediainfo-helper:latest
+    container_name: plex-mediainfo-helper
+    restart: unless-stopped
+    ports:
+      - "9001:9001"
+    volumes:
+      # 左侧改成 122 上 Plex 实际的 Databases 目录（含 com.plexapp.plugins.library.db）
+      - "/path/to/plex/config/Library/Application Support/Plex Media Server/Plug-in Support/Databases:/db"
+    environment:
+      PTH_DB_PATH: "/db/com.plexapp.plugins.library.db"
+      # 自定义一个访问密码，稍后填进插件
+      PTH_TOKEN: "换成一个自定义密码"
+      # 繁忙检测用；PTH_PLEX_TOKEN 留空则跳过检测
+      PTH_PLEX_URL: "http://192.168.0.122:32400"
+      PTH_PLEX_TOKEN: "你的PlexToken"
+      # 可选：备份保留份数、有播放时是否拒写
+      PTH_BACKUP_KEEP: "10"
+      PTH_REFUSE_WHEN_PLAYING: "1"

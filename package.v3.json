@@ -170,6 +170,21 @@
             "v3.0.0": "适配 MoviePilot V3 SDK 与整理重命名事件契约"
         }
     },
+    "PlexToolbox": {
+        "name": "PLEX 工具箱",
+        "description": "Plex 302 反向代理、STRM 媒体信息补全、缺海报修复与重复条目合并；支持无 Emby 时用 ffprobe 探测 STRM 直链。",
+        "labels": "媒体,工具",
+        "version": "1.1.0",
+        "release": true,
+        "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/Plex_A.png",
+        "author": "shyblacktea,MoviePilot助手",
+        "system_version": ">=3.0.0",
+        "level": 1,
+        "history": {
+            "v1.1.0": "新增无 Emby 时使用 ffprobe 探测 STRM 直链，并增加 Plex 主机到 MoviePilot 容器的路径映射",
+            "v1.0.0": "新增 Plex 302 反向代理、媒体信息补全、海报修复与重复条目合并"
+        }
+    },
     "P115SubFixer": {
         "name": "115订阅站点修复",
         "description": "修复115网盘订阅追更插件导致的订阅站点被篡改问题，并自动卸载该插件",
