@@ -300,7 +300,6 @@ def ffprobe_url(
         timeout_value = 40.0
     command = [
         executable,
-        "-nostdin",
         "-v",
         "error",
         "-print_format",
