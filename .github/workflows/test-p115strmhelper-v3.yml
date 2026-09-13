@@ -1,0 +1,42 @@
+name: Test p115strmhelper (V3)
+
+on:
+  push:
+    paths:
+      - 'plugins.v3/p115strmhelper/**'
+      - '.github/workflows/test-p115strmhelper-v3.yml'
+  pull_request:
+    paths:
+      - 'plugins.v3/p115strmhelper/**'
+      - '.github/workflows/test-p115strmhelper-v3.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout plugin code
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: plugins.v3/p115strmhelper/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --find-links plugins.v3/p115strmhelper/wheels -r plugins.v3/p115strmhelper/requirements.txt
+
+      - name: Run tests (host stub)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/plugins.v3/p115strmhelper/tests/_stub_host${{ matrix.os == 'windows-latest' && ';' || ':' }}${{ github.workspace }}/plugins.v3/p115strmhelper
+        run: |
+          python -m unittest discover -s plugins.v3/p115strmhelper/tests -p "test_*.py" -v
