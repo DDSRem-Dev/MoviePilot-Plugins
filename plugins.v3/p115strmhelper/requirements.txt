@@ -13,6 +13,14 @@ numpy
 httpx[http2]
 cachetools
 
+# Provided by the MoviePilot host at runtime, but declared explicitly so the
+# self-contained test-suite (bundled host stub) can import every plugin module.
+apscheduler~=3.11.0
+sqlalchemy~=2.0
+jieba~=0.42.1
+jinja2~=3.1
+aiofiles~=25.1
+
 # Rust Mode
 full_strm_sync==0.1.6
 txt_tree_storage==0.2.1
