@@ -14,6 +14,7 @@ from app.sdk.logging import logger
 from app.sdk.media import MediaInfo, MetaInfo
 
 BASE_UI: Optional[List[Dict[str, Any]]] = None
+TENCENT_VIDEO_MEDIA_SOURCE = MediaSource("tencentvideo")
 
 CHANNEL_PARAMS = {
     "tv": {"Id": "100113", "Name": "电视剧"},
@@ -174,7 +175,7 @@ class TencentVideoDiscover(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/tencentvideo_A.png"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -232,7 +233,7 @@ class TencentVideoDiscover(_PluginBase):
         return [
             {
                 "name": "腾讯视频",
-                "media_source": MediaSource.TencentVideo,
+                "media_source": TENCENT_VIDEO_MEDIA_SOURCE,
                 "media_types": [MediaType.MOVIE, MediaType.TV],
             }
         ]
@@ -347,7 +348,7 @@ class TencentVideoDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.TencentVideo
+        mediainfo.media_source = TENCENT_VIDEO_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         if source_media.get("overview") and not mediainfo.overview:
             mediainfo.overview = source_media["overview"]
@@ -414,7 +415,7 @@ class TencentVideoDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.TencentVideo
+        mediainfo.media_source = TENCENT_VIDEO_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         if source_media.get("overview") and not mediainfo.overview:
             mediainfo.overview = source_media["overview"]
@@ -621,7 +622,7 @@ class TencentVideoDiscover(_PluginBase):
             )
             return MediaInfo(
                 type=MediaType.MOVIE,
-                media_source=MediaSource.TencentVideo,
+                media_source=TENCENT_VIDEO_MEDIA_SOURCE,
                 title=movie_info.get("title"),
                 year=movie_info.get("year"),
                 media_id=str(movie_info.get("cid")),
@@ -658,7 +659,7 @@ class TencentVideoDiscover(_PluginBase):
             )
             return MediaInfo(
                 type=MediaType.TV,
-                media_source=MediaSource.TencentVideo,
+                media_source=TENCENT_VIDEO_MEDIA_SOURCE,
                 title=series_info.get("title"),
                 year=series_info.get("year"),
                 media_id=str(series_info.get("cid")),
@@ -779,7 +780,7 @@ class TencentVideoDiscover(_PluginBase):
         event_data: DiscoverSourceEventData = event.event_data
         tencentvideo_source = DiscoverMediaSource(
             name="腾讯视频",
-            media_source=MediaSource.TencentVideo,
+            media_source=TENCENT_VIDEO_MEDIA_SOURCE,
             mediaid_prefix="tencentvideo",
             api_path=f"plugin/TencentVideoDiscover/tencentvideo_discover?apikey={settings.API_TOKEN}",
             filter_params={

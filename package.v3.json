@@ -76,13 +76,14 @@
         "name": "咪咕视频探索",
         "description": "让探索支持咪咕视频的数据浏览。",
         "labels": "探索",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/migu_A.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "修复自定义媒体来源枚举兼容性",
             "v3.0.0": "适配 MoviePilot V3 SDK、探索源与媒体身份契约"
         }
     },
@@ -90,13 +91,14 @@
         "name": "哔哩哔哩探索",
         "description": "让探索支持哔哩哔哩的数据浏览。",
         "labels": "探索",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "Bilibili_E.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "修复自定义媒体来源枚举兼容性",
             "v3.0.0": "适配 MoviePilot V3 SDK、探索源与媒体身份契约"
         }
     },
@@ -118,13 +120,14 @@
         "name": "芒果TV探索",
         "description": "让探索支持芒果TV的数据浏览。",
         "labels": "探索",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/mangguo_A.jpg",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "修复自定义媒体来源枚举兼容性",
             "v3.0.0": "适配 MoviePilot V3 SDK、探索源与媒体身份契约"
         }
     },
@@ -132,13 +135,14 @@
         "name": "腾讯视频探索",
         "description": "让探索支持腾讯视频的数据浏览。",
         "labels": "探索",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "release": true,
         "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/tencentvideo_A.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.1": "修复自定义媒体来源枚举兼容性",
             "v3.0.0": "适配 MoviePilot V3 SDK、探索源与媒体身份契约"
         }
     },

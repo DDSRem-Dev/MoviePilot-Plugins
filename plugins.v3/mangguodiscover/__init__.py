@@ -29,6 +29,7 @@ HEADERS = {
 }
 
 BASE_UI: Optional[List[Dict[str, Any]]] = None
+MANGGUO_MEDIA_SOURCE = MediaSource("mangguo")
 
 
 def init_base_ui() -> List[Dict[str, Any]]:
@@ -108,7 +109,7 @@ class MangGuoDiscover(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/mangguo_A.jpg"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -166,7 +167,7 @@ class MangGuoDiscover(_PluginBase):
         return [
             {
                 "name": "芒果TV",
-                "media_source": MediaSource.MangoTV,
+                "media_source": MANGGUO_MEDIA_SOURCE,
                 "media_types": [MediaType.MOVIE, MediaType.TV],
             }
         ]
@@ -273,7 +274,7 @@ class MangGuoDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.MangoTV
+        mediainfo.media_source = MANGGUO_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         return mediainfo
 
@@ -338,7 +339,7 @@ class MangGuoDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.MangoTV
+        mediainfo.media_source = MANGGUO_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         return mediainfo
 
@@ -444,7 +445,7 @@ class MangGuoDiscover(_PluginBase):
             """
             return MediaInfo(
                 type=MediaType.MOVIE,
-                media_source=MediaSource.MangoTV,
+                media_source=MANGGUO_MEDIA_SOURCE,
                 title=movie_info.get("title"),
                 year=movie_info.get("year"),
                 media_id=str(movie_info.get("clipId")),
@@ -457,7 +458,7 @@ class MangGuoDiscover(_PluginBase):
             """
             return MediaInfo(
                 type=MediaType.TV,
-                media_source=MediaSource.MangoTV,
+                media_source=MANGGUO_MEDIA_SOURCE,
                 title=series_info.get("title"),
                 year=series_info.get("year"),
                 media_id=str(series_info.get("clipId")),
@@ -550,7 +551,7 @@ class MangGuoDiscover(_PluginBase):
         event_data: DiscoverSourceEventData = event.event_data
         mangguo_source = DiscoverMediaSource(
             name="芒果TV",
-            media_source=MediaSource.MangoTV,
+            media_source=MANGGUO_MEDIA_SOURCE,
             mediaid_prefix="mangguo",
             api_path=f"plugin/MangGuoDiscover/mangguo_discover?apikey={settings.API_TOKEN}",
             filter_params={

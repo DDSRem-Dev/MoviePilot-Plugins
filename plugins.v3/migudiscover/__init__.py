@@ -11,6 +11,8 @@ from app.sdk.logging import logger
 from app.sdk.media import MediaInfo, MetaInfo
 from app.sdk.network import RequestUtils
 
+MIGU_MEDIA_SOURCE = MediaSource("migu")
+
 
 class MiGuDiscover(_PluginBase):
     """
@@ -24,7 +26,7 @@ class MiGuDiscover(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/migu_A.png"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -81,7 +83,7 @@ class MiGuDiscover(_PluginBase):
         return [
             {
                 "name": "咪咕视频",
-                "media_source": MediaSource.MiguVideo,
+                "media_source": MIGU_MEDIA_SOURCE,
                 "media_types": [MediaType.MOVIE, MediaType.TV],
             }
         ]
@@ -190,7 +192,7 @@ class MiGuDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.MiguVideo
+        mediainfo.media_source = MIGU_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         if source_media.get("overview") and not mediainfo.overview:
             mediainfo.overview = source_media["overview"]
@@ -256,7 +258,7 @@ class MiGuDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.MiguVideo
+        mediainfo.media_source = MIGU_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         if source_media.get("overview") and not mediainfo.overview:
             mediainfo.overview = source_media["overview"]
@@ -381,7 +383,7 @@ class MiGuDiscover(_PluginBase):
                 first_air_date = movie_info.get("publishTime")
             return MediaInfo(
                 type=MediaType.MOVIE,
-                media_source=MediaSource.MiguVideo,
+                media_source=MIGU_MEDIA_SOURCE,
                 title=movie_info.get("name"),
                 year=year,
                 media_id=str(movie_info.get("pID")),
@@ -402,7 +404,7 @@ class MiGuDiscover(_PluginBase):
                 first_air_date = series_info.get("publishTime")
             return MediaInfo(
                 type=MediaType.TV,
-                media_source=MediaSource.MiguVideo,
+                media_source=MIGU_MEDIA_SOURCE,
                 title=series_info.get("name"),
                 year=year,
                 media_id=str(series_info.get("pID")),
@@ -1044,7 +1046,7 @@ class MiGuDiscover(_PluginBase):
         event_data: DiscoverSourceEventData = event.event_data
         migu_source = DiscoverMediaSource(
             name="咪咕视频",
-            media_source=MediaSource.MiguVideo,
+            media_source=MIGU_MEDIA_SOURCE,
             mediaid_prefix="migu",
             api_path=f"plugin/MiGuDiscover/migu_discover?apikey={settings.API_TOKEN}",
             filter_params={

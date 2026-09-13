@@ -20,6 +20,8 @@ from .ui_generator import (
     variety_ui,
 )
 
+BILIBILI_MEDIA_SOURCE = MediaSource("bilibili")
+
 CHANNEL_PARAMS = {
     "tv": {
         "_type": "1",
@@ -83,7 +85,7 @@ class BilibiliDiscover(_PluginBase):
     # 插件图标
     plugin_icon = "Bilibili_E.png"
     # 插件版本
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -137,7 +139,7 @@ class BilibiliDiscover(_PluginBase):
         return [
             {
                 "name": "哔哩哔哩",
-                "media_source": MediaSource.Bilibili,
+                "media_source": BILIBILI_MEDIA_SOURCE,
                 "media_types": [MediaType.MOVIE, MediaType.TV],
             }
         ]
@@ -241,7 +243,7 @@ class BilibiliDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.Bilibili
+        mediainfo.media_source = BILIBILI_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         return mediainfo
 
@@ -304,7 +306,7 @@ class BilibiliDiscover(_PluginBase):
         )
         if not mediainfo:
             return None
-        mediainfo.media_source = MediaSource.Bilibili
+        mediainfo.media_source = BILIBILI_MEDIA_SOURCE
         mediainfo.media_id = str(media_id)
         return mediainfo
 
@@ -435,7 +437,7 @@ class BilibiliDiscover(_PluginBase):
                 vote_average = movie_info.get("score")
             return MediaInfo(
                 type=MediaType.MOVIE,
-                media_source=MediaSource.Bilibili,
+                media_source=BILIBILI_MEDIA_SOURCE,
                 title=movie_info.get("title"),
                 media_id=str(movie_info.get("media_id")),
                 poster_path=movie_info.get("cover"),
@@ -451,7 +453,7 @@ class BilibiliDiscover(_PluginBase):
                 vote_average = series_info.get("score")
             return MediaInfo(
                 type=MediaType.TV,
-                media_source=MediaSource.Bilibili,
+                media_source=BILIBILI_MEDIA_SOURCE,
                 title=series_info.get("title"),
                 media_id=str(series_info.get("media_id")),
                 poster_path=series_info.get("cover"),
@@ -778,7 +780,7 @@ class BilibiliDiscover(_PluginBase):
         event_data: DiscoverSourceEventData = event.event_data
         bilibili_source = DiscoverMediaSource(
             name="哔哩哔哩",
-            media_source=MediaSource.Bilibili,
+            media_source=BILIBILI_MEDIA_SOURCE,
             mediaid_prefix="bilibili",
             api_path=f"plugin/BilibiliDiscover/bilibili_discover?apikey={settings.API_TOKEN}",
             filter_params={
