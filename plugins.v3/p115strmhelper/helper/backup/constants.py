@@ -1,0 +1,33 @@
+class BackupProgress:
+    """
+    备份进度日志节流参数
+    """
+
+    TARGET_LOG_LINES = 30
+    MIN_LOG_INTERVAL_SEC = 5.0
+    MAX_LOG_INTERVAL_SEC = 120.0
+    SCAN_MIN_LOG_INTERVAL_SEC = 3.0
+    SCAN_MAX_LOG_INTERVAL_SEC = 30.0
+    MIN_BYTE_STEP = 256 * 1024 * 1024
+    MIN_PCT_STEP = 0.5
+    UPLOAD_MIN_INTERVAL_SEC = 15.0
+    UPLOAD_MAX_INTERVAL_SEC = 120.0
+    SPEED_WINDOW_SEC = 30.0
+    SPEED_WARMUP_SEC = 10.0
+    DEFAULT_UPLOAD_BPS = 5 * 1024 * 1024
+
+
+class BackupPhaseWeight:
+    """
+    备份各阶段整体进度权重（0–1）
+    """
+
+    SCAN_START = 0.0
+    SCAN_END = 0.05
+    PACK_START = 0.05
+    PACK_END_LOCAL = 0.95
+    PACK_END_CLOUD = 0.80
+    UPLOAD_START = 0.80
+    UPLOAD_END = 0.95
+    CLEAN_START = 0.95
+    CLEAN_END = 1.0

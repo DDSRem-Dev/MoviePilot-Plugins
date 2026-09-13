@@ -25,6 +25,7 @@ wheels/
 !plugins.v2/p115strmhelper/wheels/
 !plugins.v2/p123strmhelper/wheels/
 !plugins.v2/p123disk/wheels/
+!plugins.v3/p115strmhelper/wheels/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
