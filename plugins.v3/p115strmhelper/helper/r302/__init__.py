@@ -22,7 +22,7 @@ from p115client import check_response as p115_check_response
 from p115client.exception import P115OSError
 from p115pickcode import to_id
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.cache import r302cacher
 from ...core.config import configer

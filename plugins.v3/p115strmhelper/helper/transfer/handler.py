@@ -8,16 +8,17 @@ from p115client.tool.edit import update_name
 
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain, task_lock
-from app.core.config import settings
-from app.core.event import eventmanager
-from app.core.metainfo import MetaInfoPath
-from app.db.transferhistory_oper import TransferHistoryOper
+from app.sdk.config import settings
+from app.sdk.events import eventmanager
+from app.sdk.media import MetaInfoPath
+from app.db.oper.transferhistory import TransferHistoryOper
 from app.helper.directory import DirectoryHelper
-from app.log import logger
-from app.schemas import FileItem, Notification, TransferInfo
+from app.sdk.logging import logger
+from app.schemas import FileItem, TransferInfo
 from app.schemas import TransferTask as MPTransferTask
-from app.schemas.types import EventType, MediaType, NotificationType
-from app.utils.string import StringUtils
+from app.schemas.message import Message
+from app.schemas.types import EventType, MediaType, MessageType
+from app.sdk.utilities import StringUtils
 
 from ...core.config import configer
 from ...schemas.transfer import TransferTask
@@ -598,7 +599,7 @@ class TransferHandler:
                             # 触发 TransferOverwriteCheck 事件，允许插件介入覆盖判断
                             if overwrite_mode != "never":
                                 try:
-                                    from app.core.event import eventmanager
+                                    from app.sdk.events import eventmanager
                                     from app.schemas import (
                                         TransferOverwriteCheckEventData,
                                     )
@@ -1940,8 +1941,8 @@ class TransferHandler:
             try:
                 chain = TransferChain()
                 chain.post_message(
-                    Notification(
-                        mtype=NotificationType.Manual,
+                    Message(
+                        mtype=MessageType.Manual,
                         title=f"{task.mediainfo.title_year} {task.meta.season_episode} 入库失败！",
                         text=f"原因：{message or '未知'}",
                         image=task.mediainfo.get_message_image()

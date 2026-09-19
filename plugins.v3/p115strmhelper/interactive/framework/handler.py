@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from .callbacks import Action
 from .registry import command_registry

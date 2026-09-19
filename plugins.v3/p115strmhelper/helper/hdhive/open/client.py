@@ -2,8 +2,8 @@ from typing import Any, Literal
 
 from httpx import Client
 
-from app.core.config import settings
-from app.utils.http import AsyncRequestUtils
+from app.sdk.config import settings
+from app.sdk.network import AsyncRequestUtils
 
 from ....utils.sentry import sentry_manager
 from .constants import HDHIVE_OPEN_BASE_URL

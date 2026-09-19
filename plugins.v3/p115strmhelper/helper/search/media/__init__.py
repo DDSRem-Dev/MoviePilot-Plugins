@@ -2,8 +2,8 @@ from asyncio import run as asyncio_run
 from typing import Any, Dict, List, Union
 
 from app.chain.media import MediaChain
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 
 class MediaSearcher:

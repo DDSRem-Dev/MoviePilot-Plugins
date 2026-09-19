@@ -27,8 +27,8 @@ except (ImportError, OSError):
 from orjson import dumps
 from p115client import P115Client
 
-from app.log import logger
-from app.core.cache import TTLCache
+from app.sdk.logging import logger
+from app.sdk.cache import TTLCache
 
 from ...core.cache import IntKeyCacheAdapter
 from ...core.config import configer

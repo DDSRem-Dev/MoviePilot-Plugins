@@ -5,9 +5,9 @@ from time import perf_counter, time as time_unix
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from app.db.transferhistory_oper import TransferHistoryOper
-from app.log import logger
-from app.schemas import NotificationType
+from app.db.oper.transferhistory import TransferHistoryOper
+from app.sdk.logging import logger
+from app.schemas.types import MessageType
 
 from share_strm_scan import Pair, ShareStrmScanCache
 
@@ -641,7 +641,7 @@ class ShareStrmCleaner:
         try:
             text = self._format_share_strm_cleanup_notify_text(summary)
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("share_strm_cleanup_notify_title"),
                 text="\n" + text,
             )
@@ -681,7 +681,7 @@ class ShareStrmCleaner:
                     )
                 )
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("share_strm_cleanup_batch_exec_title"),
                 text="\n" + "\n".join(lines),
             )

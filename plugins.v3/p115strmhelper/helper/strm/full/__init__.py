@@ -19,8 +19,8 @@ from p115client.tool.iterdir import (
     iter_files_with_path_skim,
 )
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from full_strm_sync import Processor, PackedResult
 from full_strm_sync import __version__ as rust_core_version

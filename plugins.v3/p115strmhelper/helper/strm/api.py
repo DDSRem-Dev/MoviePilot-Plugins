@@ -31,7 +31,7 @@ from ...utils.strm import StrmUrlGetter, StrmGenerater
 from ...utils.path import PathUtils, PathRemoveUtils
 from ...utils.sentry import sentry_manager
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 class ApiSyncStrmHelper:

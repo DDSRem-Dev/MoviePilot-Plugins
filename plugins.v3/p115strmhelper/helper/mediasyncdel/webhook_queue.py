@@ -3,7 +3,7 @@ from queue import Queue
 from threading import Lock, Thread
 from typing import Optional
 
-from app.log import logger
+from app.sdk.logging import logger
 from app.schemas.mediaserver import WebhookEventInfo
 
 

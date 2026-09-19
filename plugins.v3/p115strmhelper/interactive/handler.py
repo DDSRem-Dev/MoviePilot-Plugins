@@ -2,8 +2,8 @@ from typing import List, Dict
 
 import httpx
 
-from app.log import logger
-from app.core.config import settings
+from app.sdk.logging import logger
+from app.sdk.config import settings
 
 from .framework.registry import command_registry, view_registry
 from .framework.callbacks import Action

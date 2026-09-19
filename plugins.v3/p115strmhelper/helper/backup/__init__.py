@@ -10,7 +10,7 @@ from httpx import Client as HttpxClient
 from p115client import P115Client, check_response
 
 from app.chain.storage import StorageChain
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.config import configer
 from ...schemas.backup import BackupHistory, BackupTargetType, StrmBackupItem

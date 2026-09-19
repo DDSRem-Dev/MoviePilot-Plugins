@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 from urllib.parse import quote
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ahocorasick import Automaton
 from p115pickcode import to_id

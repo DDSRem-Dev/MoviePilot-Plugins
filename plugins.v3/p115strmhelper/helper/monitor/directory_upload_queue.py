@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 from p115client import P115Client
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 @dataclass

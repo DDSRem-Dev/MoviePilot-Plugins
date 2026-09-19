@@ -8,7 +8,7 @@ from p115client import P115Client
 from p115client.tool.clouddownload import clouddownload_iter
 from p115client.tool.attr import get_attr
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.config import configer
 from ...core.p115 import get_pid_by_path

@@ -4,9 +4,9 @@ from typing import Tuple
 
 from pytz import timezone as pytz_timezone
 
-from app.core.config import settings
-from app.log import logger
-from app.schemas import NotificationType
+from app.sdk.config import settings
+from app.sdk.logging import logger
+from app.schemas.types import MessageType
 
 from ...core.config import configer
 from ...core.message import post_message
@@ -91,7 +91,7 @@ def run_hdhive_checkin_once(
 
         if send_notify and configer.notify:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=f"HDHive {label} {'成功' if ok else '失败'}",
                 text="\n" + detail + "\n",
             )
@@ -101,7 +101,7 @@ def run_hdhive_checkin_once(
         err = str(e)
         if send_notify and configer.notify:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="HDHive 签到失败",
                 text="\n" + err + "\n",
             )
@@ -111,7 +111,7 @@ def run_hdhive_checkin_once(
         err = str(e)
         if send_notify and configer.notify:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="HDHive 签到异常",
                 text="\n" + err + "\n",
             )

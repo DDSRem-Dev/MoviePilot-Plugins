@@ -8,8 +8,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from uuid import uuid4
 
 from app.chain.transfer import TransferChain
-from app.log import logger
-from app.schemas import FileItem, NotificationType
+from app.sdk.logging import logger
+from app.schemas import FileItem
+from app.schemas.types import MessageType
 
 from ....core.cache import rename_media_fields_cacher
 from ....core.config import configer
@@ -632,7 +633,7 @@ class ShareAuditDownloadQueue:
             lines.append(i18n.translate("share_audit_notify_reason", reason=detail))
         try:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=title,
                 text="\n" + "\n".join(lines),
             )

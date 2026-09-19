@@ -5,8 +5,8 @@ from typing import Optional, Tuple
 
 from pytz import timezone as pytz_timezone
 
-from app.log import logger
-from app.core.config import settings
+from app.sdk.logging import logger
+from app.sdk.config import settings
 
 from ...core.config import configer
 

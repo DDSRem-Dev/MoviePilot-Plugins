@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.chain.storage import StorageChain
-from app.log import logger
+from app.sdk.logging import logger
 from app.schemas import FileItem
 
 

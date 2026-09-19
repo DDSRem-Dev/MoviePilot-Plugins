@@ -14,10 +14,11 @@ from p115center import P115Center, UploadInfo
 from p115client import P115Client, check_response
 from p115client.const import _CACHE_DIR
 
-from app.core.config import global_vars
-from app.log import logger
+from app.sdk.config import global_vars
+from app.sdk.logging import logger
 from app.modules.filemanager.storages import transfer_process
-from app.schemas import FileItem, NotificationType
+from app.schemas import FileItem
+from app.schemas.types import MessageType
 
 from ..core.config import configer
 from ..core.i18n import i18n
@@ -118,7 +119,7 @@ class P115DiskCore:
             """
             if configer.notify and configer.upload_module_notify:
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("upload_module_title"),
                     text=f"\n{i18n.translate('upload_wait_text', name=target_name)}\n",
                 )

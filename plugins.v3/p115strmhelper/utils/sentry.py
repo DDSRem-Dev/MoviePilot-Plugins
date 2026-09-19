@@ -15,7 +15,7 @@ from sentry_sdk.integrations.excepthook import ExcepthookIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.dedupe import DedupeIntegration
 
-from app.log import logger
+from app.sdk.logging import logger
 from version import APP_VERSION
 
 from ..version import VERSION

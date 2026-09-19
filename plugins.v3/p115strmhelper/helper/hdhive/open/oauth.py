@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from .broker_http import broker_http_client, broker_request_headers
 from .constants import DEFAULT_OAUTH_SCOPES

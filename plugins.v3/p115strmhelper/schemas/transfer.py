@@ -2,8 +2,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.core.context import MediaInfo
-from app.core.meta import MetaBase
+from app.sdk.media import MediaInfo, MetaBase
 from app.schemas import FileItem
 
 

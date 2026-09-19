@@ -6,16 +6,19 @@ from pathlib import Path
 from re import search as re_search
 from typing import Any, List, Dict, Tuple, Optional, Union
 
-from app.core.config import settings
-from app.core.event import eventmanager, Event
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.events import eventmanager, Event
+from app.sdk.logging import logger
 from app.plugins import _PluginBase
-from app.schemas import (
-    FileItem,
-    NotificationType,
+from app.schemas import FileItem
+from app.sdk.media import MetaVideo
+from app.schemas.types import (
+    ChainEventType,
+    EventType,
+    MediaType,
+    MessageType,
+    NotificationChannel,
 )
-from app.core.meta import MetaVideo
-from app.schemas.types import EventType, MessageChannel, ChainEventType, MediaType
 from app.helper.directory import DirectoryHelper
 from app.chain.storage import StorageChain
 
@@ -1393,7 +1396,7 @@ class P115StrmHelper(_PluginBase):
 
     def __delete_message(
         self,
-        channel: MessageChannel,
+        channel: NotificationChannel,
         source: str,
         message_id: Union[str, int],
         chat_id: Optional[Union[str, int]] = None,
@@ -2198,7 +2201,7 @@ class P115StrmHelper(_PluginBase):
             # 发送通知
             if configer.notify:
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title="【自动删除低质量源文件】源文件已删除",
                     text=f"\n因媒体库已存在更高质量文件，已自动删除源文件:\n{source_path}",
                 )

@@ -14,11 +14,11 @@ from pydantic import (
     field_serializer,
 )
 
-from app.log import logger
-from app.core.config import settings
-from app.utils.system import SystemUtils
-from app.db.systemconfig_oper import SystemConfigOper
-from app.db.plugindata_oper import PluginDataOper
+from app.sdk.logging import logger
+from app.sdk.config import settings
+from app.sdk.utilities import SystemUtils
+from app.db.oper.systemconfig import SystemConfigOper
+from app.db.oper.plugindata import PluginDataOper
 
 from ..sidebar_nav import sidebar_nav_keys_known
 from ..version import VERSION

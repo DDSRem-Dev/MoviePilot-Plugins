@@ -10,8 +10,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from ..db_manager import ct_db_manager, P115StrmHelperBase
 

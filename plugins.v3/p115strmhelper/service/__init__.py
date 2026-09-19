@@ -48,8 +48,8 @@ from ..service.p115_checkin.scheduler import (
 )
 from ..utils.sentry import sentry_manager
 
-from app.log import logger
-from app.schemas import NotificationType
+from app.sdk.logging import logger
+from app.schemas.types import MessageType
 from app.scheduler import Scheduler
 
 
@@ -298,7 +298,7 @@ class ServiceHelper:
                             )
                             if configer.notify:
                                 post_message(
-                                    mtype=NotificationType.Plugin,
+                                    mtype=MessageType.Plugin,
                                     title=i18n.translate(
                                         "monitor_life_auto_restart_title"
                                     ),
@@ -500,7 +500,7 @@ class ServiceHelper:
             if strm_cleanup_deferred_count != 0:
                 text += f"\n⏳ 待二次确认清理无效 STRM {strm_cleanup_deferred_count} 个"
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("full_sync_done_title"),
                 text=text,
             )
@@ -569,7 +569,7 @@ class ServiceHelper:
             )
             if configer.get_config("notify"):
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("share_sync_done_title"),
                     text=f"\n📄 生成STRM文件 {strm_count} 个\n"
                     + f"⬇️ 下载媒体文件 {mediainfo_count} 个\n"
@@ -659,7 +659,7 @@ class ServiceHelper:
             if remove_unless_strm_count != 0:
                 text += f"🗑️ 清理无效STRM文件 {remove_unless_strm_count} 个"
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("inc_sync_done_title"),
                 text=text,
             )

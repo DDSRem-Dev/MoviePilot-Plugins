@@ -4,7 +4,7 @@ import importlib
 from alembic.config import Config as AlembicConfig
 from alembic.command import revision as alembic_revision
 
-from app.core.config import settings
+from app.sdk.config import settings
 
 plugin_id = None
 while not plugin_id:

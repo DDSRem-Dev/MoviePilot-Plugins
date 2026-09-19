@@ -29,7 +29,7 @@ from urllib.request import urlopen as _urlopen
 
 from orjson import dumps, loads
 
-from app.core.config import settings
+from app.sdk.config import settings
 
 from ...core.config import configer
 from ...utils.hdhive import extract_hdhive_resource_rows

@@ -34,13 +34,13 @@ from cryptography.hazmat.primitives import hashes
 from diskcache import Deque
 
 from app import schemas
-from app.log import logger
-from app.core.config import global_vars
-from app.helper.storage import StorageHelper
+from app.sdk.logging import logger
+from app.sdk.config import global_vars
+from app.sdk.services import StorageHelper
 from app.chain.storage import StorageChain
 from app.modules.filemanager.storages import transfer_process
-from app.schemas import NotificationType
-from app.utils.string import StringUtils
+from app.schemas.types import MessageType
+from app.sdk.utilities import StringUtils
 
 from ..core.config import configer
 from ..core.p115_client import create_client
@@ -394,7 +394,7 @@ class U115OpenHelper:
             """
             if configer.notify and configer.upload_module_notify:
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("upload_module_title"),
                     text=f"\n{i18n.translate('upload_wait_text', name=target_name)}\n",
                 )

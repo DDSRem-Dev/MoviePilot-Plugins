@@ -8,10 +8,9 @@ from pathlib import Path
 from httpx import stream
 from p115client import P115Client
 
-from app.log import logger
-from app.core.metainfo import MetaInfo
+from app.sdk.logging import logger
+from app.sdk.media import MediaInfo, MetaInfo
 from app.chain.media import MediaChain
-from app.core.context import MediaInfo
 
 from ...core.aliyunpan import BAligo
 from ...core.config import configer

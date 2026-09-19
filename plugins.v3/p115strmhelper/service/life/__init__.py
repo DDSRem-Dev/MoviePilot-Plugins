@@ -8,8 +8,8 @@ from ...helper.life import MonitorLife
 from ...utils.exception import NotifyExceptionFormatter
 from ...utils.sentry import sentry_manager
 
-from app.log import logger
-from app.schemas import NotificationType
+from app.sdk.logging import logger
+from app.schemas.types import MessageType
 
 
 @sentry_manager.capture_plugin_exceptions
@@ -70,7 +70,7 @@ def monitor_life_thread_worker(
                 if configer.notify:
                     _err_text = NotifyExceptionFormatter.format_exception_for_notify(e)
                     post_message(
-                        mtype=NotificationType.Plugin,
+                        mtype=MessageType.Plugin,
                         title=i18n.translate("monitor_life_error_title"),
                         text=(
                             f"\n{i18n.translate('monitor_life_error_text', error=_err_text)}\n"
@@ -87,7 +87,7 @@ def monitor_life_thread_worker(
         if configer.notify:
             _err_text = NotifyExceptionFormatter.format_exception_for_notify(e)
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("monitor_life_exit_title"),
                 text=(
                     f"\n{i18n.translate('monitor_life_exit_text', error=_err_text)}\n"

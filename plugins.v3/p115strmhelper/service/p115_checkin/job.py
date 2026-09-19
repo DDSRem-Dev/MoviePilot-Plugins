@@ -3,8 +3,8 @@ from typing import Tuple
 
 from p115client import check_response
 
-from app.log import logger
-from app.schemas import NotificationType
+from app.sdk.logging import logger
+from app.schemas.types import MessageType
 
 from ...core.config import configer
 from ...core.message import post_message
@@ -74,7 +74,7 @@ def run_p115_checkin_once(
 
         if send_notify and configer.notify:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="115 签到" + ("成功" if ok else "失败"),
                 text="\n" + detail + "\n",
             )
@@ -85,7 +85,7 @@ def run_p115_checkin_once(
         err = str(e)
         if send_notify and configer.notify:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="115 签到异常",
                 text="\n" + err + "\n",
             )

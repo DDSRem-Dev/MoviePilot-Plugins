@@ -43,9 +43,10 @@ from p115client.tool.life import (
     BEHAVIOR_TYPE_TO_NAME,
 )
 
-from app.schemas import NotificationType, FileItem
-from app.log import logger
-from app.core.config import settings
+from app.schemas import FileItem
+from app.schemas.types import MessageType
+from app.sdk.logging import logger
+from app.sdk.config import settings
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
 
@@ -153,7 +154,7 @@ class MonitorLife:
 
         if text_parts and configer.get_config("notify"):
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("life_sync_done_title"),
                 text="\n" + "\n".join(text_parts),
             )
@@ -1577,7 +1578,7 @@ class MonitorLife:
                     )
                     _history_count = len(transfer_history) if transfer_history else 0
                     post_message(
-                        mtype=NotificationType.Plugin,
+                        mtype=MessageType.Plugin,
                         title=i18n.translate("life_sync_media_del_title"),
                         text=f"\n{del_type_text}\n"
                         f"{i18n.translate('sync_del_record_count', count=_history_count)}\n"

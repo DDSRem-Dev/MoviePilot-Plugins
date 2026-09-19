@@ -8,7 +8,7 @@ from httpx import HTTPStatusError
 from orjson import dumps, loads
 from p115center import P115Center
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ....core.config import configer
 from ....utils.sentry import sentry_manager

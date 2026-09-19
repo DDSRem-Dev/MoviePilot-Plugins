@@ -4,7 +4,7 @@ from typing import Callable, Optional, Set
 
 from p115client import P115Client
 
-from app.log import logger
+from app.sdk.logging import logger
 from app.scheduler import Scheduler
 
 from ...core.config import configer

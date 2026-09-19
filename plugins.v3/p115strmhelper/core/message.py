@@ -3,10 +3,11 @@ from random import choice
 from typing import List, Optional
 from base64 import b64decode
 
-from app.core.config import settings
-from app.log import logger
-from app.schemas import Notification, NotificationType, MessageChannel
-from app.utils.string import StringUtils
+from app.sdk.config import settings
+from app.sdk.logging import logger
+from app.schemas.message import Message
+from app.schemas.types import MessageType, NotificationChannel
+from app.sdk.utilities import StringUtils
 
 from ..core.config import configer
 from ..core.i18n import i18n
@@ -18,8 +19,8 @@ _BATCH_DELAY = 60
 
 
 def post_message(
-    channel: MessageChannel = None,
-    mtype: NotificationType = None,
+    channel: NotificationChannel = None,
+    mtype: MessageType = None,
     title: Optional[str] = None,
     text: Optional[str] = None,
     image: Optional[str] = None,
@@ -46,7 +47,7 @@ def post_message(
         else:
             text = f"\n{message}\n"
     chain.post_message(
-        Notification(
+        Message(
             channel=channel,
             mtype=mtype,
             title=title,
@@ -204,7 +205,7 @@ class UploadNotifyAggregator:
 
         text = "\n".join(lines)
         post_message(
-            mtype=NotificationType.Plugin,
+            mtype=MessageType.Plugin,
             title=title,
             text=f"\n{text}\n",
         )

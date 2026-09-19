@@ -185,12 +185,12 @@ def _setup_mock_env() -> None:
     """
     for pkg in [
         "app",
-        "app.core",
+        "app.sdk",
         "app.chain",
         "app.db",
+        "app.db.oper",
         "app.helper",
         "app.schemas",
-        "app.utils",
         "app.modules",
         "app.plugins",
         "p115client",
@@ -199,7 +199,7 @@ def _setup_mock_env() -> None:
         _make_pkg(pkg)
 
     _make_module(
-        "app.log",
+        "app.sdk.logging",
         logger=SimpleNamespace(
             info=lambda *a, **k: None,
             debug=lambda *a, **k: None,
@@ -208,29 +208,32 @@ def _setup_mock_env() -> None:
             error=lambda *a, **k: None,
         ),
     )
-    _make_module("app.core.config", settings=FakeSettings())
+    _make_module("app.sdk.config", settings=FakeSettings())
     _make_module(
-        "app.core.event",
+        "app.sdk.events",
         eventmanager=SimpleNamespace(send_event=lambda *a, **k: None),
     )
-    _make_module("app.core.context", MediaInfo=object)
-    _make_module("app.core.meta", MetaBase=object)
-    _make_module("app.core.metainfo", MetaInfoPath=FakeMetaInfoPath)
+    _make_module(
+        "app.sdk.media",
+        MediaInfo=object,
+        MetaBase=object,
+        MetaInfoPath=FakeMetaInfoPath,
+    )
     _make_module("app.chain.storage", StorageChain=FakeStorageChain)
     _make_module(
         "app.chain.transfer",
         TransferChain=object,
         task_lock=SimpleNamespace(),
     )
-    _make_module("app.db.transferhistory_oper", TransferHistoryOper=object)
+    _make_module("app.db.oper.transferhistory", TransferHistoryOper=object)
     _make_module("app.helper.directory", DirectoryHelper=object)
     _make_module(
         "app.schemas",
         FileItem=FakeFileItem,
-        Notification=object,
         TransferInfo=object,
         TransferTask=object,
     )
+    _make_module("app.schemas.message", Message=object)
     _make_module(
         "app.schemas.types",
         EventType=SimpleNamespace(
@@ -242,10 +245,10 @@ def _setup_mock_env() -> None:
             AudioTransferFailed="AudioTransferFailed",
         ),
         MediaType=object,
-        NotificationType=object,
+        MessageType=object,
         ChainEventType=object,
     )
-    _make_module("app.utils.string", StringUtils=object)
+    _make_module("app.sdk.utilities", StringUtils=object)
     _make_module("p115client", P115Client=object, check_response=lambda *a, **k: None)
     _make_module("p115client.tool.edit", update_name=object)
     _make_module("p115client.tool.attr", get_attr=object)

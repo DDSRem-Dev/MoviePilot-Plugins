@@ -4,8 +4,8 @@ from typing import Any, Callable, Dict, Optional
 from apscheduler.triggers.date import DateTrigger
 from pytz import timezone
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 from app.scheduler import Scheduler
 
 

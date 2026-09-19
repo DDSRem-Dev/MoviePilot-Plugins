@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from app.log import logger
+from app.sdk.logging import logger
 from app.schemas.types import MediaType
 
 from ....core.config import configer

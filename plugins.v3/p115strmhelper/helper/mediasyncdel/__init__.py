@@ -2,16 +2,16 @@ from time import strftime, localtime, time
 from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 
-from app.core.event import Event
-from app.log import logger
-from app.core.config import settings
+from app.sdk.events import Event
+from app.sdk.logging import logger
+from app.sdk.config import settings
 from app.db.models.transferhistory import TransferHistory
-from app.db.transferhistory_oper import TransferHistoryOper
-from app.db.downloadhistory_oper import DownloadHistoryOper
-from app.db.plugindata_oper import PluginDataOper
-from app.helper.downloader import DownloaderHelper
+from app.db.oper.transferhistory import TransferHistoryOper
+from app.db.oper.downloadhistory import DownloadHistoryOper
+from app.db.oper.plugindata import PluginDataOper
+from app.sdk.services import DownloaderHelper
 from app.chain.storage import StorageChain
-from app.schemas.types import MediaType, MediaImageType, NotificationType
+from app.schemas.types import MediaType, MediaImageType, MessageType
 from app.schemas.mediaserver import WebhookEventInfo
 
 from ...core.config import configer
@@ -985,7 +985,7 @@ class MediaSyncDelHelper:
                     i18n.translate("sync_del_error_count", count=error_cnt) + "\n"
                 )
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("media_sync_del_done_title"),
                 image=backrop_image,
                 text=f"{msg}\n"

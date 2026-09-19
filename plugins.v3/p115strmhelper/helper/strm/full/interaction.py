@@ -2,8 +2,8 @@ from pathlib import Path
 from time import time as time_unix
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.schemas import NotificationType
-from app.log import logger
+from app.schemas.types import MessageType
+from app.sdk.logging import logger
 
 from ....core.config import configer
 from ....core.i18n import i18n
@@ -235,7 +235,7 @@ class StrmCleanupInteraction:
             ]
         ]
         post_message(
-            mtype=NotificationType.Plugin,
+            mtype=MessageType.Plugin,
             title=i18n.translate("strm_cleanup_pending_title"),
             text=text,
             buttons=buttons,
@@ -267,7 +267,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_not_found_title"),
                     text=i18n.translate("strm_cleanup_msg_not_found_body"),
                 )
@@ -276,7 +276,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_exec_fail_title"),
                     text=i18n.translate("strm_cleanup_msg_invalid_batch_body"),
                 )
@@ -285,7 +285,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_exec_fail_title"),
                     text=i18n.translate("strm_cleanup_msg_exec_fail_body", err=err),
                 )
@@ -294,7 +294,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_done_title"),
                     text=i18n.translate("strm_cleanup_msg_done_body", count=removed),
                 )
@@ -304,7 +304,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_cancelled_title"),
                     text=i18n.translate("strm_cleanup_msg_cancelled_body"),
                 )
@@ -313,7 +313,7 @@ class StrmCleanupInteraction:
                     channel=channel,
                     source=source,
                     userid=userid,
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("strm_cleanup_msg_not_found_title"),
                     text=i18n.translate("strm_cleanup_msg_not_found_body"),
                 )

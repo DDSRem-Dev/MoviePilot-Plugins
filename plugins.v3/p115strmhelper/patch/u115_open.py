@@ -4,7 +4,7 @@ from typing import Optional, Callable, Any, Dict
 from p115center import P115Center
 
 from app import schemas
-from app.log import logger
+from app.sdk.logging import logger
 from app.modules.filemanager.storages.u115 import U115Pan
 
 from ..core.u115_open import U115OpenHelper

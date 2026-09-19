@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, Generator, List, Optional, Union
 
-from app.core.config import settings
+from app.sdk.config import settings
 from app.helper.redis import RedisHelper
 
 import txt_tree_storage

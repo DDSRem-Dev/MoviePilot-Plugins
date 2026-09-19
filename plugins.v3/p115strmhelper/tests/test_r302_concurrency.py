@@ -130,6 +130,7 @@ def _load_r302_module() -> Any:
 
     for package_name in (
         "app",
+        "app.sdk",
         "p115client",
         "p115strmhelper",
         "p115strmhelper.core",
@@ -138,9 +139,9 @@ def _load_r302_module() -> Any:
     ):
         install(package_name, _package(package_name))
 
-    log_module = ModuleType("app.log")
+    log_module = ModuleType("app.sdk.logging")
     log_module.logger = MagicMock()
-    install("app.log", log_module)
+    install("app.sdk.logging", log_module)
 
     cipher_module = ModuleType("p115cipher")
     cipher_module.rsa_encrypt = lambda value: b"encrypted"

@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional, Tuple, TYPE_CHECKING
 
-from app.log import logger
+from app.sdk.logging import logger
 
 if TYPE_CHECKING:
     from ..helper.transfer import TransferTaskManager, TransferHandler
@@ -113,12 +113,13 @@ class TransferChainPatcher:
         """
         from app.chain.media import MediaChain
         from app.chain.tmdb import TmdbChain
-        from app.core.config import settings
-        from app.core.context import MediaInfo
-        from app.db.transferhistory_oper import TransferHistoryOper
+        from app.sdk.config import settings
+        from app.sdk.media import MediaInfo
+        from app.db.oper.transferhistory import TransferHistoryOper
         from app.helper.directory import DirectoryHelper
-        from app.schemas import Notification, TransferInfo
-        from app.schemas.types import MediaType, NotificationType
+        from app.schemas import TransferInfo
+        from app.schemas.message import Message
+        from app.schemas.types import MediaType, MessageType
 
         from ..schemas.transfer import TransferTask as PluginTransferTask
 
@@ -188,8 +189,8 @@ class TransferChainPatcher:
                         download_hash=task.download_hash,
                     )
                     chain_self.post_message(
-                        Notification(
-                            mtype=NotificationType.Manual,
+                        Message(
+                            mtype=MessageType.Manual,
                             title=f"{task.fileitem.name} 未识别到媒体信息，无法入库！",
                             text=(
                                 "原因：未识别到媒体信息\n"
@@ -519,7 +520,7 @@ class TransferChainPatcher:
         :param need_rename: 是否与 MP 目录 renaming 一致
         :return: 目标路径，失败返回 None
         """
-        from app.core.config import settings
+        from app.sdk.config import settings
         from app.modules.filemanager.transhandler import TransHandler
         from app.schemas.types import MediaType
 
@@ -556,7 +557,7 @@ class TransferChainPatcher:
 
             # 触发 TransferRenameBuild 事件，允许插件注入命名字段
             try:
-                from app.core.event import eventmanager
+                from app.sdk.events import eventmanager
                 from app.schemas import TransferRenameBuildEventData
                 from app.schemas.types import ChainEventType
 
@@ -714,7 +715,7 @@ class TransferChainPatcher:
         :param callback: 回调
         :return: 返回值
         """
-        from app.core.event import eventmanager
+        from app.sdk.events import eventmanager
         from app.schemas import StorageOperSelectionEventData, TransferInfo
         from app.schemas.types import ChainEventType
 

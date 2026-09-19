@@ -24,8 +24,8 @@ from sqlalchemy.orm import (
 from sqlalchemy.exc import OperationalError
 
 from ..core.config import configer
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 
 _DATABASE_LIFECYCLE_LOCK = RLock()

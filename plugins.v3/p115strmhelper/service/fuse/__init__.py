@@ -31,7 +31,7 @@ from ...core.config import configer
 from ...helper.fuse import P115FuseOperations
 from ...utils.sentry import sentry_manager
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 def _get_fuse_error_message(error_code: int) -> str:

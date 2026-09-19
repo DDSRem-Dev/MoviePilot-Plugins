@@ -22,7 +22,7 @@ from p115client.tool import (
 )
 from yarl import URL
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ._sqlitedict import SqliteTableDict
 from ...core.config import configer

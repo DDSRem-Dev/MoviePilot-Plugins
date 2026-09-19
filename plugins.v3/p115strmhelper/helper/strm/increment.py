@@ -21,8 +21,8 @@ from p115client.tool.fs_files import fs_files_iter
 from p115client.tool.iterdir import iterdir
 from sqlalchemy.orm.exc import MultipleResultsFound
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from ...core.cache import DirectoryCache, idpathcacher
 from ...core.config import configer

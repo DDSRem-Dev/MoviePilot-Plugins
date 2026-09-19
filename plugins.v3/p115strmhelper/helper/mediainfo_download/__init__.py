@@ -30,7 +30,7 @@ from p115client.util import reduce_image_url_layers
 from p115pickcode import pickcode_to_id
 from zstandard import ZstdCompressor, ZstdDecompressor
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.config import configer
 from ...core.p115_client import create_client

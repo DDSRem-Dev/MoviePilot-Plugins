@@ -8,10 +8,10 @@ from urllib.parse import quote
 from httpx import RequestError, post as httpx_post
 from p115center import P115Center
 
-from app.helper.mediaserver import MediaServerHelper
-from app.log import logger
+from app.sdk.services import MediaServerHelper
+from app.sdk.logging import logger
 from app.schemas import ServiceInfo
-from app.utils.http import RequestUtils
+from app.sdk.network import RequestUtils
 
 from ...core.config import configer
 from ...schemas.emby_mediainfo import EmbyMediainfoTask

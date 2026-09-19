@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Tuple, Optional, Any
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 @dataclass

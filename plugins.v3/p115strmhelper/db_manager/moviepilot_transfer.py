@@ -6,7 +6,7 @@ from app.db.models.transferhistory import TransferHistory
 try:
     from app.sdk.utilities import cut as jieba_cut
 except ImportError:
-    from app.utils.jieba import cut as jieba_cut
+    from app.sdk.utilities import cut as jieba_cut
 
 
 class TransferHBOper(DbOper):

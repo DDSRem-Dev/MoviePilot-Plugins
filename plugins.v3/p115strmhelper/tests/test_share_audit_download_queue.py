@@ -37,6 +37,7 @@ def _load_queue_module():
     for package_name in (
         "app",
         "app.chain",
+        "app.sdk",
         "p115strmhelper",
         "p115strmhelper.core",
         "p115strmhelper.helper",
@@ -52,14 +53,17 @@ def _load_queue_module():
     transfer_module.TransferChain = MagicMock
     install("app.chain.transfer", transfer_module)
 
-    log_module = ModuleType("app.log")
+    log_module = ModuleType("app.sdk.logging")
     log_module.logger = MagicMock()
-    install("app.log", log_module)
+    install("app.sdk.logging", log_module)
 
     schemas_module = ModuleType("app.schemas")
     schemas_module.FileItem = SimpleNamespace
-    schemas_module.NotificationType = SimpleNamespace(Plugin="plugin")
     install("app.schemas", schemas_module)
+
+    schemas_types_module = ModuleType("app.schemas.types")
+    schemas_types_module.MessageType = SimpleNamespace(Plugin="plugin")
+    install("app.schemas.types", schemas_types_module)
 
     config_module = ModuleType("p115strmhelper.core.config")
     config_module.configer = SimpleNamespace(

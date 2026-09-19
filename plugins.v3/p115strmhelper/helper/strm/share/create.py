@@ -13,8 +13,8 @@ from p115client import check_response
 from p115client.tool.iterdir import share_iter_files
 from p115client.util import share_extract_payload
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from ....core.cache import sharestrmcacher
 from ....core.config import configer
