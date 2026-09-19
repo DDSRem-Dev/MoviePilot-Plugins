@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable, Generator, List, Optional, Union
 
 from app.sdk.config import settings
-from app.helper.redis import RedisHelper
+from app.adapters.cache.redis import RedisHelper
 
 import txt_tree_storage
 

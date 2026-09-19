@@ -111,12 +111,13 @@ class TransferChainPatcher:
         """
         Patched 版本的 __handle_transfer
         """
+        from app.application.directory import DirectoryHelper
+        from app.application.history import add_transfer_fail
         from app.chain.media import MediaChain
         from app.chain.tmdb import TmdbChain
-        from app.sdk.config import settings
-        from app.sdk.media import MediaInfo
         from app.db.oper.transferhistory import TransferHistoryOper
-        from app.helper.directory import DirectoryHelper
+        from app.sdk.config import settings
+        from app.sdk.media import MediaInfo, resolve_media_identity
         from app.schemas import TransferInfo
         from app.schemas.message import Message
         from app.schemas.types import MediaType, MessageType
@@ -181,7 +182,7 @@ class TransferChainPatcher:
                     if task.preview:
                         return False, "未识别到媒体信息"
                     # 新增整理失败历史记录
-                    his = transferhis.add_fail(
+                    his = add_transfer_fail(
                         fileitem=task.fileitem,
                         mode=task.transfer_type,
                         meta=task.meta,
@@ -217,7 +218,7 @@ class TransferChainPatcher:
                     ):
                         try:
                             import asyncio
-                            from app.core import global_vars
+                            from app.sdk.config import global_vars
 
                             group_key = (
                                 task.download_hash
@@ -241,10 +242,17 @@ class TransferChainPatcher:
 
                 mediainfo_changed = True
 
-            # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据tmdbid查询之前的title
+            # 如果未开启新增已入库媒体是否跟随TMDB信息变化则根据媒体身份查询之前的title
             if not settings.SCRAP_FOLLOW_TMDB:
-                transfer_history = transferhis.get_by_type_tmdbid(
-                    tmdbid=mediainfo.tmdb_id, mtype=mediainfo.type.value
+                media_source, media_id = resolve_media_identity(media=mediainfo)
+                transfer_history = (
+                    transferhis.get_by_media_identity(
+                        media_source=media_source,
+                        media_id=media_id,
+                        mtype=mediainfo.type.value,
+                    )
+                    if media_source and media_id
+                    else None
                 )
                 if transfer_history and mediainfo.title != transfer_history.title:
                     mediainfo.title = transfer_history.title
@@ -354,7 +362,7 @@ class TransferChainPatcher:
                         )
                         fail_msg = "未识别到文件集数"
                         src_path = task.fileitem.path
-                        transferhis.add_fail(
+                        add_transfer_fail(
                             fileitem=task.fileitem,
                             mode=task.transfer_type or "",
                             meta=task.meta,

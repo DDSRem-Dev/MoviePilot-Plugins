@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from p115client import check_response
 from p115client.tool.edit import update_name
 
+from app.application.history import add_transfer_success
 from app.chain.transfer import TransferChain, task_lock
 from app.sdk.config import settings
 from app.sdk.events import eventmanager
@@ -913,7 +914,7 @@ class TransferHandlerLinkedBatch:
                     transferinfo.file_list_new.append(str(related_file.target_path))
 
                 # 记录成功历史
-                history = self._handler.history_oper.add_success(
+                history = add_transfer_success(
                     fileitem=task.fileitem,
                     mode=task.transfer_type,
                     meta=task.meta,

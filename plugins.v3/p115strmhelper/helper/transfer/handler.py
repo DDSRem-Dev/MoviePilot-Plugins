@@ -6,13 +6,13 @@ from typing import Dict, List, Optional, Set, Tuple
 from p115client import P115Client, check_response
 from p115client.tool.edit import update_name
 
+from app.application.directory import DirectoryHelper
+from app.application.history import add_transfer_fail, add_transfer_success
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain, task_lock
 from app.sdk.config import settings
 from app.sdk.events import eventmanager
 from app.sdk.media import MetaInfoPath
-from app.db.oper.transferhistory import TransferHistoryOper
-from app.helper.directory import DirectoryHelper
 from app.sdk.logging import logger
 from app.schemas import FileItem, TransferInfo
 from app.schemas import TransferTask as MPTransferTask
@@ -42,7 +42,6 @@ class TransferHandler:
         self.client = client
         self.storage_name = storage_name
         self.storage_chain = StorageChain()
-        self.history_oper = TransferHistoryOper()
 
         self.cache_updater = CacheUpdater.create(
             client=client, storage_name=storage_name
@@ -1203,7 +1202,7 @@ class TransferHandler:
                     need_notify=need_notify_val,
                 )
 
-                history = self.history_oper.add_success(
+                history = add_transfer_success(
                     fileitem=task.fileitem,
                     mode=task.transfer_type,
                     meta=task.meta,
@@ -1874,7 +1873,7 @@ class TransferHandler:
             )
 
             # 记录失败历史
-            history = self.history_oper.add_fail(
+            history = add_transfer_fail(
                 fileitem=task.fileitem,
                 mode=task.transfer_type or "",
                 meta=task.meta,
@@ -1893,7 +1892,7 @@ class TransferHandler:
                 try:
                     import asyncio
 
-                    from app.core import global_vars
+                    from app.sdk.config import global_vars
 
                     chain = TransferChain()
                     group_key = (

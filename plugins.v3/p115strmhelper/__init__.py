@@ -19,7 +19,7 @@ from app.schemas.types import (
     MessageType,
     NotificationChannel,
 )
-from app.helper.directory import DirectoryHelper
+from app.application.directory import DirectoryHelper
 from app.chain.storage import StorageChain
 
 try:

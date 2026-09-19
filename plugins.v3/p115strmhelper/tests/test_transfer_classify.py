@@ -185,6 +185,7 @@ def _setup_mock_env() -> None:
     """
     for pkg in [
         "app",
+        "app.application",
         "app.sdk",
         "app.chain",
         "app.db",
@@ -225,8 +226,12 @@ def _setup_mock_env() -> None:
         TransferChain=object,
         task_lock=SimpleNamespace(),
     )
-    _make_module("app.db.oper.transferhistory", TransferHistoryOper=object)
-    _make_module("app.helper.directory", DirectoryHelper=object)
+    _make_module("app.application.directory", DirectoryHelper=object)
+    _make_module(
+        "app.application.history",
+        add_transfer_success=lambda **k: None,
+        add_transfer_fail=lambda **k: None,
+    )
     _make_module(
         "app.schemas",
         FileItem=FakeFileItem,

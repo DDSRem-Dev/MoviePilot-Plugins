@@ -22,7 +22,7 @@ from orjson import dumps
 
 from app.sdk.cache import LRUCache, TTLCache, AsyncCache
 from app.sdk.config import settings
-from app.helper.redis import RedisHelper
+from app.adapters.cache.redis import RedisHelper
 
 
 class IdPathCache:

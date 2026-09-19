@@ -3,6 +3,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from app.application.history import add_transfer_success
 from app.sdk.config import settings
 from app.sdk.media import MetaBase, MetaInfoPath
 from app.sdk.logging import logger
@@ -356,7 +357,7 @@ def record_related_files_success_history(
                 need_notify=False,
             )
 
-            related_history = handler.history_oper.add_success(
+            related_history = add_transfer_success(
                 fileitem=related_file.fileitem,
                 mode=task.transfer_type,
                 meta=task.meta,

@@ -8,7 +8,7 @@ from p115client.tool.attr import get_attr
 from app.chain.storage import StorageChain
 from app.sdk.config import settings
 from app.sdk.media import MediaInfo, MetaBase, MetaInfoPath
-from app.helper.directory import DirectoryHelper
+from app.application.directory import DirectoryHelper
 from app.sdk.logging import logger
 from app.schemas import TransferInfo, FileItem
 from app.schemas.types import EventType, ChainEventType
