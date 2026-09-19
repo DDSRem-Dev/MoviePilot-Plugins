@@ -1,0 +1,18 @@
+p115client==0.0.9.6.5.1
+sentry-sdk~=2.68.0
+aligo~=6.2.8
+qrcode_terminal~=0.8
+pyahocorasick~=2.3.0
+diskcache~=5.6.3
+zstandard~=0.25.0
+mfusepy~=3.1.0
+p115center-sdk==0.0.17
+slippers-proxy~=0.3.0
+orjson
+numpy
+httpx[http2]
+
+# Rust Mode
+full_strm_sync==0.1.6
+txt_tree_storage==0.2.1
+share_strm_scan==0.2.2

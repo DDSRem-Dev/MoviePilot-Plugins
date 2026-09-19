@@ -1,0 +1,12 @@
+[package]
+name = "txt_tree_storage"
+version = "0.2.1"
+edition = "2021"
+
+[lib]
+name = "txt_tree_storage"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29.0", features = ["extension-module"] }
+ahash = "0.8"
