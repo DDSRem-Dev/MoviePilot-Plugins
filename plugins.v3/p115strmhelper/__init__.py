@@ -54,8 +54,9 @@ from .core.cache import (
 )
 from .core.config import configer
 from .core.i18n import i18n
+from .core.legacy_migration import run_legacy_migration
 from .core.message import post_message
-from .db_manager import ct_db_manager, init_database as ensure_database
+from .db_manager import bind_handle
 from .mcp import MCPManager
 from .patch.u115_open import U115Patcher
 from .patch.p115disk_upload import P115DiskPatcher
@@ -122,6 +123,7 @@ class P115StrmHelper(_PluginBase):
     api = None
     mcp_manager = None
     _rename_media_fields_cache = rename_media_fields_cacher
+    _db_handle = None
 
     @staticmethod
     def logs_oper(oper_name: str):
@@ -177,9 +179,6 @@ class P115StrmHelper(_PluginBase):
         if not Path(configer.PLUGIN_TEMP_PATH).exists():
             Path(configer.PLUGIN_TEMP_PATH).mkdir(parents=True, exist_ok=True)
 
-        # 初始化数据库
-        self.init_database()
-
         # 实例化处理器和渲染器
         self.action_handler = ActionHandler()
         self.view_renderer = ViewRenderer()
@@ -191,6 +190,11 @@ class P115StrmHelper(_PluginBase):
         """
         初始化插件
         """
+        # 存量数据库迁移：必须是本方法最先执行的动作，且发生在下方 get_database()
+        # 调用之前——顺序颠倒会让 get_database() 提前在磁盘上建出空库文件，
+        # 污染"目标文件是否存在"这一迁移判据
+        run_legacy_migration(self, config)
+
         self.api = Api(client=None)
 
         if config:
@@ -202,8 +206,14 @@ class P115StrmHelper(_PluginBase):
         # 停止现有任务
         self.stop_service()
 
+        # 绑定本插件实例（本体或分身）自己的数据库句柄；句柄按 __class__.__name__
+        # 由宿主分配和缓存，本体与分身各自解析到互不相同的库文件
+        self._db_handle = self.get_database()
+        bind_handle(self._db_handle)
+
         if configer.enabled:
-            self.init_database()
+            if not Path(configer.PLUGIN_CONFIG_PATH).exists():
+                Path(configer.PLUGIN_CONFIG_PATH).mkdir(parents=True, exist_ok=True)
 
             if servicer.init_service():
                 self.api = Api(client=servicer.client)
@@ -223,14 +233,11 @@ class P115StrmHelper(_PluginBase):
             logger.warning(f"MCP 初始化跳过: {e}")
             self.mcp_manager = None
 
-    @logs_oper("初始化数据库")
-    def init_database(self) -> bool:
+    def get_database_migrations(self) -> str:
         """
-        初始化数据库
+        声明插件自有数据库的 Alembic 迁移脚本目录，插件启动时由宿主执行到 head
         """
-        if not Path(configer.PLUGIN_CONFIG_PATH).exists():
-            Path(configer.PLUGIN_CONFIG_PATH).mkdir(parents=True, exist_ok=True)
-        return ensure_database()
+        return str(Path(__file__).parent / "database" / "migrations")
 
     def get_state(self) -> bool:
         """
@@ -2217,7 +2224,8 @@ class P115StrmHelper(_PluginBase):
         """
         type(self)._rename_media_fields_cache.clear()
         servicer.stop()
-        ct_db_manager.close_database()
+        # 数据库连接池由宿主按插件标识统一管理：卸载时宿主自己 dispose() 句柄，
+        # 这里不重复释放，避免与宿主的释放/重建时序产生竞态
         U115Patcher().disable()
         P115DiskPatcher().disable()
         AppVerPatcher().disable()

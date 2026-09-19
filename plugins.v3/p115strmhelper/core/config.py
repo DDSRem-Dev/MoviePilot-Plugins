@@ -76,13 +76,6 @@ class ConfigManager(BaseModel):
         )
 
     @staticmethod
-    def _get_default_plugin_database_script_location() -> Path:
-        """
-        返回默认的插件数据库结构目录路径
-        """
-        return settings.ROOT_PATH / "app" / "plugins" / "p115strmhelper" / "database"
-
-    @staticmethod
     def _get_default_plugin_temp_path() -> Path:
         """
         返回默认的插件临时目录路径
@@ -297,19 +290,18 @@ class ConfigManager(BaseModel):
     )
     PLUGIN_DB_PATH: Path = Field(
         default_factory=lambda: ConfigManager._get_default_plugin_db_path(),
-        description="插件数据库目录",
-    )
-    PLUGIN_DATABASE_SCRIPT_LOCATION: Path = Field(
-        default_factory=lambda: (
-            ConfigManager._get_default_plugin_database_script_location()
+        description=(
+            "v2 存量数据库文件路径。v3 下插件数据库改由宿主按插件实例标识自管理，"
+            "本字段仅在首次以 v3 加载时用于定位存量数据并一次性迁移，不再是"
+            "当前插件库的实际路径"
         ),
-        description="插件数据库表目录",
     )
-    PLUGIN_DATABASE_VERSION_LOCATIONS: List[str] = Field(
-        default_factory=lambda: [
-            str(ConfigManager._get_default_plugin_config_path() / "database/versions")
-        ],
-        description="插件数据库版本目录列表",
+    skip_legacy_db_import: bool = Field(
+        default=False,
+        description=(
+            "跳过存量数据库导入。默认关闭；仅在 PLUGIN_DB_PATH 指向的旧库已损坏、"
+            "用户明确同意放弃存量数据时手动开启，开启后插件以全新空库启动"
+        ),
     )
     PLUGIN_TEMP_PATH: Path = Field(
         default_factory=lambda: ConfigManager._get_default_plugin_temp_path(),
@@ -878,7 +870,6 @@ class ConfigManager(BaseModel):
     @field_serializer(
         "PLUGIN_CONFIG_PATH",
         "PLUGIN_DB_PATH",
-        "PLUGIN_DATABASE_SCRIPT_LOCATION",
         "PLUGIN_TEMP_PATH",
     )
     def _serialize_paths(self, v: Path) -> str:
