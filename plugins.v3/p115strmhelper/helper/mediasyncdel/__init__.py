@@ -5,13 +5,14 @@ from pathlib import Path
 from app.sdk.events import Event
 from app.sdk.logging import logger
 from app.sdk.config import settings
+from app.sdk.media import resolve_media_identity
 from app.db.models.transferhistory import TransferHistory
 from app.db.oper.transferhistory import TransferHistoryOper
 from app.db.oper.downloadhistory import DownloadHistoryOper
 from app.db.oper.plugindata import PluginDataOper
 from app.sdk.services import DownloaderHelper
 from app.chain.storage import StorageChain
-from app.schemas.types import MediaType, MediaImageType, MessageType
+from app.schemas.types import MediaType, MediaSource, MediaImageType, MessageType
 from app.schemas.mediaserver import WebhookEventInfo
 
 from ...core.config import configer
@@ -520,6 +521,11 @@ class MediaSyncDelHelper:
 
         # 类型
         mtype = MediaType.MOVIE if media_type in ["Movie", "MOV"] else MediaType.TV
+        # v3 媒体身份：webhook 仅提供 TMDB ID，按 TMDB 数据源解析为规范 media_source/media_id；
+        # 解析不出来时两者均为 None，交由 TransferHistoryOper.get_by 按“查无记录”处理，不会误匹配
+        media_source, media_id = resolve_media_identity(
+            media_source=MediaSource.TMDB, media_id=tmdb_id
+        )
         # 删除多版本电影
         if mtype == MediaType.MOVIE and configer.sync_del_remove_versions:
             msg, transfer_history = "", []
@@ -533,13 +539,14 @@ class MediaSyncDelHelper:
         elif mtype == MediaType.MOVIE:
             msg = f"电影 {media_name} {tmdb_id}"
             transfer_history: List[TransferHistory] = self.transferhis.get_by(
-                tmdbid=tmdb_id, mtype=mtype.value, dest=media_path
+                media_source=media_source, media_id=media_id, mtype=mtype.value,
+                dest=media_path,
             )
         # 删除电视剧
         elif mtype == MediaType.TV and not season_num and not episode_num:
             msg = f"剧集 {media_name} {tmdb_id}"
             transfer_history: List[TransferHistory] = self.transferhis.get_by(
-                tmdbid=tmdb_id, mtype=mtype.value
+                media_source=media_source, media_id=media_id, mtype=mtype.value
             )
         # 季处理为集（多版本季删除）
         elif (
@@ -562,7 +569,8 @@ class MediaSyncDelHelper:
                 return "", []
             msg = f"剧集 {media_name} S{season_num} {tmdb_id}"
             transfer_history: List[TransferHistory] = self.transferhis.get_by(
-                tmdbid=tmdb_id, mtype=mtype.value, season=f"S{season_num}"
+                media_source=media_source, media_id=media_id, mtype=mtype.value,
+                season=f"S{season_num}",
             )
         # 删除集
         elif mtype == MediaType.TV and season_num and episode_num:
@@ -576,7 +584,8 @@ class MediaSyncDelHelper:
                 return "", []
             msg = f"剧集 {media_name} S{season_num}E{episode_num} {tmdb_id}"
             transfer_history: List[TransferHistory] = self.transferhis.get_by(
-                tmdbid=tmdb_id,
+                media_source=media_source,
+                media_id=media_id,
                 mtype=mtype.value,
                 season=f"S{season_num}",
                 episode=f"E{episode_num}",
@@ -878,7 +887,8 @@ class MediaSyncDelHelper:
                 title = transferhis.title
                 if title not in media_name:
                     logger.warn(
-                        f"【同步删除】当前转移记录 {transferhis.id} {title} {transferhis.tmdbid} 与删除媒体 {media_name} 不符，防误删，暂不自动删除"
+                        f"【同步删除】当前转移记录 {transferhis.id} {title} "
+                        f"{transferhis.media_source}:{transferhis.media_id} 与删除媒体 {media_name} 不符，防误删，暂不自动删除"
                     )
                     continue
                 image = transferhis.image or image

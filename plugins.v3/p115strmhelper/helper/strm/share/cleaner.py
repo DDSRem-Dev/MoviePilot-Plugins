@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from app.db.oper.transferhistory import TransferHistoryOper
 from app.sdk.logging import logger
-from app.schemas.types import MessageType
+from app.schemas.types import MediaSource, MessageType
 
 from share_strm_scan import Pair, ShareStrmScanCache
 
@@ -256,6 +256,12 @@ class ShareStrmMissingMediaStore:
         :return Dict: 含 ``uid``、``reason``、``detected_at`` 及 ``id``/``title`` 等 API 字段的字典
         """
         uid = str(uuid4())
+        # v3 TransferHistory 只有单一 media_source + media_id，不再同时存 tmdbid/tvdbid/
+        # imdbid/doubanid 四列；为不改动既有 API 响应结构（前端 AppPageStart.vue 按这
+        # 四个旧键名读取展示），按记录实际的 media_source 把 media_id 映射回对应旧键，
+        # 其余三个旧键留空，兼容旧前端且不再永久返回 None
+        media_source = getattr(th, "media_source", None)
+        media_id = getattr(th, "media_id", None)
         base: Dict[str, Any] = {
             "uid": uid,
             "strm_path": strm_path,
@@ -267,10 +273,10 @@ class ShareStrmMissingMediaStore:
             "type": getattr(th, "type", None),
             "title": getattr(th, "title", None),
             "year": getattr(th, "year", None),
-            "tmdbid": getattr(th, "tmdbid", None),
-            "tvdbid": getattr(th, "tvdbid", None),
-            "imdbid": getattr(th, "imdbid", None),
-            "doubanid": getattr(th, "doubanid", None),
+            "tmdbid": media_id if media_source == MediaSource.TMDB.value else None,
+            "tvdbid": media_id if media_source == MediaSource.TVDB.value else None,
+            "imdbid": media_id if media_source == MediaSource.IMDb.value else None,
+            "doubanid": media_id if media_source == MediaSource.Douban.value else None,
             "seasons": getattr(th, "seasons", None),
             "episodes": getattr(th, "episodes", None),
             "image": getattr(th, "image", None),

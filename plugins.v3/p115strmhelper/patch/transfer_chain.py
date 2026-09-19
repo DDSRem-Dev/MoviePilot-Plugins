@@ -141,13 +141,13 @@ class TransferChainPatcher:
                         task.meta, download_history
                     )
                     if (
-                        download_history.tmdbid or download_history.doubanid
+                        download_history.media_source and download_history.media_id
                     ) and not history_year_conflict:
                         # 下载记录中已存在识别信息
                         mediainfo: Optional[MediaInfo] = chain_self.recognize_media(
                             mtype=MediaType(download_history.type),
-                            tmdbid=download_history.tmdbid,
-                            doubanid=download_history.doubanid,
+                            media_source=download_history.media_source,
+                            media_id=download_history.media_id,
                             episode_group=download_history.episode_group,
                         )
                         need_obtain_images = True
@@ -196,7 +196,7 @@ class TransferChainPatcher:
                             text=(
                                 "原因：未识别到媒体信息\n"
                                 "如果按钮不可用，可回复：\n"
-                                f"```\n/redo {his.id}\n/redo {his.id} [tmdbid]|[类型]\n```\n"
+                                f"```\n/redo {his.id}\n/redo {his.id} [media_source]|[media_id]|[类型]\n```\n"
                                 "自动重试或手动识别整理。"
                             ),
                             username=task.username,

@@ -19,4 +19,6 @@ dependencies = [
     "full_strm_sync==0.1.6",
     "txt_tree_storage==0.2.1",
     "share_strm_scan==0.2.2",
+    "cachedict==0.0.7",
+    "errno2==0.0.5",
 ]
