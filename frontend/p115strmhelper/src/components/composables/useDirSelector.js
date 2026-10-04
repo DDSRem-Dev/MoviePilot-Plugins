@@ -52,8 +52,11 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
       if (dirDialog.isLocal) {
         try {
           const response = await api.post('storage/list', { path: dirDialog.currentPath || '/', type: 'share', flag: 'ROOT' });
-          if (response && Array.isArray(response)) {
-            dirDialog.items = response
+          // MoviePilot V3 的 storage/list 返回包装结构 {success,message,data}，V2 及更早版本返回裸数组，此处统一取数组。
+          // 使用 Array.isArray 逐层判定而非真值判定，避免 V3 空目录(data=[])被误判为无效响应。
+          const storageList = Array.isArray(response) ? response : (response && Array.isArray(response.data) ? response.data : null);
+          if (Array.isArray(storageList)) {
+            dirDialog.items = storageList
               .filter(item => item.type === 'dir')
               .map(item => ({ name: item.name, path: item.path, is_dir: true }))
               .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
