@@ -589,6 +589,78 @@ class TestDoGenerate(TestCase):
             mediainfodownloader=self.downloader,
         )
 
+    def test_incomplete_transfer_results_are_skipped(self) -> None:
+        """
+        缺少整理结果或目标信息时安全跳过，不创建服务或生成下载文件
+        """
+        module = self.transfer_module
+        self.configer.transfer_monitor_clouddrive2_enabled = True
+        complete = self._build_item("特典.mkv")["transferinfo"]
+        cases = {
+            "missing_transferinfo": {},
+            "null_transferinfo": {"transferinfo": None},
+            "skipped_transfer": {
+                "transferinfo": SimpleNamespace(
+                    success=True, target_item=None, target_diritem=None
+                )
+            },
+            "missing_target_item": {
+                "transferinfo": SimpleNamespace(
+                    success=True,
+                    target_item=None,
+                    target_diritem=complete.target_diritem,
+                )
+            },
+            "missing_target_diritem": {
+                "transferinfo": SimpleNamespace(
+                    success=True,
+                    target_item=complete.target_item,
+                    target_diritem=None,
+                )
+            },
+            "serialized_skipped_transfer": {"transferinfo": {"success": True}},
+        }
+        for event_type in (
+            "TransferComplete",
+            "SubtitleTransferComplete",
+            "AudioTransferComplete",
+        ):
+            for name, item in cases.items():
+                with (
+                    self.subTest(event_type=event_type, case=name),
+                    patch.object(
+                        module,
+                        "TransferInfo",
+                        side_effect=lambda **data: SimpleNamespace(
+                            target_item=data.get("target_item"),
+                            target_diritem=data.get("target_diritem"),
+                        ),
+                    ),
+                    patch.object(module, "FileDbHelper") as database,
+                    patch.object(module, "StrmUrlGetter") as url_getter,
+                    patch.object(module, "StorageChain") as storage,
+                    patch.object(module, "logger") as log,
+                    patch.object(
+                        module.TransferStrmHelper, "generate_strm_files"
+                    ) as gen,
+                    patch.object(
+                        module.TransferStrmHelper, "_download_media_file"
+                    ) as download,
+                ):
+                    result = module.TransferStrmHelper().do_generate(
+                        client=MagicMock(),
+                        item=item,
+                        event_type=event_type,
+                        mediainfodownloader=self.downloader,
+                    )
+                    self.assertIsNone(result)
+                    database.assert_not_called()
+                    url_getter.assert_not_called()
+                    storage.assert_not_called()
+                    gen.assert_not_called()
+                    download.assert_not_called()
+                    log.error.assert_not_called()
+
     def test_transfer_complete_subtitle_downloads(self) -> None:
         """
         TransferComplete 携带字幕文件时自动走下载流程且不生成 STRM

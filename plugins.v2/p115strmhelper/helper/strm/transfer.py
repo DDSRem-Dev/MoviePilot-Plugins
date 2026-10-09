@@ -274,7 +274,7 @@ class TransferStrmHelper:
         item: Dict,
         event_type: Union[EventType, ChainEventType],
         mediainfodownloader: MediaInfoDownloader,
-    ):
+    ) -> None:
         """
         生成 STRM 操作
 
@@ -283,13 +283,23 @@ class TransferStrmHelper:
         :param event_type (Union): 事件类型
         :param mediainfodownloader (MediaInfoDownloader): 媒体信息下载器实例
         """
-        _database_helper = FileDbHelper()
-        _get_url = StrmUrlGetter()
-
         # 转移信息
         item_transfer: Optional[TransferInfo] = item.get("transferinfo")
         if isinstance(item_transfer, dict):
             item_transfer: TransferInfo = TransferInfo(**item_transfer)
+        if (
+            item_transfer is None
+            or item_transfer.target_item is None
+            or item_transfer.target_diritem is None
+        ):
+            logger.debug(
+                "【监控整理STRM生成】整理结果缺少目标文件或目录信息，跳过 STRM 生成"
+            )
+            return
+
+        _database_helper = FileDbHelper()
+        _get_url = StrmUrlGetter()
+
         # 媒体信息
         mediainfo: Optional[MediaInfo] = item.get("mediainfo")
         # 元数据信息
