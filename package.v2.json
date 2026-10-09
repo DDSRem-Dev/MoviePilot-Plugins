@@ -746,11 +746,12 @@
         "name": "MediaWarp",
         "description": "EmbyServer/Jellyfin 中间件：优化播放 Strm 文件、自定义前端样式、自定义允许访问客户端、嵌入脚本。",
         "labels": "云盘",
-        "version": "1.0.7",
+        "version": "1.0.8",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/cloud.png",
         "author": "DDSRem",
         "level": 1,
         "history": {
+            "v1.0.8": "修复配置及二进制写入中断导致服务无法启动，支持空配置重建并记录启动异常",
             "v1.0.7": "兼容 MacOS 系统",
             "v1.0.6": "再修复 URL 编码问题",
             "v1.0.5": "修复 URL 编码问题",

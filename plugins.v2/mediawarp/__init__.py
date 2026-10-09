@@ -1,18 +1,20 @@
 import os
 import platform
+import shutil
 import tarfile
 import tempfile
-import shutil
-from typing import Any, List, Dict, Tuple
-from pathlib import Path
+from collections.abc import MutableMapping
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import IO, Any, Dict, Generator, List, Tuple
 
-import pytz
 import psutil
+import pytz
 import requests
+from apscheduler.schedulers.background import BackgroundScheduler
 from ruamel.yaml import YAML
 from ruamel.yaml.representer import RoundTripRepresenter
-from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
 from app.helper.mediaserver import MediaServerHelper
@@ -32,7 +34,7 @@ class MediaWarp(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/cloud.png"
     # 插件版本
-    plugin_version = "1.0.7"
+    plugin_version = "1.0.8"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -578,9 +580,21 @@ class MediaWarp(_PluginBase):
         """
         pass
 
-    def __run_service(self):
+    def __run_service(self) -> None:
         """
-        运行服务
+        运行服务并记录调度任务中的启动异常
+        """
+        try:
+            self.__start_service()
+        except Exception:
+            logger.error(
+                "MediaWarp 服务启动失败，请检查配置文件、文件权限和磁盘空间",
+                exc_info=True,
+            )
+
+    def __start_service(self) -> None:
+        """
+        准备配置并启动服务
         """
         if not Path(self.__mediawarp_path).exists():
             logger.info("尝试自动下载二级制文件中...")
@@ -599,11 +613,6 @@ class MediaWarp(_PluginBase):
             if version != self.__mediawarp_version:
                 logger.info("尝试自动更新二级制文件中...")
                 self.__download_and_extract()
-
-        if not Path(self.__config_path / self.__config_filename).exists():
-            logger.error("MediaWarp 配置文件不存在，无法启动插件")
-            self.__update_config()
-            return
 
         changes = {
             "Port": self._port,
@@ -625,7 +634,7 @@ class MediaWarp(_PluginBase):
             "Web.VideoTogether": bool(self._video_together),
             "HTTPStrm.Enable": True,
             "HTTPStrm.FinalURL": True,
-            "HTTPStrm.PrefixList": self._media_strm_path.split("\n"),
+            "HTTPStrm.PrefixList": (self._media_strm_path or "").split("\n"),
             "Subtitle.SRT2ASS": bool(self._srt2ass),
         }
         self.__modify_config(Path(self.__config_path / self.__config_filename), changes)
@@ -637,14 +646,63 @@ class MediaWarp(_PluginBase):
 
         if self.process.is_running():
             logger.info("MediaWarp 服务成功启动！")
+        else:
+            logger.error("MediaWarp 进程启动后已退出，请检查 MediaWarp 日志和配置")
 
-    def __modify_config(self, config_path, modifications):
+    @staticmethod
+    @contextmanager
+    def __atomic_write(
+        target: Path, binary: bool = False
+    ) -> Generator[IO[Any], None, None]:
+        """
+        写入同目录临时文件，落盘成功后原子替换目标文件
+
+        :param target (Path): 目标文件路径
+        :param binary (bool): 是否以二进制模式写入
+
+        :yields IO: 临时文件对象
+        """
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb" if binary else "w",
+            encoding=None if binary else "utf-8",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temp_path = Path(file.name)
+            try:
+                if target.exists():
+                    shutil.copymode(target, temp_path)
+                yield file
+                file.flush()
+                os.fsync(file.fileno())
+                file.close()
+                os.replace(temp_path, target)
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+    def __atomic_copy(self, source: Path, target: Path) -> None:
+        """
+        原子复制文件并保留源文件的权限和时间戳
+        """
+        with (
+            source.open("rb") as source_file,
+            self.__atomic_write(target, binary=True) as target_file,
+        ):
+            shutil.copyfileobj(source_file, target_file)
+            target_file.flush()
+            shutil.copystat(source, target_file.name)
+
+    def __modify_config(self, config_path: Path, modifications: Dict[str, Any]) -> None:
         """
         修改配置文件
 
-        :param config_path: 配置文件路径
-        :param modifications: 要修改的配置项字典
-        :return: None
+        空文件或缺失文件按插件设置重建，解析或结构错误保留原文件并报错
+
+        :param config_path (Path): 配置文件路径
+        :param modifications (Dict): 要修改的配置项字典
         """
         yaml = YAML()
         yaml.preserve_quotes = True
@@ -664,17 +722,28 @@ class MediaWarp(_PluginBase):
 
         RoundTripRepresenter.add_representer(bool, represent_bool)
 
-        with open(config_path, "r", encoding="utf-8") as file:
-            config = yaml.load(file)
+        config = None
+        if config_path.exists():
+            with config_path.open("r", encoding="utf-8") as file:
+                config = yaml.load(file)
+        if config is None:
+            logger.warning("MediaWarp 配置文件为空或不存在，将按插件设置重建")
+            config = {}
+        if not isinstance(config, MutableMapping):
+            raise TypeError("MediaWarp 配置文件根节点必须是映射")
 
         for key, value in modifications.items():
             keys = key.split(".")
             current = config
             for k in keys[:-1]:
-                current = current.setdefault(k, {})
+                if current.get(k) is None:
+                    current[k] = {}
+                current = current[k]
+                if not isinstance(current, MutableMapping):
+                    raise TypeError(f"MediaWarp 配置项 {key} 的父节点必须是映射")
             current[keys[-1]] = value
 
-        with open(config_path, "w", encoding="utf-8") as file:
+        with self.__atomic_write(config_path) as file:
             yaml.dump(config, file)
 
     def __get_download_url(self):
@@ -728,7 +797,9 @@ class MediaWarp(_PluginBase):
                     tar.extract(member=mediawarp_member[0], path=temp_dir)
                     extracted_path = Path(temp_dir) / mediawarp_member[0].name
                     extracted_path.chmod(0o755)
-                    shutil.copy2(extracted_path, Path(self.__mediawarp_path))
+                    self.__atomic_copy(extracted_path, Path(self.__mediawarp_path))
+                else:
+                    raise ValueError("下载的压缩包中缺少 MediaWarp 二进制文件")
 
                 config_target = Path(self.__config_path / self.__config_filename)
                 if not config_target.exists():
@@ -742,14 +813,14 @@ class MediaWarp(_PluginBase):
                         extracted_config = (
                             Path(temp_dir) / config_example_member[0].name
                         )
-                        shutil.copy2(extracted_config, config_target)
+                        self.__atomic_copy(extracted_config, config_target)
                         logger.info(f"示例配置文件已保存到 {config_target}")
 
-            with open(self.__mediawarp_version_path, "w", encoding="utf-8") as f:
+            with self.__atomic_write(self.__mediawarp_version_path) as f:
                 f.write(self.__mediawarp_version)
             logger.info(f"安装完成！MediaWarp 已安装到 {self.__mediawarp_path}")
         except Exception as e:
-            logger.info(f"发生错误: {e}")
+            logger.error(f"MediaWarp 安装失败: {e}", exc_info=True)
         finally:
             shutil.rmtree(temp_dir)
 
