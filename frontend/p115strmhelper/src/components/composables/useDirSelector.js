@@ -52,13 +52,14 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
       if (dirDialog.isLocal) {
         try {
           const response = await api.post('storage/list', { path: dirDialog.currentPath || '/', type: 'share', flag: 'ROOT' });
-          if (response && Array.isArray(response)) {
-            dirDialog.items = response
+          const items = Array.isArray(response) ? response : response?.data;
+          if (Array.isArray(items)) {
+            dirDialog.items = items
               .filter(item => item.type === 'dir')
               .map(item => ({ name: item.name, path: item.path, is_dir: true }))
               .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
           } else {
-            throw new Error('浏览目录失败：无效响应');
+            throw new Error(response?.message || '浏览目录失败：无效响应');
           }
         } catch (error) {
           console.error('浏览本地目录失败:', error);
