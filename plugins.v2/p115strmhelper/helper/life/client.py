@@ -36,7 +36,7 @@ from p115client import P115Client, check_response
 from p115client.exception import P115AuthenticationError, P115OSError
 from p115client.tool.attr import get_path, normalize_attr
 from p115client.tool.fs_files import fs_files_iter
-from p115client.tool.iterdir import iter_files_with_path
+from p115client.tool.iterdir import iter_files
 from p115client.tool.life import (
     life_show,
     iter_life_behavior_once,
@@ -339,9 +339,12 @@ class MonitorLife:
                     pantransfercacher.delete_pan_transfer_list.append(
                         str(event["file_id"])
                     )
-                for item in iter_files_with_path(
+                for item in iter_files(
                     self._client,
                     cid=int(file_id),
+                    with_path=True,
+                    order="user_ptime",
+                    max_workers=None,
                     with_ancestors=True,
                     cooldown=2,
                     use_media_api=False,
@@ -551,9 +554,12 @@ class MonitorLife:
                 )
             )
             for batch in batched(
-                iter_files_with_path(
+                iter_files(
                     self._client,
                     cid=int(file_id),
+                    with_path=True,
+                    order="user_ptime",
+                    max_workers=None,
                     with_ancestors=True,
                     cooldown=2,
                     use_media_api=False,

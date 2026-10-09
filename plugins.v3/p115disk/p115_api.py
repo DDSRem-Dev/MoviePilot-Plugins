@@ -15,7 +15,7 @@ from p115client.const import _CACHE_DIR
 from p115client.exception import P115NotADirectoryError
 from p115client.tool.attr import normalize_attr, get_id_to_path, get_attr
 from p115client.tool.fs_files import fs_files_iter
-from p115client.tool.iterdir import iter_files_with_path_skim
+from p115client.tool.iterdir import iter_files_skim
 
 from app.chain.storage import StorageChain
 from app.modules.filemanager.storages import transfer_process
@@ -155,9 +155,10 @@ class P115Api:
 
         items = []
         try:
-            for item in iter_files_with_path_skim(
+            for item in iter_files_skim(
                 client=self.client,
                 cid=file_id,
+                with_path=True,
                 with_ancestors=False,
                 **get_ios_ua_app(),
             ):

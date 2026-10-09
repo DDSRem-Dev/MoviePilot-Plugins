@@ -118,7 +118,7 @@ class ShareTransferHelper:
                 share_code=share_code,
                 cid=0,
                 app="web",
-                max_workers=0,
+                order="user_ptime",
                 **configer.get_ios_ua_app(app=False),
             ):
                 if file_num == 1:
@@ -339,7 +339,7 @@ class ShareTransferHelper:
                         share_code=share_code,
                         cid=0,
                         app="web",
-                        max_workers=0,
+                        order="user_ptime",
                         **configer.get_ios_ua_app(app=False),
                     )
                 ]

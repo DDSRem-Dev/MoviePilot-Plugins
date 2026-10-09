@@ -14,7 +14,7 @@ from p115client.const import _CACHE_DIR
 from p115client.exception import P115NotADirectoryError
 from p115client.tool.attr import normalize_attr, get_id_to_path, get_attr
 from p115client.tool.fs_files import fs_files_iter
-from p115client.tool.iterdir import iter_files_with_path_skim
+from p115client.tool.iterdir import iter_files_skim
 
 from app.chain.storage import StorageChain
 from app.core.config import settings, global_vars
@@ -138,9 +138,10 @@ class P115Api:
 
         items = []
         try:
-            for item in iter_files_with_path_skim(
+            for item in iter_files_skim(
                 client=self.client,
                 cid=file_id,
+                with_path=True,
                 with_ancestors=False,
                 **get_ios_ua_app(),
             ):
@@ -177,6 +178,7 @@ class P115Api:
         except Exception as e:
             logger.warn(f"【P115Disk】递归遍历文件夹失败: {str(e)}")
             return None
+        return items
 
     def list(self, fileitem: FileItem) -> List[FileItem]:
         """

@@ -21,11 +21,8 @@ from orjson import loads
 from p115center import P115Center
 from p115client import check_response
 from p115client.const import TYPE_TO_SUFFIXES
-from p115client.tool.iterdir import (
-    iter_file_list,
-    iter_files,
-    iter_files_with_path_skim,
-)
+from p115client.tool.iter_nodes import iter_nodes
+from p115client.tool.iterdir import iter_files, iter_files_skim
 from p115client.util import reduce_image_url_layers
 from p115pickcode import pickcode_to_id
 from zstandard import ZstdCompressor, ZstdDecompressor
@@ -489,7 +486,7 @@ class MediaInfoDownloader:
                 )
                 check_response(resp)
                 attr = next(
-                    iter_file_list(
+                    iter_nodes(
                         client=self.client,
                         payload=scid,
                         page_size=1,
@@ -547,7 +544,7 @@ class MediaInfoDownloader:
                 # 休眠等待 115 全部转存完成
                 time_sleep(8)
                 attr = next(
-                    iter_file_list(
+                    iter_nodes(
                         client=self.client,
                         payload=scid,
                         page_size=1,
@@ -713,9 +710,10 @@ class MediaInfoDownloader:
                 # 休眠等待 115 全部转存完成
                 time_sleep(8)
                 file_info_lst = list(
-                    iter_files_with_path_skim(
+                    iter_files_skim(
                         client=self.client,
                         cid=scid,
+                        with_path=True,
                         with_ancestors=False,
                         **configer.get_ios_ua_app(),
                     )

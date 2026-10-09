@@ -4,7 +4,7 @@ from typing import Tuple, List, Optional, Dict
 from uuid import uuid4
 
 from p115client import P115Client
-from p115client.tool import iter_files_with_path_skim
+from p115client.tool import iter_files_skim
 from p115pickcode import to_id
 
 from ...core.u115_open import U115OpenHelper
@@ -395,9 +395,10 @@ class ApiSyncStrmHelper:
                     configer.PLUGIN_TEMP_PATH / f"{uuid}_pan_tree.txt"
                 )
 
-            for item in iter_files_with_path_skim(
+            for item in iter_files_skim(
                 self.client,
                 cid=parent_id,
+                with_path=True,
                 with_ancestors=True,
                 **configer.get_ios_ua_app(),
             ):
@@ -521,9 +522,10 @@ class ApiSyncStrmHelper:
                         f"【API_STRM生成】网盘媒体目录 ID 获取失败: {item.pan_media_path} {e}"
                     )
                     continue
-                for i in iter_files_with_path_skim(
+                for i in iter_files_skim(
                     self.client,
                     cid=parent_id,
+                    with_path=True,
                     with_ancestors=True,
                     **configer.get_ios_ua_app(),
                 ):

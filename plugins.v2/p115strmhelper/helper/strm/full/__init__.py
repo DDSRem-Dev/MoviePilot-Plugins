@@ -14,10 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from orjson import dumps
 from p115client import P115Client
-from p115client.tool.iterdir import (
-    iter_files_with_path,
-    iter_files_with_path_skim,
-)
+from p115client.tool.iterdir import iter_files, iter_files_skim
 
 from app.core.config import settings
 from app.log import logger
@@ -721,15 +718,19 @@ class FullSyncStrmHelper:
                     configer.get_config("full_sync_iter_function")
                     == "iter_files_with_path_skim"
                 ):
-                    iter_func = iter_files_with_path_skim
+                    iter_func = iter_files_skim
                     iter_kwargs = {
+                        "with_path": True,
                         "cid": parent_id,
                         "with_ancestors": True,
                         **configer.get_ios_ua_app(),
                     }
                 else:
-                    iter_func = iter_files_with_path
+                    iter_func = iter_files
                     iter_kwargs = {
+                        "with_path": True,
+                        "order": "user_ptime",
+                        "max_workers": None,
                         "cid": parent_id,
                         "with_ancestors": True,
                         "cooldown": 1.5,
@@ -885,15 +886,19 @@ class FullSyncStrmHelper:
                         configer.get_config("full_sync_iter_function")
                         == "iter_files_with_path_skim"
                     ):
-                        iter_func = iter_files_with_path_skim
+                        iter_func = iter_files_skim
                         iter_kwargs = {
+                            "with_path": True,
                             "cid": parent_id,
                             "with_ancestors": True,
                             **configer.get_ios_ua_app(),
                         }
                     else:
-                        iter_func = iter_files_with_path
+                        iter_func = iter_files
                         iter_kwargs = {
+                            "with_path": True,
+                            "order": "user_ptime",
+                            "max_workers": None,
                             "cid": parent_id,
                             "with_ancestors": True,
                             "cooldown": 1.5,

@@ -17,7 +17,7 @@ from p115client.tool import (
     get_id_to_path,
     iterdir,
     normalize_attr_simple,
-    traverse_tree_with_path,
+    traverse_tree,
     P115QueryDB,
 )
 from yarl import URL
@@ -162,9 +162,10 @@ class WebdavCore:
         :param id (int): 起始目录 ID
         :return AsyncIterator: 异步迭代器，产出文件/目录属性字典
         """
-        async for attr in traverse_tree_with_path(
+        async for attr in traverse_tree(
             self.client,
             id,
+            with_path=True,
             id_to_dirnode=self.id_to_dirnode,
             escape=None,
             async_=True,
