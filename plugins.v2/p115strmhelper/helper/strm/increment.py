@@ -1,13 +1,14 @@
-from sys import platform as sys_platform
 from collections import deque
 from functools import partial
 from itertools import batched, cycle
 from os import close, O_CREAT, O_RDWR, open as os_open
 from pathlib import Path
 from posixpath import join as posix_join
+from sys import platform as sys_platform
 from threading import Thread
 from time import perf_counter, sleep
 from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, Tuple
+from uuid import uuid4
 
 from p115client import P115Client
 from p115client.tool.attr import normalize_attr
@@ -161,24 +162,25 @@ class IncrementSyncStrmHelper:
             delay_seconds=configer.increment_sync_media_server_refresh_delay,
         )
 
+        tree_id = uuid4().hex
+        self._pan_path_by_local: Dict[str, Optional[str]] = {}
         self.local_tree_path = (
-            configer.get_config("PLUGIN_TEMP_PATH") / "increment_local_tree.txt"
-        )
-        self.pan_tree_path = (
-            configer.get_config("PLUGIN_TEMP_PATH") / "increment_pan_tree.txt"
+            configer.get_config("PLUGIN_TEMP_PATH")
+            / f"increment_local_tree_{tree_id}.txt"
         )
         self.pan_to_local_tree_path = (
-            configer.get_config("PLUGIN_TEMP_PATH") / "increment_pan_to_local_tree.txt"
+            configer.get_config("PLUGIN_TEMP_PATH")
+            / f"increment_pan_to_local_tree_{tree_id}.txt"
         )
         self.local_strm_tree_path = (
-            configer.get_config("PLUGIN_TEMP_PATH") / "increment_local_strm_tree.txt"
+            configer.get_config("PLUGIN_TEMP_PATH")
+            / f"increment_local_strm_tree_{tree_id}.txt"
         )
         self.pan_to_local_strm_tree_path = (
             configer.get_config("PLUGIN_TEMP_PATH")
-            / "increment_pan_to_local_strm_tree.txt"
+            / f"increment_pan_to_local_strm_tree_{tree_id}.txt"
         )
         self.local_tree = DirectoryTree(self.local_tree_path)
-        self.pan_tree = DirectoryTree(self.pan_tree_path)
         self.pan_to_local_tree = DirectoryTree(self.pan_to_local_tree_path)
         self.local_strm_tree = DirectoryTree(self.local_strm_tree_path)
         self.pan_to_local_strm_tree = DirectoryTree(self.pan_to_local_strm_tree_path)
@@ -186,7 +188,6 @@ class IncrementSyncStrmHelper:
     def __del__(self):
         self.directory_cache.close()
         self.local_tree.clear()
-        self.pan_tree.clear()
         self.pan_to_local_tree.clear()
         self.local_strm_tree.clear()
         self.pan_to_local_strm_tree.clear()
@@ -505,7 +506,7 @@ class IncrementSyncStrmHelper:
             logger.info("【增量STRM生成】扫描本地媒体库运行中...")
             sleep(10)
 
-    def __generate_pan_tree(self, pan_media_dir: str, target_dir: str):
+    def __generate_pan_tree(self, pan_media_dir: str, target_dir: str) -> None:
         """
         生成网盘目录树
 
@@ -516,21 +517,28 @@ class IncrementSyncStrmHelper:
         """
         last_error: Optional[Exception] = None
         for i in range(1, 4):
-            self.pan_tree.clear()
+            self._pan_path_by_local.clear()
             self.pan_to_local_tree.clear()
             self.pan_to_local_strm_tree.clear()
 
             logger.info(f"【增量STRM生成】开始生成网盘目录树: {pan_media_dir}")
 
             try:
-                for path1, path2 in self.__itertree(
+                for local_path, pan_path in self.__itertree(
                     pan_path=pan_media_dir, local_path=target_dir
                 ):
-                    self.pan_to_local_tree.generate_tree_from_list([path1], append=True)
-                    self.pan_tree.generate_tree_from_list([path2], append=True)
-                    if Path(path1).suffix.lower() == ".strm":
+                    if local_path in self._pan_path_by_local:
+                        if self._pan_path_by_local[local_path] != pan_path:
+                            # 冲突标记保留到本次扫描结束，避免后续重复项覆盖它
+                            self._pan_path_by_local[local_path] = None
+                        continue
+                    self._pan_path_by_local[local_path] = pan_path
+                    self.pan_to_local_tree.generate_tree_from_list(
+                        [local_path], append=True
+                    )
+                    if Path(local_path).suffix.lower() == ".strm":
                         self.pan_to_local_strm_tree.generate_tree_from_list(
-                            [path1], append=True
+                            [local_path], append=True
                         )
 
                 logger.info(f"【增量STRM生成】网盘目录树生成完成: {pan_media_dir}")
@@ -552,7 +560,6 @@ class IncrementSyncStrmHelper:
                     logger.warning(
                         f"【增量STRM生成】Redis OOM，第 {i} 次尝试后将目录树降级到 TXT 存储并重试..."
                     )
-                    self.pan_tree.switch_storage("txt")
                     self.pan_to_local_tree.switch_storage("txt")
                     self.pan_to_local_strm_tree.switch_storage("txt")
                 else:
@@ -567,7 +574,41 @@ class IncrementSyncStrmHelper:
                 f"网盘目录树生成失败: {pan_media_dir}"
             ) from last_error
 
-    def __handle_addition_path(self, pan_path: str, local_path: str):
+    def _iter_addition_paths(self) -> Iterator[Tuple[str, str]]:
+        """
+        按本地路径查找唯一网盘源文件，跳过缺失、冲突或类型不匹配的映射
+
+        :yields Tuple: 本地路径与网盘路径
+        """
+        for local_path in self.pan_to_local_tree.compare_trees(self.local_tree):
+            pan_path = self._pan_path_by_local.get(local_path)
+            reason = ""
+            if local_path not in self._pan_path_by_local:
+                reason = "缺少网盘源路径映射"
+            elif pan_path is None:
+                reason = "多个网盘源文件映射到同一本地路径"
+            else:
+                local_suffix = Path(local_path).suffix.lower()
+                pan_suffix = Path(pan_path).suffix.lower()
+                if local_suffix == ".strm":
+                    valid_type = pan_suffix in self.rmt_mediaext
+                else:
+                    valid_type = (
+                        self.auto_download_mediainfo
+                        and local_suffix == pan_suffix
+                        and pan_suffix in self.download_mediaext
+                        and pan_suffix not in self.rmt_mediaext
+                    )
+                if not valid_type:
+                    reason = f"本地与网盘源文件类型不匹配: {pan_path}"
+            if reason:
+                logger.warning(f"【增量STRM生成】跳过 {local_path}: {reason}")
+                self.strm_fail_count += 1
+                self.strm_fail_dict[local_path] = reason
+                continue
+            yield local_path, pan_path
+
+    def __handle_addition_path(self, pan_path: str, local_path: str) -> None:
         """
         处理新增路径
 
@@ -602,7 +643,7 @@ class IncrementSyncStrmHelper:
                     )
                     return
 
-            if self.auto_download_mediainfo:
+            if self.auto_download_mediainfo and new_file_path.suffix.lower() != ".strm":
                 if pan_path_obj.suffix.lower() in self.download_mediaext:
                     if not (
                         result := MediainfoDownloadMiddleware.should_download(
@@ -895,19 +936,12 @@ class IncrementSyncStrmHelper:
                         logger.error(f"【增量STRM生成】{path} 目录树生成错误")
                     else:
                         # 生成或者下载文件
-                        for line in self.pan_to_local_tree.compare_trees_lines(
-                            self.local_tree
-                        ):
-                            pan_path_str = self.pan_tree.get_path_by_line_number(line)
-                            local_path_str = (
-                                self.pan_to_local_tree.get_path_by_line_number(line)
+                        for local_path_str, pan_path_str in self._iter_addition_paths():
+                            self.total_iterated += 1
+                            self.__handle_addition_path(
+                                pan_path=pan_path_str,
+                                local_path=local_path_str,
                             )
-                            if pan_path_str and local_path_str:
-                                self.total_iterated += 1
-                                self.__handle_addition_path(
-                                    pan_path=pan_path_str,
-                                    local_path=local_path_str,
-                                )
 
                         # 清理无效 STRM 文件
                         if self.remove_unless_strm:
