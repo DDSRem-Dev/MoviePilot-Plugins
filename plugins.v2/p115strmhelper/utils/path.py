@@ -211,6 +211,10 @@ class PathRemoveUtils:
     目录删除工具
     """
 
+    _SCRAP_EXTENSIONS = frozenset(
+        {".nfo", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tbn"}
+    )
+
     @staticmethod
     def remove_parent_dir(
         file_path: Path,
@@ -258,11 +262,12 @@ class PathRemoveUtils:
                         logger.warn(f"{func_type}本地空目录 {parent_path} 已删除")
 
     @staticmethod
-    def clean_related_files(file_path: Path, func_type: str = None):
+    def clean_related_files(file_path: Path, func_type: Optional[str] = None) -> None:
         """
-        根据一个文件的路径，清理同一文件夹下文件名包含此文件名的其他文件
+        清理同目录下文件名包含基准文件名的关联文件及失效的通用刮削文件
 
-        对于 .strm 后缀文件进行保护，不做删除操作
+        保护 .strm 文件，仅当目录剩余内容全部为图片或 NFO 时清理通用刮削文件
+        存在其他文件、子目录或符号链接时保留共享刮削文件
 
         :param file_path (Path): 基准文件路径
         :param func_type (str): 日志输出函数名称
@@ -278,3 +283,15 @@ class PathRemoveUtils:
             ):
                 logger.warn(f"{func_type}删除文件 {item_to_check}")
                 item_to_check.unlink(missing_ok=True)
+
+        remaining = list(directory.iterdir())
+        if not all(
+            item.is_file()
+            and not item.is_symlink()
+            and item.suffix.lower() in PathRemoveUtils._SCRAP_EXTENSIONS
+            for item in remaining
+        ):
+            return
+        for item in remaining:
+            logger.warning(f"{func_type}删除刮削文件 {item}")
+            item.unlink(missing_ok=True)
