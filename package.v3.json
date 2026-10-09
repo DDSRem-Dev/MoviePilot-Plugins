@@ -3,13 +3,14 @@
         "name": "115网盘储存",
         "description": "更快更强的115网盘存储模块。",
         "labels": "云盘",
-        "version": "3.0.1",
+        "version": "3.0.2",
         "release": true,
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "system_version": ">=3.0.0",
         "level": 1,
         "history": {
+            "v3.0.2": "- 升级 p115client 至 0.0.9.7.2，同步更新 V3 依赖清单\n- 适配新版路径遍历接口，保留文件路径和祖先目录信息",
             "v3.0.1": "修复清理缓存响应并适配 V3 存储管理接口",
             "v3.0.0": "适配 MoviePilot V3 SDK 与插件依赖清单"
         }
