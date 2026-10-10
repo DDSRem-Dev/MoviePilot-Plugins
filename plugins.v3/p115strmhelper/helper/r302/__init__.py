@@ -1,0 +1,619 @@
+from asyncio import (
+    create_task,
+    get_event_loop,
+    Lock,
+    run as asyncio_run,
+    sleep as asyncio_sleep,
+    to_thread,
+)
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from errno import EIO, ENOENT
+from typing import AsyncIterator, Awaitable, Callable, cast, Dict, Optional, Tuple
+from urllib.error import HTTPError
+from urllib.parse import parse_qsl, unquote, urlsplit, urlencode
+
+from httpx import AsyncClient, Limits, Timeout
+from orjson import loads
+from p115cipher import rsa_decrypt, rsa_encrypt
+from p115client import P115Client
+from p115client import check_response as p115_check_response
+from p115client.exception import P115OSError
+from p115pickcode import to_id
+
+from app.log import logger
+
+from ...core.cache import r302cacher
+from ...core.config import configer
+from ...core.u115_open import U115OpenHelper
+from ...utils.http import check_response
+from ...utils.sentry import sentry_manager
+from ...utils.url import Url
+
+
+_COPY_DOWNLOAD_RETRY_DELAYS = (0.5, 1.0, 2.0)
+_INCOMPLETE_UPLOAD_ERROR = "文件上传不完整"
+
+
+@sentry_manager.capture_all_class_exceptions
+class Redirect:
+    """
+    302 跳转模块
+    """
+
+    _http_client: Optional[AsyncClient] = None
+
+    def __init__(self, client: P115Client, pid: Optional[int] = None):
+        self.client = client
+        self.u115openhelper = U115OpenHelper()
+        self._downurl_locks: Dict[Tuple[str, str], Tuple[Lock, int]] = {}
+        self._downurl_locks_guard = Lock()
+
+        self.pid = pid
+
+    @asynccontextmanager
+    async def _acquire_downurl_lock(
+        self, pickcode: str, cache_ua: str
+    ) -> AsyncIterator[None]:
+        """
+        按下载缓存键获取进程内互斥锁并在无使用者时清理
+
+        :param pickcode (str): 下载缓存主键
+        :param cache_ua (str): 下载缓存 User-Agent 键
+
+        :yields None: 获取互斥锁后的执行上下文
+        """
+        key = (pickcode, cache_ua)
+        async with self._downurl_locks_guard:
+            lock_info = self._downurl_locks.get(key)
+            if lock_info:
+                lock, users = lock_info
+            else:
+                lock, users = Lock(), 0
+            self._downurl_locks[key] = (lock, users + 1)
+
+        acquired = False
+        try:
+            await lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                lock.release()
+            async with self._downurl_locks_guard:
+                current_lock, users = self._downurl_locks[key]
+                if users == 1:
+                    self._downurl_locks.pop(key)
+                else:
+                    self._downurl_locks[key] = (current_lock, users - 1)
+
+    @classmethod
+    def http_client(cls) -> AsyncClient:
+        """
+        获取 HTTP 客户端，如果未初始化则自动初始化
+        """
+        if cls._http_client is None:
+            cookies = configer.cookies_dict if configer.cookies else None
+            cls._http_client = AsyncClient(
+                follow_redirects=True,
+                timeout=Timeout(10.0, connect=5.0),
+                limits=Limits(
+                    max_connections=200,
+                    max_keepalive_connections=100,
+                ),
+                cookies=cookies,
+            )
+        return cls._http_client
+
+    @classmethod
+    async def close_http_client(cls):
+        """
+        关闭 HTTP 客户端连接池
+        """
+        if cls._http_client is not None:
+            await cls._http_client.aclose()
+            cls._http_client = None
+
+    @classmethod
+    def close_http_client_sync(cls):
+        """
+        同步关闭 HTTP 客户端连接池
+        """
+        if cls._http_client is not None:
+            try:
+                loop = get_event_loop()
+                if loop.is_running():
+                    create_task(cls.close_http_client())
+                else:
+                    loop.run_until_complete(cls.close_http_client())
+            except RuntimeError:
+                try:
+                    asyncio_run(cls.close_http_client())
+                except RuntimeError:
+                    with ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            lambda: asyncio_run(cls.close_http_client())
+                        )
+                        future.result(timeout=5)
+
+    @staticmethod
+    def get_first(m: Mapping, *keys, default=None):
+        """
+        从映射容器中按顺序查找第一个存在的键并返回对应值
+
+        :param m (Mapping): 映射容器
+        :param keys (Tuple): 按优先级排列的键
+        :param default (Any): 未找到时的默认值
+        :return Any: 第一个命中键的值或 default
+        """
+        for k in keys:
+            if k in m:
+                return m[k]
+        return default
+
+    @staticmethod
+    def _is_405_error(error: Exception) -> bool:
+        """
+        判断异常是否为 HTTP 405
+
+        :param error (Exception): 请求异常
+
+        :return bool: 是否为 HTTP 405
+        """
+        if isinstance(error, HTTPError):
+            return error.code == 405
+        if isinstance(error, P115OSError):
+            message = str(error)
+            return "405" in message or "Method Not Allowed" in message
+        return getattr(error, "status_code", None) == 405
+
+    async def _call_with_405_fallback(
+        self,
+        primary_call: Callable[[], Awaitable[Dict]],
+        fallback_call: Callable[[], Awaitable[Dict]],
+        operation: str,
+    ) -> Dict:
+        """
+        Web API 返回 405 时切换到 App API
+
+        :param primary_call (Callable): Web API 调用
+        :param fallback_call (Callable): App API 调用
+        :param operation (str): 操作名称
+
+        :return Dict: API 响应
+        """
+        try:
+            response = await primary_call()
+            p115_check_response(response)
+            return response
+        except Exception as error:
+            if not self._is_405_error(error):
+                raise
+            logger.warning(
+                f"【302跳转服务】{operation} Web API 返回 405，切换 IOS App API"
+            )
+            response = await fallback_call()
+            p115_check_response(response)
+            return response
+
+    async def get_pickcode_for_copy(self, pickcode: str) -> Optional[str]:
+        """
+        通过复制文件获取二次 PickCode
+        """
+        if not self.pid:
+            return None
+        file_id = to_id(pickcode)
+        resp = await self._call_with_405_fallback(
+            primary_call=lambda: self.client.fs_copy(
+                file_id,
+                pid=self.pid,
+                async_=True,
+                **configer.get_ios_ua_app(app=False),
+            ),
+            fallback_call=lambda: self.client.fs_copy_app(
+                file_id,
+                pid=self.pid,
+                async_=True,
+                **configer.get_ios_ua_app(),
+            ),
+            operation="复制多端播放文件",
+        )
+        payload = {"cid": self.pid, "o": "user_ptime", "asc": 0}
+        resp = await self._call_with_405_fallback(
+            primary_call=lambda: self.client.fs_files(
+                payload,
+                async_=True,
+                **configer.get_ios_ua_app(app=False),
+            ),
+            fallback_call=lambda: self.client.fs_files_app(
+                payload,
+                async_=True,
+                **configer.get_ios_ua_app(),
+            ),
+            operation="查询多端播放副本",
+        )
+        data = resp.get("data")[0]
+        return data.get("pc", None)
+
+    async def delayed_remove(self, pickcode: str) -> None:
+        """
+        延迟删除
+        """
+        file_id = to_id(pickcode)
+        await self._call_with_405_fallback(
+            primary_call=lambda: self.client.fs_delete(
+                file_id,
+                async_=True,
+                **configer.get_ios_ua_app(app=False),
+            ),
+            fallback_call=lambda: self.client.fs_delete_app(
+                file_id,
+                async_=True,
+                **configer.get_ios_ua_app(),
+            ),
+            operation="清理多端播放副本",
+        )
+        logger.debug(f"【302跳转服务】清理 {pickcode} 文件")
+
+    async def _delayed_remove_async(self, pickcode: str) -> None:
+        """
+        异步延迟删除
+        """
+        await asyncio_sleep(5.0)
+        await self.delayed_remove(pickcode)
+
+    async def _wait_for_copy_download_retry(
+        self, pickcode: str, retry_index: int
+    ) -> None:
+        """
+        等待多端播放副本可获取下载地址后重试
+
+        :param pickcode (str): 副本 PickCode
+        :param retry_index (int): 从零开始的重试序号
+        """
+        delay = _COPY_DOWNLOAD_RETRY_DELAYS[retry_index]
+        logger.warning(
+            f"【302跳转服务】多端播放副本尚未复制完成 {pickcode}，"
+            f"{delay:g} 秒后进行第 {retry_index + 1}/"
+            f"{len(_COPY_DOWNLOAD_RETRY_DELAYS)} 次重试"
+        )
+        await asyncio_sleep(delay)
+
+    async def share_get_id_for_name(
+        self,
+        share_code: str,
+        receive_code: str,
+        name: str,
+        parent_id: int = 0,
+    ) -> int:
+        """
+        分享通过名字获取ID
+        """
+        api = "http://web.api.115.com/share/search"
+        payload = {
+            "share_code": share_code,
+            "receive_code": receive_code,
+            "search_value": name,
+            "cid": parent_id,
+            "limit": 1,
+            "type": 99,
+        }
+        suffix = name.rpartition(".")[-1]
+        if suffix.isalnum():
+            payload["suffix"] = suffix
+        resp = await self.http_client().get(
+            f"{api}?{urlencode(payload)}",
+        )
+        check_response(resp)
+        json = loads(cast(bytes, resp.content))
+        if self.get_first(json, "errno", "errNo") == 20021:
+            payload.pop("suffix")
+            resp = await self.http_client().get(
+                f"{api}?{urlencode(payload)}",
+            )
+            check_response(resp)
+            json = loads(cast(bytes, resp.content))
+        if not json["state"] or not json["data"]["count"]:
+            raise FileNotFoundError(ENOENT, json)
+        info = json["data"]["list"][0]
+        if info["n"] != name:
+            raise FileNotFoundError(ENOENT, f"name not found: {name!r}")
+        id = int(info["fid"])
+        return id
+
+    async def get_receive_code(self, share_code: str) -> str:
+        """
+        获取接收码
+        """
+        resp = await self.client.share_info(share_code, async_=True)
+        p115_check_response(resp)
+        data = resp.get("data")
+        if not data or not data.get("receive_code"):
+            raise FileNotFoundError(ENOENT, resp)
+        return data["receive_code"]
+
+    async def get_downurl_cookie(
+        self,
+        pickcode: str,
+        user_agent: str = "",
+    ) -> Url:
+        """
+        获取下载链接
+        """
+        if not user_agent:
+            cache_ua = "NoUA"
+        else:
+            cache_ua = user_agent
+
+        cache_url = await r302cacher.get(pickcode, cache_ua)
+        if cache_url:
+            logger.debug(f"【302跳转服务】缓存获取 {pickcode} {cache_ua} {cache_url}")
+            return Url.of(
+                cache_url,
+                {"file_name": unquote(urlsplit(cache_url).path.rpartition("/")[-1])},
+            )
+
+        async with self._acquire_downurl_lock(pickcode, cache_ua):
+            cache_url = await r302cacher.get(pickcode, cache_ua)
+            if cache_url:
+                logger.debug(
+                    f"【302跳转服务】并发复用缓存 {pickcode} {cache_ua} {cache_url}"
+                )
+                return Url.of(
+                    cache_url,
+                    {
+                        "file_name": unquote(
+                            urlsplit(cache_url).path.rpartition("/")[-1]
+                        )
+                    },
+                )
+
+            post_pickcode = pickcode
+            if (
+                configer.get_config("same_playback")
+                and await r302cacher.count_by_pick_code(pickcode) > 0
+            ):
+                post_pickcode = await self.get_pickcode_for_copy(pickcode)
+                logger.debug(
+                    f"【302跳转服务】多端播放开启 {pickcode} -> {post_pickcode}"
+                )
+
+            is_copy = post_pickcode != pickcode
+            try:
+                for retry_index in range(len(_COPY_DOWNLOAD_RETRY_DELAYS) + 1):
+                    resp = await self.http_client().post(
+                        "http://proapi.115.com/android/2.0/ufile/download",
+                        data={
+                            "data": rsa_encrypt(
+                                f'{{"pick_code":"{post_pickcode}"}}'.encode("utf-8")
+                            ).decode("utf-8")
+                        },
+                        headers={
+                            "User-Agent": user_agent,
+                        },
+                    )
+                    check_response(resp)
+                    json = loads(cast(bytes, resp.content))
+                    if json["state"]:
+                        break
+                    if (
+                        not is_copy
+                        or json.get("error") != _INCOMPLETE_UPLOAD_ERROR
+                        or retry_index == len(_COPY_DOWNLOAD_RETRY_DELAYS)
+                    ):
+                        raise OSError(EIO, json)
+                    await self._wait_for_copy_download_retry(post_pickcode, retry_index)
+
+                data = json["data"] = loads(rsa_decrypt(json["data"]))
+                data["file_name"] = unquote(
+                    urlsplit(data["url"]).path.rpartition("/")[-1]
+                )
+                url = Url.of(data["url"], data)
+
+                expires_time = (
+                    int(next(v for k, v in parse_qsl(urlsplit(url).query) if k == "t"))
+                    - 60 * 5
+                )
+                await r302cacher.set(pickcode, cache_ua, str(url), expires_time)
+                logger.debug(
+                    f"【302跳转服务】添加至缓存 {pickcode} {cache_ua} {url} "
+                    f"{expires_time}"
+                )
+                logger.info(
+                    f"【302跳转服务】从 115 获取下载地址成功: "
+                    f"{pickcode} {data['file_name']}"
+                )
+                return url
+            finally:
+                if is_copy:
+                    create_task(self._delayed_remove_async(post_pickcode))
+
+    async def get_downurl_open(
+        self,
+        pickcode: str,
+        user_agent: str = "",
+    ) -> Url:
+        """
+        获取下载链接
+        """
+        if not user_agent:
+            cache_ua = "NoUA"
+        else:
+            cache_ua = user_agent
+
+        cache_url = await r302cacher.get(pickcode, cache_ua)
+        if cache_url:
+            logger.debug(f"【302跳转服务】缓存获取 {pickcode} {cache_ua} {cache_url}")
+            return Url.of(
+                cache_url,
+                {"file_name": unquote(urlsplit(cache_url).path.rpartition("/")[-1])},
+            )
+
+        async with self._acquire_downurl_lock(pickcode, cache_ua):
+            cache_url = await r302cacher.get(pickcode, cache_ua)
+            if cache_url:
+                logger.debug(
+                    f"【302跳转服务】并发复用缓存 {pickcode} {cache_ua} {cache_url}"
+                )
+                return Url.of(
+                    cache_url,
+                    {
+                        "file_name": unquote(
+                            urlsplit(cache_url).path.rpartition("/")[-1]
+                        )
+                    },
+                )
+
+            post_pickcode = pickcode
+            if (
+                configer.get_config("same_playback")
+                and await r302cacher.count_by_pick_code(pickcode) > 0
+            ):
+                post_pickcode = await self.get_pickcode_for_copy(pickcode)
+                logger.debug(
+                    f"【302跳转服务】多端播放开启 {pickcode} -> {post_pickcode}"
+                )
+
+            is_copy = post_pickcode != pickcode
+            try:
+                for retry_index in range(len(_COPY_DOWNLOAD_RETRY_DELAYS) + 1):
+                    resp_url = await to_thread(
+                        self.u115openhelper.get_download_url,
+                        pickcode=post_pickcode,
+                        user_agent=user_agent,
+                    )
+                    if resp_url:
+                        break
+                    if not is_copy or retry_index == len(_COPY_DOWNLOAD_RETRY_DELAYS):
+                        raise OSError(EIO, "获取多端播放副本下载地址失败")
+                    await self._wait_for_copy_download_retry(post_pickcode, retry_index)
+
+                data: Dict = {}
+                data["file_name"] = unquote(urlsplit(resp_url).path.rpartition("/")[-1])
+
+                expires_time = (
+                    int(
+                        next(
+                            v
+                            for k, v in parse_qsl(urlsplit(resp_url).query)
+                            if k == "t"
+                        )
+                    )
+                    - 60 * 5
+                )
+                await r302cacher.set(pickcode, cache_ua, resp_url, expires_time)
+                logger.debug(
+                    f"【302跳转服务】添加至缓存 {pickcode} {cache_ua} {resp_url} "
+                    f"{expires_time}"
+                )
+                logger.info(
+                    f"【302跳转服务】从 115 获取下载地址成功: "
+                    f"{pickcode} {data['file_name']}"
+                )
+                return Url.of(resp_url, data)
+            finally:
+                if is_copy:
+                    create_task(self._delayed_remove_async(post_pickcode))
+
+    async def get_share_downurl(
+        self, share_code: str, receive_code: str, file_id: int, user_agent: str = ""
+    ) -> Url:
+        """
+        获取分享下载链接
+        """
+        if not user_agent:
+            cache_ua = "NoUA"
+        else:
+            cache_ua = user_agent
+
+        cache_pickcode = f"{share_code}{receive_code}{file_id}"
+        cache_url = await r302cacher.get(cache_pickcode, cache_ua)
+        if cache_url:
+            logger.debug(
+                f"【302跳转服务】分享缓存获取 {share_code} {receive_code} {file_id} {cache_ua} {cache_url}"
+            )
+            return Url.of(
+                cache_url,
+                {"file_name": unquote(urlsplit(cache_url).path.rpartition("/")[-1])},
+            )
+
+        async with self._acquire_downurl_lock(cache_pickcode, cache_ua):
+            cache_url = await r302cacher.get(cache_pickcode, cache_ua)
+            if cache_url:
+                logger.debug(
+                    f"【302跳转服务】分享并发复用缓存 {share_code} "
+                    f"{receive_code} {file_id} {cache_ua} {cache_url}"
+                )
+                return Url.of(
+                    cache_url,
+                    {
+                        "file_name": unquote(
+                            urlsplit(cache_url).path.rpartition("/")[-1]
+                        )
+                    },
+                )
+
+            payload = {
+                "share_code": share_code,
+                "receive_code": receive_code,
+                "file_id": file_id,
+            }
+            try:
+                client_url = await self.client.share_download_url(
+                    payload,
+                    app="android",
+                    async_=True,
+                )
+            except Exception as e:
+                error_payload = getattr(e, "message", None)
+                if (
+                    isinstance(error_payload, Mapping)
+                    and error_payload.get("errno") == 4100008
+                ):
+                    refreshed_receive_code = await self.get_receive_code(share_code)
+                    if refreshed_receive_code == receive_code:
+                        raise
+                    url = await self.get_share_downurl(
+                        share_code,
+                        refreshed_receive_code,
+                        file_id,
+                        user_agent,
+                    )
+                    expires_time = (
+                        int(
+                            next(
+                                v for k, v in parse_qsl(urlsplit(url).query) if k == "t"
+                            )
+                        )
+                        - 60 * 5
+                    )
+                    await r302cacher.set(
+                        cache_pickcode, cache_ua, str(url), expires_time
+                    )
+                    return url
+                raise
+
+            data = {
+                "file_id": client_url.id,
+                "file_name": client_url.name,
+                "file_size": client_url.size,
+                "sha1": client_url.sha1,
+            }
+            url = Url.of(str(client_url), data)
+
+            expires_time = (
+                int(next(v for k, v in parse_qsl(urlsplit(url).query) if k == "t"))
+                - 60 * 5
+            )
+            await r302cacher.set(cache_pickcode, cache_ua, str(url), expires_time)
+            logger.debug(
+                f"【302跳转服务】分享添加至缓存 {share_code} {receive_code} "
+                f"{file_id} {cache_ua} {url} {expires_time}"
+            )
+            logger.info(
+                f"【302跳转服务】从 115 获取分享下载地址成功: "
+                f"{share_code} {file_id} {data['file_name']}"
+            )
+
+            return url

@@ -1,0 +1,193 @@
+from typing import Dict, List, Set
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Text,
+    select,
+    delete,
+    literal,
+    or_,
+    update,
+    func,
+)
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
+
+from ...db_manager import db_update, db_query, P115StrmHelperBase
+
+
+class Folder(P115StrmHelperBase):
+    """
+    文件夹类
+    """
+
+    __tablename__ = "folders"
+
+    id = Column(Integer, primary_key=True)
+    parent_id = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=False)
+    path = Column(Text, nullable=False, unique=True)
+
+    @staticmethod
+    @db_query
+    def get_by_path(db: Session, file_path: str):
+        """
+        通过路径获取（当路径不唯一报错 MultipleResultsFound）
+
+        :param db (Session): 数据库会话
+        :param file_path (str): 文件夹路径
+
+        :return Folder: 匹配的文件夹模型实例，未找到返回 None
+        """
+        return db.execute(
+            select(Folder).where(Folder.path == file_path)
+        ).scalar_one_or_none()
+
+    @staticmethod
+    @db_query
+    def get_by_id(db: Session, file_id: int):
+        """
+        通过ID获取
+
+        :param db (Session): 数据库会话
+        :param file_id (int): 文件夹 ID
+
+        :return Folder: 匹配的文件夹模型实例，未找到返回 None
+        """
+        return db.scalars(select(Folder).where(Folder.id == file_id)).first()
+
+    @staticmethod
+    @db_query
+    def get_by_parent_id(db: Session, parent_id: int):
+        """
+        通过parent_id获取
+
+        :param db (Session): 数据库会话
+        :param parent_id (int): 父目录 ID
+
+        :return List: 匹配的文件夹列表
+        """
+        return (
+            db.execute(select(Folder).where(Folder.parent_id == parent_id))
+            .scalars()
+            .all()
+        )
+
+    @staticmethod
+    @db_update
+    def delete_by_path(db: Session, file_path: str):
+        """
+        通过路径删除（删除所有匹配值）
+
+        :param db (Session): 数据库会话
+        :param file_path (str): 文件夹路径
+
+        :return bool: 始终返回 True
+        """
+        db.execute(delete(Folder).where(Folder.path == file_path))
+        return True
+
+    @staticmethod
+    @db_update
+    def delete_by_id(db: Session, file_id: int):
+        """
+        通过ID删除
+
+        :param db (Session): 数据库会话
+        :param file_id (int): 文件夹 ID
+
+        :return bool: 始终返回 True
+        """
+        db.execute(delete(Folder).where(Folder.id == file_id))
+        return True
+
+    @staticmethod
+    @db_update
+    def upsert_batch_by_list(db: Session, batch: List[Dict]):
+        """
+        通过列表批量写入或更新数据
+
+        :param db (Session): 数据库会话
+        :param batch (List): 待写入的数据列表
+
+        :return bool: 始终返回 True
+        """
+        stmt = sqlite_insert(Folder).prefix_with("OR REPLACE")
+        db.execute(stmt, batch)
+        return True
+
+    @staticmethod
+    @db_update
+    def remove_by_path_batch(db: Session, path: str):
+        """
+        通过路径批量删除
+
+        :param db (Session): 数据库会话
+        :param path (str): 路径前缀
+
+        :return bool: 始终返回 True
+        """
+        db.execute(delete(Folder).where(Folder.path.startswith(path)))
+        return True
+
+    @staticmethod
+    @db_update
+    def update_path_prefix(db: Session, old_prefix: str, new_prefix: str):
+        """
+        批量更新以 old_prefix 开头的路径
+
+        :param db (Session): 数据库会话
+        :param old_prefix (str): 旧路径前缀
+        :param new_prefix (str): 新路径前缀
+
+        :return bool: 始终返回 True
+        """
+        old_prefix = old_prefix.rstrip("/") or "/"
+        new_prefix = new_prefix.rstrip("/") or "/"
+        if old_prefix == "/":
+            return True
+
+        db.execute(
+            update(Folder)
+            .where(
+                or_(
+                    Folder.path == old_prefix,
+                    Folder.path.startswith(f"{old_prefix}/"),
+                )
+            )
+            .values(
+                path=literal(new_prefix) + func.substr(Folder.path, len(old_prefix) + 1)
+            )
+        )
+        return True
+
+    @staticmethod
+    @db_update
+    def remove_by_path_prefix_not_in_ids(
+        db: Session, path_prefix: str, ids: Set[int]
+    ) -> int:
+        """
+        删除路径前缀匹配但 ID 不在给定集合中的记录，返回实际删除行数
+
+        :param db (Session): 数据库会话
+        :param path_prefix (str): 路径前缀
+        :param ids (Set): 需要保留的 ID 集合
+
+        :return int: 实际删除的总行数
+        """
+        all_ids = set(
+            db.execute(select(Folder.id).where(Folder.path.startswith(path_prefix)))
+            .scalars()
+            .all()
+        )
+        ghost_ids = list(all_ids - ids)
+        if not ghost_ids:
+            return 0
+        deleted = 0
+        for i in range(0, len(ghost_ids), 900):
+            chunk = ghost_ids[i : i + 900]
+            result = db.execute(delete(Folder).where(Folder.id.in_(chunk)))
+            deleted += result.rowcount
+        return deleted
