@@ -11,7 +11,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from platform import machine as _machine
-from re import search
+from re import compile as re_compile
+from re import fullmatch
 from shutil import rmtree
 from socket import (
     AF_INET,
@@ -21,18 +22,22 @@ from socket import (
     socket,
 )
 from sys import platform
-from time import sleep, time
+from time import monotonic
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
-from urllib.request import Request as _UrlRequest
-from urllib.request import urlopen as _urlopen
 
 from orjson import dumps, loads
 
 from app.core.config import settings
 
 from ...core.config import configer
-from ...utils.hdhive import extract_hdhive_resource_rows
+from ...utils.hdhive import (
+    EXTRACT_SHARE_URL_JS,
+    READ_RESOURCE_CHUNKS_JS,
+    extract_hdhive_page_resources,
+    extract_hdhive_resource_rows,
+    is_hdhive_share_url,
+)
 from ...utils.sentry import sentry_manager
 
 _CLOAKBROWSER_AVAILABLE = False
@@ -76,15 +81,272 @@ except ImportError:
     _SLIPPERS_AVAILABLE = False
 
 
+USER_MENU_SELECTOR = (
+    'button[aria-label="打开用户菜单"], button[aria-label="Open user menu"]'
+)
+CHECKIN_BUTTON_SELECTORS = {
+    False: 'button:has(path[d^="M11.5 21h-5.5"])',
+    True: 'button:has(path[d^="M3 3m0 2a2 2 0 0 1 2 -2h14"])',
+}
+
+INSTALL_RESULT_OBSERVER_JS = """
+() => {
+    window.__re0CheckinObserver?.disconnect();
+    window.__re0CheckinResults = [];
+    const selector = '[data-slot="toast"], [role="alert"], [role="alertdialog"]';
+    const previous = new WeakMap();
+    const results = new Map();
+    const containers = () => [...new Set(
+        [...document.querySelectorAll(selector)].map(el =>
+            el.closest('[data-slot="toast"]') || el
+        )
+    )];
+    const read = el => ({
+        text: (el.innerText || '').trim(),
+        status: el.classList.contains('toast--success') ? 'success' :
+            el.classList.contains('toast--danger') ? 'error' : ''
+    });
+    for (const el of containers()) previous.set(el, JSON.stringify(read(el)));
+    const collect = () => {
+        for (const el of containers()) {
+            const result = read(el);
+            const value = JSON.stringify(result);
+            if (!result.text || !el.getClientRects().length || previous.get(el) === value) continue;
+            previous.set(el, value);
+            results.set(el, result);
+        }
+        window.__re0CheckinResults = [...results.values()];
+    };
+    window.__re0CheckinObserver = new MutationObserver(collect);
+    window.__re0CheckinObserver.observe(document.body, {
+        childList: true, subtree: true, characterData: true,
+        attributes: true, attributeFilter: ['class']
+    });
+}
+"""
+READ_RESULTS_JS = "() => window.__re0CheckinResults || []"
+STOP_RESULT_OBSERVER_JS = "() => window.__re0CheckinObserver?.disconnect()"
+
+
+def _is_navigation_error(error: Exception) -> bool:
+    return any(
+        message in str(error)
+        for message in (
+            "Execution context was destroyed",
+            "Cannot find context with specified id",
+        )
+    )
+
+
+def parse_checkin_result(text: str, status: str = "") -> Optional[Tuple[bool, str]]:
+    """
+    解析 RE0 签到提示，区分已签到、成功、失败与非结果文本
+
+    :param text (str): Toast 完整文本，包含标题和描述
+    :param status (str): Toast 状态，success、error 或空字符串
+
+    :return Tuple: 明确结果的成功标记与文案，非结果文本返回 None
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    clean = " ".join(lines)
+    if not clean:
+        return None
+    lowered = clean.lower()
+    if any(
+        word in lowered
+        for word in (
+            "已经签到",
+            "已签到",
+            "签到过",
+            "明天再来",
+            "already checked in",
+            "already checked-in",
+            "already signed in",
+        )
+    ):
+        detail = " ".join(
+            line for line in lines if line not in ("签到失败", "Check-in failed")
+        )
+        return True, f"今日已签到：{detail or clean}"
+    if status == "error" or any(
+        word in lowered
+        for word in (
+            "失败",
+            "错误",
+            "异常",
+            "请先登录",
+            "未登录",
+            "error",
+            "failed",
+        )
+    ):
+        return False, clean
+    if status == "success" or any(
+        word in lowered
+        for word in (
+            "签到成功",
+            "check-in successful",
+            "check in successful",
+        )
+    ):
+        return True, clean
+    return None
+
+
+def _click_home_dialog_button(page: Any, button: Any, debug: Any) -> None:
+    try:
+        button.click(timeout=3000)
+    except Exception as e:
+        if not any(
+            text in str(e).lower()
+            for text in ("stable check", "not stable", "position is still changing")
+        ):
+            raise
+        # cloakbrowser 的稳定性检查可能持续失败，确认命中目标后使用真实鼠标事件
+        point = button.evaluate(
+            """el => {
+                if (!el.isConnected || el.matches(':disabled') ||
+                    el.getAttribute('aria-disabled') === 'true' ||
+                    el.closest('[inert]')) return false;
+                const rect = el.getBoundingClientRect();
+                if (!rect.width || !rect.height) return false;
+                const hit = document.elementFromPoint(
+                    rect.x + rect.width / 2, rect.y + rect.height / 2
+                );
+                if (!hit || !el.contains(hit)) return false;
+                return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+            }"""
+        )
+        if not point:
+            raise
+        page.mouse.click(point["x"], point["y"])
+        debug.log("首页弹窗按钮稳定性检查失败，已确认按钮未遮挡并通过真实鼠标点击")
+
+
+def _ensure_preferred_provider(dialog: Any, debug: Any) -> None:
+    providers = dialog.locator('[class*="UserPreferenceDialog_providerGrid"]')
+    if providers.locator('input[type="checkbox"]:checked').count():
+        return
+    provider = providers.locator('[data-slot="checkbox"]').filter(
+        has_text=re_compile(r"(?i)^115\s*(网盘|Drive)$")
+    )
+    checkbox = provider.locator('input[type="checkbox"]')
+    # 站点嵌套 label 的鼠标点击不能可靠切换状态，使用输入框的原生键盘交互
+    checkbox.focus(timeout=3000)
+    checkbox.press("Space", timeout=3000)
+    provider.locator('input[type="checkbox"]:checked').wait_for(
+        state="attached", timeout=3000
+    )
+    debug.log("未设置偏好网盘，已选择 115 网盘")
+
+
+def _wait_for_preference_save(page: Any, dialog: Any, debug: Any) -> None:
+    deadline = monotonic() + 15
+    while monotonic() < deadline:
+        for result in reversed(page.evaluate(READ_RESULTS_JS)):
+            if result.get("status") == "error":
+                raise RuntimeError(f"RE0 偏好设置保存失败：{result.get('text', '')}")
+        if not dialog.is_visible():
+            debug.log("偏好设置弹窗已关闭，继续签到")
+            return
+        page.wait_for_timeout(250)
+    raise RuntimeError("RE0 偏好设置提交后弹窗未关闭，未收到保存成功结果")
+
+
+def _dismiss_home_dialogs(page: Any, debug: Any) -> None:
+    menu = page.locator(USER_MENU_SELECTOR).first
+    menu.wait_for(state="visible", timeout=30000)
+    dismiss = page.get_by_role(
+        "button",
+        name=re_compile(
+            r"^(我知道了(?:\s*[（(].*?[)）])?|保存并启用推荐|Got it|Save and enable recommendations)$"
+        ),
+    )
+    deadline = monotonic() + 45
+    while True:
+        visible_dialogs = page.locator('[role="dialog"]:visible')
+        if not visible_dialogs.count():
+            return
+        if monotonic() >= deadline:
+            raise RuntimeError("RE0 首页弹窗未关闭，请检查公告或首次登录设置")
+        for button in dismiss.all():
+            if button.is_visible() and button.is_enabled():
+                name = button.inner_text().strip()
+                save_preferences = name in (
+                    "保存并启用推荐",
+                    "Save and enable recommendations",
+                )
+                dialog_locator = button.locator("xpath=ancestor::*[@role='dialog'][1]")
+                dialog = dialog_locator.element_handle()
+                if dialog is None:
+                    continue
+                try:
+                    if save_preferences:
+                        _ensure_preferred_provider(dialog_locator, debug)
+                        page.evaluate(INSTALL_RESULT_OBSERVER_JS)
+                    _click_home_dialog_button(page, button, debug)
+                except Exception as e:
+                    if save_preferences:
+                        page.evaluate(STOP_RESULT_OBSERVER_JS)
+                    debug.log(f"弹窗按钮暂不可点击，继续检查其他弹窗: {e}")
+                    continue
+                if save_preferences:
+                    debug.log("已点击保存偏好设置按钮，等待站点确认")
+                    try:
+                        _wait_for_preference_save(page, dialog, debug)
+                    finally:
+                        page.evaluate(STOP_RESULT_OBSERVER_JS)
+                else:
+                    debug.log("已点击首页公告确认按钮")
+                break
+        page.wait_for_timeout(250)
+
+
+def run_checkin(page: Any, gamble: bool, debug: Any) -> Tuple[bool, str]:
+    """
+    在已登录的 RE0 首页通过用户菜单签到并捕获 Toast 结果
+
+    :param page (Any): 已完成登录并加载首页的浏览器页面
+    :param gamble (bool): 是否使用赌狗签到
+    :param debug (Any): 签到调试记录器
+
+    :return Tuple: 签到是否完成及结果说明
+    """
+    label = "赌狗签到" if gamble else "每日签到"
+    _dismiss_home_dialogs(page, debug)
+    page.locator(USER_MENU_SELECTOR).first.click(timeout=10000)
+    button = page.locator(CHECKIN_BUTTON_SELECTORS[gamble]).first
+    button.wait_for(state="visible", timeout=10000)
+    page.evaluate(INSTALL_RESULT_OBSERVER_JS)
+    try:
+        # 站点校验 isTrusted，必须由浏览器真实点击以提交 Server Action
+        button.click(timeout=10000)
+        deadline = monotonic() + 60
+        while monotonic() < deadline:
+            for result in reversed(page.evaluate(READ_RESULTS_JS)):
+                parsed = parse_checkin_result(
+                    result.get("text", ""), result.get("status", "")
+                )
+                if parsed is not None:
+                    debug.screenshot(page, "final_result", parsed[1])
+                    return parsed
+            page.wait_for_timeout(250)
+        debug.screenshot(page, "result_timeout", "等待 RE0 签到提示超时")
+        debug.save_html(page, "result_timeout")
+        return False, f"{label}：等待 RE0 签到结果超时"
+    finally:
+        page.evaluate(STOP_RESULT_OBSERVER_JS)
+
+
 class HDHiveError(Exception):
     """
-    HDHive 浏览器自动化异常基类
+    RE0 浏览器自动化异常基类
     """
 
 
 class HDHiveLoginError(HDHiveError):
     """
-    HDHive 认证或 Cookie 相关失败
+    RE0 认证或 Cookie 相关失败
     """
 
     login_redirect: bool
@@ -96,7 +358,7 @@ class HDHiveLoginError(HDHiveError):
 
 class HDHiveBrowserError(HDHiveError):
     """
-    HDHive 页面操作或浏览器自动化失败
+    RE0 页面操作或浏览器自动化失败
     """
 
 
@@ -125,7 +387,7 @@ class _CheckinDebugSession:
             self._log_path = self._dir / "checkin.log"
             self._enabled = True
             self._log(f"{'=' * 60}")
-            self._log(f"HDHive {label} Debug Session")
+            self._log(f"RE0 {label} Debug Session")
             self._log(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self._log(f"输出目录: {self._dir}")
             self._log(
@@ -264,6 +526,8 @@ class _CheckinDebugSession:
                     "Just a moment",
                     "Checking your browser",
                     "Attention Required",
+                    "请稍候",
+                    "请稍等",
                 )
             ):
                 signals.append(f"可疑标题='{title}'")
@@ -285,6 +549,14 @@ class _CheckinDebugSession:
                     signals.append(label)
             except Exception:
                 pass
+        try:
+            if any(
+                urlparse(frame.url).hostname == "challenges.cloudflare.com"
+                for frame in page.frames
+            ):
+                signals.append("CF-frame（含 Shadow DOM 内的验证帧）")
+        except Exception:
+            pass
         cf_texts = (
             "完成验证后签到",
             "请验证您是真人",
@@ -316,12 +588,12 @@ class _CheckinDebugSession:
 @sentry_manager.capture_all_class_exceptions
 class HDHivePlaywrightClient:
     """
-    HDHive 站点浏览器自动化客户端
+    RE0 站点浏览器自动化客户端
 
     运行时自动选择 cloakbrowser（新版 MoviePilot）或 Playwright Chromium（旧版 MoviePilot）
     """
 
-    DEFAULT_BASE_URL = "https://hdhive.com"
+    DEFAULT_BASE_URL = "https://re0.me"
     LOGIN_PAGE = "/login"
     _CHROME_UA_SUFFIX = (
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -758,9 +1030,13 @@ class HDHivePlaywrightClient:
                         browser.close()
 
     @contextmanager
-    def _page_with_login(self) -> Iterator[Any]:
+    def _page_with_login(
+        self, debug: Optional[_CheckinDebugSession] = None
+    ) -> Iterator[Any]:
         """
         创建「已在同一上下文内真实登录」的浏览器页面，自动管理上下文生命周期
+
+        :param debug (_CheckinDebugSession): 可选调试记录器，在关闭页面前保存失败现场
 
         :yields Any: 已登录的页面对象
         :raises HDHiveLoginError: 未配置账号密码或登录失败
@@ -772,13 +1048,148 @@ class HDHivePlaywrightClient:
             )
         with self._fresh_context() as context:
             page = context.new_page()
-            if not self._fill_and_submit(page, self._username, self._password):
-                raise HDHiveLoginError("登录失败（未离开登录页）", login_redirect=True)
             try:
-                self._build_cookie_str_from_raw(context.cookies())
+                if not self._fill_and_submit(
+                    page, self._username, self._password, debug=debug
+                ):
+                    raise HDHiveLoginError(
+                        "登录失败（未离开登录页）", login_redirect=True
+                    )
+                try:
+                    self._build_cookie_str_from_raw(context.cookies())
+                except Exception:
+                    pass
+                yield page
+            except Exception:
+                if debug:
+                    debug.log_page_state(page, "浏览器流程失败")
+                    debug.screenshot(page, "browser_failure")
+                    debug.save_html(page, "browser_failure")
+                raise
+
+    @staticmethod
+    def _click_cf_checkbox(page: Any) -> bool:
+        """
+        点击 Cloudflare 验证帧中未选中的复选框，兼容封闭 Shadow DOM
+
+        :param page (Any): 浏览器页面对象
+
+        :return bool: 是否实际点击了验证复选框
+        """
+        for frame in page.frames:
+            if urlparse(frame.url).hostname != "challenges.cloudflare.com":
+                continue
+            try:
+                checkbox = frame.get_by_role("checkbox").first
+                if checkbox.is_visible() and not checkbox.is_checked():
+                    checkbox.click(timeout=1000)
+                    return True
             except Exception:
                 pass
-            yield page
+
+            # CF 可将复选框放在封闭 Shadow DOM 内，需由无障碍树定位真实控件
+            session = None
+            try:
+                session = page.context.new_cdp_session(frame)
+                nodes = session.send("Accessibility.getFullAXTree").get("nodes", [])
+                for node in nodes:
+                    if (
+                        node.get("ignored")
+                        or node.get("role", {}).get("value") != "checkbox"
+                    ):
+                        continue
+                    properties = {
+                        prop["name"]: prop.get("value", {}).get("value")
+                        for prop in node.get("properties", [])
+                    }
+                    if properties.get("disabled") or properties.get("checked") in (
+                        True,
+                        "true",
+                    ):
+                        continue
+                    node_id = node.get("backendDOMNodeId")
+                    if not node_id:
+                        continue
+                    quad = session.send("DOM.getBoxModel", {"backendNodeId": node_id})[
+                        "model"
+                    ]["content"]
+                    x = sum(quad[0::2]) / 4
+                    y = sum(quad[1::2]) / 4
+                    if max(quad[0::2]) <= min(quad[0::2]) or max(quad[1::2]) <= min(
+                        quad[1::2]
+                    ):
+                        continue
+                    for event_type in ("mouseMoved", "mousePressed", "mouseReleased"):
+                        event = {"type": event_type, "x": x, "y": y}
+                        if event_type != "mouseMoved":
+                            event.update(button="left", clickCount=1)
+                        session.send("Input.dispatchMouseEvent", event)
+                    return True
+            except Exception:
+                # 验证帧可能在自动通过或重新加载时销毁，交由等待循环重试
+                continue
+            finally:
+                if session:
+                    try:
+                        session.detach()
+                    except Exception:
+                        pass
+        return False
+
+    def _wait_for_cloudflare(
+        self, page: Any, debug: Optional[_CheckinDebugSession] = None
+    ) -> None:
+        deadline = monotonic() + 90
+        detected = False
+        clicks = 0
+        next_click = 0.0
+        while monotonic() < deadline:
+            try:
+                challenge = page.evaluate(
+                    """() => Boolean(
+                        window._cf_chl_opt ||
+                        document.querySelector('#challenge-running, #challenge-form') ||
+                        /^(Just a moment|Checking your browser|请稍候|请稍等)/i.test(document.title)
+                    )"""
+                )
+            except Exception as e:
+                if not _is_navigation_error(e):
+                    raise
+                page.wait_for_timeout(500)
+                continue
+            if not challenge:
+                if detected and debug:
+                    debug.log("Cloudflare 验证页已通过，继续加载 RE0 页面")
+                return
+            if not detected:
+                detected = True
+                if debug:
+                    debug.log(
+                        "检测到 Cloudflare 访问验证，等待自动通过或点击验证复选框（最长 90 秒）"
+                    )
+                    debug.log_page_state(page, "Cloudflare 验证")
+            now = monotonic()
+            if clicks < 3 and now >= next_click:
+                if self._click_cf_checkbox(page):
+                    clicks += 1
+                    if debug:
+                        debug.log(f"已点击 Cloudflare 验证复选框（第 {clicks} 次）")
+                next_click = now + 5
+            page.wait_for_timeout(500)
+        reason = (
+            "Cloudflare 访问验证在 90 秒内未通过"
+            if detected
+            else "RE0 页面持续跳转或无法读取"
+        )
+        raise HDHiveBrowserError(
+            f"{reason}，请检查代理及 challenges.cloudflare.com 的连通性，当前 URL: {page.url}"
+        )
+
+    def _goto(
+        self, page: Any, url: str, debug: Optional[_CheckinDebugSession] = None
+    ) -> None:
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        self._wait_for_cloudflare(page, debug)
 
     @staticmethod
     def _parse_cookie_str(cookie_str: str) -> dict[str, str]:
@@ -798,7 +1209,7 @@ class HDHivePlaywrightClient:
     @classmethod
     def _cookie_file_path(cls) -> Path:
         """
-        返回 HDHive Cookie 持久化文件路径
+        返回 RE0 Cookie 持久化文件路径
 
         :return Path: 插件数据目录下的 Cookie JSON 文件路径
         """
@@ -900,11 +1311,104 @@ class HDHivePlaywrightClient:
         self._password = password.strip()
         return self
 
+    def _fill_login_form(
+        self,
+        page: Any,
+        username: str,
+        password: str,
+        debug: Optional[_CheckinDebugSession] = None,
+    ) -> None:
+        fields = [
+            (
+                "用户名",
+                page.locator(
+                    ":is(input[name='username'], input[name='email'], "
+                    "input[type='email'], input[autocomplete='username'], "
+                    "input[placeholder*='邮箱'], input[placeholder*='email'], "
+                    "input[placeholder*='用户名']):visible"
+                ).first,
+                username,
+            ),
+            (
+                "密码",
+                page.locator(
+                    ":is(input[name='password'], input[type='password']):visible"
+                ).first,
+                password,
+            ),
+        ]
+        for label, field, _ in fields:
+            try:
+                field.wait_for(state="visible", timeout=15000)
+            except PlaywrightTimeoutError as e:
+                raise HDHiveLoginError(f"等待登录{label}输入框超时") from e
+
+        invalid = []
+        for attempt in range(3):
+            for label, field, value in fields:
+                try:
+                    if field.input_value(timeout=1000) == value:
+                        continue
+                    try:
+                        field.fill(value, timeout=5000)
+                    except Exception as e:
+                        if debug:
+                            debug.log(
+                                f"{label}常规填写异常（{type(e).__name__}），检查实际输入值"
+                            )
+                    if field.input_value(timeout=1000) != value:
+                        # 人性化输入可能丢失焦点，使用原生 setter 并通知 React 更新受控字段
+                        field.evaluate(
+                            """(el, value) => {
+                                const win = el.ownerDocument.defaultView;
+                                const setter = Object.getOwnPropertyDescriptor(
+                                    win.HTMLInputElement.prototype, 'value'
+                                ).set;
+                                setter.call(el, value);
+                                el.dispatchEvent(new win.Event('input', {bubbles: true}));
+                                el.dispatchEvent(new win.Event('change', {bubbles: true}));
+                            }""",
+                            value,
+                            timeout=3000,
+                        )
+                        if debug:
+                            debug.log(
+                                f"{label}输入值未保留，已使用原生输入事件重新填写"
+                            )
+                except Exception as e:
+                    if debug:
+                        debug.log(
+                            f"{label}填写未完成（{type(e).__name__}），等待表单稳定后重试"
+                        )
+
+            # 等待受控表单重渲染，并同时复核两项，避免填写密码时用户名被清空
+            page.wait_for_timeout(500)
+            invalid = []
+            for label, field, value in fields:
+                try:
+                    if field.input_value(timeout=1000) == value:
+                        continue
+                except Exception:
+                    pass
+                invalid.append(label)
+            if not invalid:
+                if debug:
+                    debug.log("登录表单账号及密码已填写并校验，准备提交")
+                return
+            if debug:
+                debug.log(
+                    f"登录表单第 {attempt + 1} 次校验未通过：{'、'.join(invalid)}"
+                )
+        raise HDHiveLoginError(
+            f"登录表单填写失败：{'、'.join(invalid)}输入值未保留，已停止提交"
+        )
+
     def _fill_and_submit(
         self,
         page: Any,
         username: str,
         password: str,
+        debug: Optional[_CheckinDebugSession] = None,
     ) -> bool:
         """
         打开登录页、填写账号密码并提交，等待离开 /login
@@ -914,52 +1418,17 @@ class HDHivePlaywrightClient:
         :param page (Any): 浏览器页面对象
         :param username (str): 登录用户名或邮箱
         :param password (str): 登录密码
+        :param debug (_CheckinDebugSession): 可选调试记录器
         :return bool: 若 URL 在超时内离开登录页则为 True
         :raises HDHiveLoginError: 等待跳转超时
         """
         root = HDHivePlaywrightClient.DEFAULT_BASE_URL
-        page.goto(
+        self._goto(
+            page,
             f"{root}{HDHivePlaywrightClient.LOGIN_PAGE}",
-            wait_until="domcontentloaded",
-            timeout=30000,
+            debug,
         )
-        try:
-            page.wait_for_selector(
-                "input[name='username'], input[name='password']", timeout=15000
-            )
-        except PlaywrightTimeoutError:
-            raise HDHiveLoginError(f"等待登录输入框超时，当前 URL: {page.url}")
-
-        user_selectors = [
-            "input[name='username']",
-            "input[name='email']",
-            "input[type='email']",
-            "input[placeholder*='邮箱']",
-            "input[placeholder*='email']",
-            "input[placeholder*='用户名']",
-        ]
-        for sel in user_selectors:
-            try:
-                if page.query_selector(sel):
-                    page.fill(sel, username)
-                    break
-            except Exception:
-                continue
-
-        pwd_selectors = [
-            "input[name='password']",
-            "input[type='password']",
-            "input[placeholder*='密码']",
-        ]
-        for sel in pwd_selectors:
-            try:
-                if page.query_selector(sel):
-                    page.fill(sel, password)
-                    break
-            except Exception:
-                continue
-
-        sleep(0.5)
+        self._fill_login_form(page, username, password, debug)
         submit_selectors = [
             "button[type='submit']",
             "button:has-text('登录')",
@@ -1006,846 +1475,29 @@ class HDHivePlaywrightClient:
                 f"登录超时，当前 URL: {page.url}，页面标题: {page.title()}{hint}"
             )
 
-    @staticmethod
-    def _parse_checkin_result_text(text: str, label: str) -> Tuple[bool, str]:
-        """
-        根据签到结果弹窗文本判断签到是否成功，并返回干净的展示文案
-
-        :param text (str): 签到结果弹窗文本
-        :param label (str): 签到类型（赌狗签到或每日签到）
-
-        :return Tuple: (是否成功, 展示用文案或错误信息)
-        """
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        clean = " ".join(lines)
-
-        already_keywords = ("已经签到", "签到过", "明天再来")
-        fail_keywords = ("失败", "错误", "error", "failed")
-
-        if any(k in clean for k in already_keywords):
-            body_lines = [
-                ln
-                for ln in lines
-                if not any(
-                    ln == kw or ln.startswith("签到") and "失败" in ln
-                    for kw in ("签到失败",)
-                )
-            ]
-            display = " ".join(body_lines) if body_lines else clean
-            return True, f"今日已签到：{display}"
-
-        if any(k in clean.lower() for k in fail_keywords):
-            return False, clean
-
-        return True, clean
-
-    @staticmethod
-    def _find_checkin_btn_by_font_decode(
-        page: Any,
-        label: str,
-        debug: "_CheckinDebugSession",
-    ) -> Optional[Any]:
-        """
-        字体解码兜底：通过浏览器 canvas 逐字渲染比对，在保护字体混淆的菜单中定位目标按钮
-
-        站点用 protected-action 自定义字体把菜单文本映射到 PUA 字符，且每次打开菜单位置随机，
-        此方法用浏览器自身渲染能力对 PUA 字符和候选汉字做像素 MSE 比对，无需外部库或参考字体文件
-
-        :param page: 浏览器页面对象
-        :param label (str): 目标签到标签（「每日签到」或「赌狗签到」）
-        :param debug: Debug 会话
-        :return: ElementHandle（找到的按钮）；失败时为 None
-        """
-        try:
-            font_family: Optional[str] = page.evaluate(
-                """
-                () => {
-                    try {
-                        for (const sheet of document.styleSheets) {
-                            try {
-                                for (const rule of sheet.cssRules) {
-                                    if (rule.constructor.name !== 'CSSFontFaceRule') continue;
-                                    const fam = rule.style.getPropertyValue('font-family')
-                                        .replace(/['"]/g, '').trim();
-                                    if (fam.startsWith('protected-action')) return fam;
-                                }
-                            } catch (e) {}
-                        }
-                    } catch (e) {}
-                    return null;
-                }
-                """
-            )
-            if not font_family:
-                debug.log("  字体解码兜底：未找到 protected-action 字体声明")
-                return None
-            debug.log(f"  字体解码兜底：保护字体={font_family!r}  目标={label!r}")
-
-            handle = page.evaluate_handle(
-                """
-                async ([label, fontFamily]) => {
-                    // 收集所有含保护字体 span 的菜单按钮
-                    const candidates = [];
-                    for (const btn of document.querySelectorAll('button[type="button"]')) {
-                        const span = btn.querySelector('span[style*="protected-action"]');
-                        if (!span) continue;
-                        const text = span.textContent;
-                        if (!text || !text.trim()) continue;
-                        candidates.push({ btn, text: text.trim() });
-                    }
-                    if (!candidates.length) return null;
-
-                    const SIZE = 128, FS = 80;
-                    const canvas = document.createElement('canvas');
-                    canvas.width = SIZE; canvas.height = SIZE;
-                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-                    function renderChar(char, family) {
-                        ctx.fillStyle = 'white';
-                        ctx.fillRect(0, 0, SIZE, SIZE);
-                        ctx.font = FS + 'px "' + family + '"';
-                        ctx.fillStyle = 'black';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(char, SIZE / 2, SIZE / 2);
-                        const d = ctx.getImageData(0, 0, SIZE, SIZE).data;
-                        const g = new Float32Array(SIZE * SIZE);
-                        for (let i = 0; i < g.length; i++) g[i] = d[i * 4];
-                        return g;
-                    }
-
-                    function mse(a, b) {
-                        let s = 0;
-                        for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; }
-                        return s / a.length;
-                    }
-
-                    // 等待保护字体就绪
-                    try { await document.fonts.load(FS + 'px "' + fontFamily + '"'); } catch (e) {}
-
-                    const labelChars = Array.from(label);
-                    // 用系统字体预渲染目标文本各字符
-                    const refImgs = labelChars.map(ch => renderChar(ch, 'sans-serif'));
-
-                    let bestBtn = null, bestScore = Infinity;
-                    for (const { btn, text } of candidates) {
-                        const puaChars = Array.from(text);
-                        if (puaChars.length !== labelChars.length) continue;
-                        let total = 0;
-                        for (let i = 0; i < puaChars.length; i++) {
-                            total += mse(renderChar(puaChars[i], fontFamily), refImgs[i]);
-                        }
-                        const score = total / puaChars.length;
-                        if (score < bestScore) { bestScore = score; bestBtn = btn; }
-                    }
-                    return bestBtn;
-                }
-                """,
-                [label, font_family],
-            )
-            elem = handle.as_element() if handle else None
-            if elem:
-                debug.log("  字体解码兜底：成功匹配签到按钮")
-                return elem
-            debug.log("  字体解码兜底：无候选按钮匹配（字符数不符或菜单未出现）")
-            return None
-        except Exception as e:
-            debug.log(f"  字体解码兜底异常: {e}")
-            return None
-
-    @staticmethod
-    def _solve_space_captcha_via_server(
-        image_data_url: str,
-        click_prompt: str,
-        image_width: int,
-        image_height: int,
-        server_base_url: str,
-        machine_id: str,
-        debug: "_CheckinDebugSession",
-    ) -> Optional[Tuple[float, float]]:
-        """
-        调用 115_server 验证码求解接口，返回归一化坐标 (x, y)，失败时返回 None
-
-        :param image_data_url: 验证码图片数据 URL
-        :param click_prompt: 验证码提示文本
-        :param image_width: 验证码图片宽度
-        :param image_height: 验证码图片高度
-        :param server_base_url: 验证码求解服务 base URL
-        :param machine_id: 机器 ID
-        :param debug: Debug 会话
-
-        :return: 归一化坐标 (x, y)，失败时返回 None
-        """
-        try:
-            api_url = server_base_url.rstrip("/") + "/captcha/space/solve"
-            payload = {
-                "image": image_data_url,
-                "prompt": click_prompt,
-                "width": image_width,
-                "height": image_height,
-            }
-            req = _UrlRequest(
-                api_url,
-                data=dumps(payload),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Machine-ID": machine_id,
-                    "User-Agent": configer.user_agent,
-                },
-                method="POST",
-            )
-            debug.log(f"  验证码求解请求: {api_url}")
-            with _urlopen(req, timeout=150) as resp:
-                resp_body = loads(resp.read())
-
-            nx = float(resp_body["x"])
-            ny = float(resp_body["y"])
-            debug.log(f"  服务端返回归一化坐标: x={nx}, y={ny}")
-            return nx, ny
-        except Exception as e:
-            debug.log(f"  验证码求解服务请求异常: {e}")
-            return None
-
-    @staticmethod
-    def _handle_space_captcha(
-        page: Any,
-        captcha_data: dict,
-        debug: "_CheckinDebugSession",
-    ) -> bool:
-        """
-        处理空间验证码
-
-        :param page: Playwright 页面对象
-        :param captcha_data: /captcha-api/slider 响应的 data 字段
-        :param debug: Debug 会话
-        :return: 是否成功完成点击（不代表验证码答案正确，结果由后续轮询判断）
-        """
-        image_data_url: str = captcha_data.get("background_image", "")
-        click_prompt: str = captcha_data.get("click_prompt", "")
-        img_w: int = int(captcha_data.get("image_width", 344))
-        img_h: int = int(captcha_data.get("image_height", 344))
-
-        server_url = "https://115server.ddsrem.com"
-
-        debug.log(f"  prompt={click_prompt!r}  图片={img_w}×{img_h}")
-        debug.log(f"  captcha_server={server_url!r}")
-
-        if not image_data_url:
-            debug.log("  验证码图片数据为空，无法求解")
-            return False
-
-        coords = HDHivePlaywrightClient._solve_space_captcha_via_server(
-            image_data_url,
-            click_prompt,
-            img_w,
-            img_h,
-            server_url,
-            configer.machine_id,
-            debug,
-        )
-        if coords is None:
-            debug.log("  验证码求解失败，未获得有效坐标")
-            debug.screenshot(page, "captcha_solve_failed", "验证码求解失败")
-            return False
-
-        lx, ly = coords
-        if 0.0 <= lx <= 1.0 and 0.0 <= ly <= 1.0:
-            lx, ly = lx * img_w, ly * img_h
-            debug.log(f"  归一化坐标 → 图片像素坐标: x={lx:.1f}, y={ly:.1f}")
-        else:
-            debug.log(f"  返回图片像素坐标: x={lx:.1f}, y={ly:.1f}")
-
-        captcha_img_elem = None
-        for img_sel in (
-            "img[src^='data:image/jpeg']",
-            "img[src^='data:image']",
-        ):
-            try:
-                page.wait_for_selector(img_sel, timeout=5000)
-                captcha_img_elem = page.query_selector(img_sel)
-                if captcha_img_elem:
-                    debug.log(f"  找到验证码图片元素: {img_sel}")
-                    break
-            except Exception:
-                pass
-
-        if captcha_img_elem is None:
-            debug.log("  未找到验证码图片 DOM 元素，无法点击")
-            debug.screenshot(page, "captcha_img_not_found", "验证码图片元素未找到")
-            debug.save_html(page, "captcha_img_not_found")
-            return False
-
-        box = captcha_img_elem.bounding_box()
-        if not box:
-            debug.log("  验证码图片 bounding_box 为空")
-            return False
-
-        scale_x = box["width"] / img_w
-        scale_y = box["height"] / img_h
-        click_x = box["x"] + lx * scale_x
-        click_y = box["y"] + ly * scale_y
-        debug.log(
-            f"  图片元素 box={box}  缩放后点击坐标=({click_x:.1f}, {click_y:.1f})"
-        )
-        page.mouse.click(click_x, click_y)
-        debug.screenshot(
-            page, "captcha_clicked", f"验证码已点击 ({click_x:.0f},{click_y:.0f})"
-        )
-        page.wait_for_timeout(2000)
-        debug.screenshot(page, "after_captcha_submit", "验证码提交后")
-        return True
-
     def _checkin_via_browser(self, gamble: bool) -> Tuple[bool, str]:
-        """
-        模拟签到
-
-        :param gamble (bool): True 为赌狗签到，False 为每日签到
-
-        :return Tuple: (是否成功, 展示用文案或错误信息)
-        """
         if not self._username or not self._password:
-            return False, "未配置 HDHive 账号密码"
+            return False, "未配置 RE0 账号密码"
 
-        root = self.DEFAULT_BASE_URL
         label = "赌狗签到" if gamble else "每日签到"
-
         debug = _CheckinDebugSession(label)
-        backend = self._check_backend()
-        proxy_url = self._proxy_url_from_settings()
-        debug.log(f"后端: {backend}")
-        debug.log(f"代理配置: {proxy_url if proxy_url else '无'}")
-        debug.log("凭据: 账号密码已配置")
-        debug.log(f"headless: {self._headless}")
-
-        def _do_checkin(page: Any) -> Tuple[bool, str]:
-            debug.log(f"导航到主页: {root}")
-            page.goto(root, wait_until="domcontentloaded", timeout=30000)
-            debug.screenshot(page, "homepage", "主页加载完毕")
-            debug.log_page_state(page, "主页")
-
-            debug.log("检测关闭弹窗按钮（'我知道了'）")
-            try:
-                dismiss_loc = page.locator("button:has-text('我知道了')")
-                dismiss_loc.first.wait_for(state="visible", timeout=8000)
-                debug.log("发现关闭弹窗按钮，开始关闭")
-                debug.screenshot(page, "dismiss_btn_visible", "关闭弹窗按钮出现")
-                for attempt in range(20):
-                    if (
-                        urlparse(page.url).path.rstrip("/")
-                        == HDHivePlaywrightClient.LOGIN_PAGE
-                    ):
-                        debug.log("  检测到跳转登录页，停止关闭弹窗重试")
-                        break
-                    try:
-                        dismiss_loc.first.click()
-                        debug.log(f"  第 {attempt + 1} 次点击关闭弹窗")
-                    except Exception as e:
-                        debug.log(f"  第 {attempt + 1} 次点击关闭弹窗失败: {e}")
-                    try:
-                        dismiss_loc.first.wait_for(state="hidden", timeout=1500)
-                        debug.log("  弹窗已关闭")
-                        break
-                    except PlaywrightTimeoutError:
-                        sleep(1)
-                debug.screenshot(page, "after_dismiss", "关闭弹窗后")
-            except Exception as e:
-                debug.log(f"未检测到关闭弹窗或已关闭: {e}")
-                debug.screenshot(page, "no_dismiss_btn", "无关闭弹窗按钮")
-
-            if urlparse(page.url).path.rstrip("/") == HDHivePlaywrightClient.LOGIN_PAGE:
-                debug.log(f"检测到登录页重定向，Cookie 已失效: {page.url}")
-                debug.screenshot(page, "login_redirect", "被重定向到登录页")
-                debug.save_html(page, "login_redirect")
-                raise HDHiveLoginError(
-                    "Cookie 已失效（被重定向到登录页），请重新登录",
-                    login_redirect=True,
-                )
-
-            debug.log("开始查找头像按钮")
-            clicked_avatar = False
-            for avatar_sel, force in (
-                ("button:has(div.MuiAvatar-root)", False),
-                ("div.MuiAvatar-root", True),
-            ):
-                try:
-                    debug.log(f"  尝试头像选择器: {avatar_sel}  force={force}")
-                    page.wait_for_selector(avatar_sel, timeout=15000)
-                    debug.log("  头像元素已找到，准备点击")
-                    debug.screenshot(
-                        page, "before_avatar_click", f"点击头像前 ({avatar_sel})"
-                    )
-                    page.click(avatar_sel, force=force)
-                    clicked_avatar = True
-                    debug.log("  头像点击成功")
-                    debug.screenshot(
-                        page, "after_avatar_click", "头像点击后（菜单应出现）"
-                    )
-                    break
-                except PlaywrightTimeoutError:
-                    debug.log(f"  头像选择器超时: {avatar_sel}")
-                    debug.log_page_state(page, f"头像超时({avatar_sel})")
-                    continue
-                except Exception as e:
-                    debug.log(f"  头像选择器异常: {avatar_sel}  错误: {e}")
-                    continue
-
-            if not clicked_avatar:
-                debug.log("所有头像选择器均失败！")
-                debug.screenshot(page, "avatar_all_failed", "头像查找全部失败")
-                debug.save_html(page, "avatar_all_failed")
-                return False, "等待头像按钮超时，可能未登录成功"
-
-            # SVG 图标识别
-            _CHECKIN_SVG_ANCHOR = {
-                False: "M11.5 21h-5.5",  # 每日签到 — 日历+勾图标
-                True: "M3 3m0 2a2 2 0 0 1 2 -2h14",  # 赌狗签到 — 格子图标
-            }
-            anchor = _CHECKIN_SVG_ANCHOR[gamble]
-            debug.log(f"等待签到按钮出现 (SVG图标识别, 锚点={anchor!r})")
-            btn_loc = page.locator(f"button:has(path[d^='{anchor}'])")
-            btn_elem = None
-            try:
-                btn_loc.first.wait_for(state="visible", timeout=15000)
-                debug.log("签到按钮已出现（SVG图标匹配）")
-                debug.screenshot(page, "checkin_btn_visible", f"签到按钮可见: {label}")
-            except PlaywrightTimeoutError:
-                debug.log("SVG图标超时，尝试明文文字兜底...")
-                debug.screenshot(
-                    page, "checkin_btn_svg_timeout", "SVG匹配超时，尝试明文文字兜底"
-                )
-                text_loc = page.locator(f"button:has-text('{label}')")
-                try:
-                    text_loc.first.wait_for(state="visible", timeout=5000)
-                    debug.log(f"签到按钮已出现（明文文字匹配: {label!r}）")
-                    debug.screenshot(
-                        page, "checkin_btn_visible", f"签到按钮可见(文字): {label}"
-                    )
-                    btn_loc = text_loc
-                except PlaywrightTimeoutError:
-                    debug.log("明文文字兜底超时，启动字体解码兜底...")
-                    debug.screenshot(
-                        page, "checkin_btn_text_timeout", "文字匹配超时，尝试字体解码"
-                    )
-                    btn_elem = HDHivePlaywrightClient._find_checkin_btn_by_font_decode(
-                        page, label, debug
-                    )
-                    if btn_elem is None:
-                        debug.log("字体解码兜底失败，签到流程终止")
-                        debug.screenshot(
-                            page, "checkin_btn_timeout", "签到按钮等待超时"
-                        )
-                        debug.save_html(page, "checkin_btn_timeout")
-                        return False, f"等待{label}按钮超时，用户菜单未出现"
-                    btn_loc = None
-                    debug.screenshot(
-                        page, "checkin_btn_found_by_font", "字体解码找到签到按钮"
-                    )
-
-            debug.log("等待签到按钮位置稳定（bounding box）")
-            _prev_box: dict = {}
-            for i in range(20):
-                try:
-                    _box = (
-                        btn_loc.first.bounding_box()
-                        if btn_loc
-                        else btn_elem.bounding_box()
-                    ) or {}
-                except Exception:
-                    _box = {}
-                if _box and _box == _prev_box:
-                    debug.log(f"  按钮位置稳定（第 {i + 1} 次检测）: {_box}")
-                    break
-                _prev_box = _box
-                sleep(0.1)
-
-            _space_captcha: dict = {}
-
-            def _on_captcha_response(resp: Any) -> None:
-                if "captcha-api/slider" in resp.url and resp.status == 200:
-                    try:
-                        body = resp.json()
-                        if body.get("success") and body.get("data"):
-                            _space_captcha.update(body["data"])
-                            debug.log(
-                                "捕获空间验证码 API"
-                                f" token={body['data'].get('token', '')[:8]}..."
-                            )
-                    except Exception as _e:
-                        debug.log(f"解析验证码响应异常: {_e}")
-
-            page.on("response", _on_captcha_response)
-
-            debug.log("安装 MutationObserver 监听签到结果弹窗")
-            page.evaluate("""
-                () => {
-                    window.__checkinResult = null;
-                    const resultPhrases = [
-                        '签到成功', '签到失败', '已经签到', '明天再来',
-                        '获得积分', '签到奖励', '积分+', '赌狗签到成功', '赌狗签到失败'
-                    ];
-                    const seen = new WeakSet();
-                    const obs = new MutationObserver((mutations) => {
-                        if (window.__checkinResult) return;
-                        for (const mut of mutations) {
-                            for (const node of mut.addedNodes) {
-                                if (node.nodeType !== 1 || seen.has(node)) continue;
-                                seen.add(node);
-                                const candidates = [node, ...node.querySelectorAll('*')];
-                                for (const el of candidates) {
-                                    const t = (el.innerText || '').trim();
-                                    if (!t || t.length >= 300) continue;
-                                    if (resultPhrases.some(p => t.includes(p))) {
-                                        window.__checkinResult = t;
-                                        obs.disconnect();
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    obs.observe(document.body, { childList: true, subtree: true });
-                }
-            """)
-
-            debug.log("点击签到按钮")
-            if btn_loc:
-                btn_loc.first.click()
-            else:
-                btn_elem.click()
-            debug.screenshot(page, "after_checkin_click", "签到按钮点击后")
-
-            cf_container_sel = "div#cf-turnstile"
-            cf_iframe_sel = "iframe[src*='challenges.cloudflare.com']"
-
-            debug.log("等待挑战出现（空间验证码 / CF Turnstile），超时 15s")
-            cf_container_found = False
-            _d_step_ms = 300
-            _d_waited_ms = 0
-            while _d_waited_ms < 15000:
-                if _space_captcha:
-                    break
-                try:
-                    if page.query_selector(cf_container_sel):
-                        cf_container_found = True
-                        break
-                except Exception:
-                    pass
-                page.wait_for_timeout(_d_step_ms)
-                _d_waited_ms += _d_step_ms
-
-            if _space_captcha:
-                debug.log(
-                    f"检测到空间验证码 mode={_space_captcha.get('mode')!r}"
-                    f"  prompt={_space_captcha.get('click_prompt', '')!r}"
-                )
-                debug.screenshot(page, "space_captcha_detected", "空间验证码已出现")
-                debug.save_html(page, "space_captcha_detected")
-                if not HDHivePlaywrightClient._handle_space_captcha(
-                    page, _space_captcha, debug
-                ):
-                    return False, f"{label}：空间验证码求解失败"
-            elif cf_container_found:
-                debug.log("【CF挑战】检测到 CF 容器，等待 iframe 异步加载 (15s)")
-                debug.screenshot(page, "cf_container_detected", "CF容器已出现")
-                debug.log_page_state(page, "CF容器")
-                debug.save_html(page, "cf_container_detected")
-            else:
-                debug.log("未检测到任何挑战（正常情况）")
-
-            if cf_container_found:
-                cf_retry_sel = "button:has-text('重新验证')"
-                cf_iframe_found = False
-                cf_retry_found = False
-                debug.log("第二阶段：等待 CF iframe 或重新验证按钮 (15s)")
-                deadline = 15000
-                step_ms = 500
-                waited = 0
-                while waited < deadline:
-                    try:
-                        el = page.query_selector(cf_iframe_sel)
-                        if el:
-                            cf_iframe_found = True
-                            debug.log(f"  CF iframe 出现 (waited={waited}ms)")
-                            break
-                    except Exception:
-                        pass
-                    try:
-                        el = page.query_selector(cf_retry_sel)
-                        if el:
-                            cf_retry_found = True
-                            debug.log(f"  CF 重新验证按钮出现 (waited={waited}ms)")
-                            break
-                    except Exception:
-                        pass
-                    page.wait_for_timeout(step_ms)
-                    waited += step_ms
-
-                debug.screenshot(
-                    page,
-                    "cf_phase2_result",
-                    f"第二阶段结果 iframe={cf_iframe_found} revalidate={cf_retry_found}",
-                )
-                debug.log_page_state(page, "CF第二阶段")
-                debug.save_html(page, "cf_phase2_result")
-
-                if cf_iframe_found:
-                    debug.log("【CF挑战】CF iframe 已加载，开始尝试点击")
-                    cf_frame = page.frame_locator(cf_iframe_sel)
-                    cf_click_success = False
-                    for cf_sel in (
-                        "input[type='checkbox']",
-                        "[class*='ctp-checkbox']",
-                        ".mark",
-                        "label",
-                    ):
-                        try:
-                            debug.log(f"  尝试 CF 选择器: {cf_sel}")
-                            cf_frame.locator(cf_sel).click(timeout=5000)
-                            debug.log(f"  CF 选择器点击成功: {cf_sel}")
-                            cf_click_success = True
-                            sleep(0.5)
-                            debug.screenshot(
-                                page, "after_cf_click", f"CF点击后 (sel={cf_sel})"
-                            )
-                            break
-                        except Exception as e:
-                            debug.log(f"  CF 选择器失败: {cf_sel}  错误: {e}")
-
-                    if not cf_click_success:
-                        debug.log("【CF挑战】所有 CF 选择器均失败，CF 可能未被解决！")
-                        debug.screenshot(
-                            page, "cf_click_all_failed", "CF所有选择器失败"
-                        )
-
-                    debug.log("等待 CF iframe 消失（验证通过），超时 30s")
-                    try:
-                        page.wait_for_selector(
-                            cf_iframe_sel, state="hidden", timeout=30000
-                        )
-                        debug.log("CF iframe 已消失，验证通过")
-                        debug.screenshot(page, "cf_resolved", "CF验证通过后")
-                    except PlaywrightTimeoutError:
-                        debug.log(
-                            "【CF挑战】等待 CF iframe 消失超时，CF 验证可能未通过！"
-                        )
-                        debug.screenshot(page, "cf_not_resolved", "CF验证未通过超时")
-                        debug.log_page_state(page, "CF未通过")
-                        debug.save_html(page, "cf_not_resolved")
-
-                elif cf_retry_found:
-                    debug.log("【CF挑战】Turnstile 首次验证失败，点击重新验证按钮")
-                    try:
-                        page.click(cf_retry_sel)
-                        debug.log("  重新验证按钮点击成功")
-                        sleep(1)
-                        debug.screenshot(page, "after_cf_retry", "CF重新验证按钮点击后")
-                    except Exception as e:
-                        debug.log(f"  重新验证按钮点击失败: {e}")
-
-                    debug.log("等待 Turnstile token 写入（验证通过），超时 30s")
-                    token_sel = "input[name='cf-turnstile-response']"
-                    token_set = False
-                    deadline2 = 30000
-                    waited2 = 0
-                    while waited2 < deadline2:
-                        try:
-                            val = page.eval_on_selector(
-                                token_sel, "el => el.value", timeout=500
-                            )
-                            if val:
-                                token_set = True
-                                debug.log(
-                                    f"  Turnstile token 已写入 (waited={waited2}ms) token[:20]={val[:20]}..."
-                                )
-                                break
-                        except Exception:
-                            pass
-                        page.wait_for_timeout(step_ms)
-                        waited2 += step_ms
-
-                    if token_set:
-                        debug.log("Turnstile 验证通过，继续等待签到结果")
-                        debug.screenshot(
-                            page, "cf_token_received", "Turnstile token已获取"
-                        )
-                    else:
-                        debug.log(
-                            "【CF挑战】30s 内未获得 Turnstile token，验证可能未通过"
-                        )
-                        debug.screenshot(page, "cf_token_timeout", "等待token超时")
-                        debug.log_page_state(page, "token超时")
-                        debug.save_html(page, "cf_token_timeout")
-
-                else:
-                    debug.log("【CF挑战】15s 内既无 iframe 也无重新验证按钮")
-                    debug.screenshot(page, "cf_unknown_state", "CF状态未知")
-                    debug.log_page_state(page, "CF未知状态")
-                    debug.save_html(page, "cf_unknown_state")
-
-                    widget_token_sel = "input[name='cf-turnstile-response']"
-                    try:
-                        existing_val = page.eval_on_selector(
-                            widget_token_sel, "el => el.value", timeout=1000
-                        )
-                        if existing_val:
-                            debug.log("  Token 已存在，直接进入结果轮询")
-                        else:
-                            debug.log(
-                                "  Widget 已初始化但 token 为空，Turnstile 验证请求静默挂起，"
-                                "尝试 JS reset 触发重新验证"
-                            )
-                            try:
-                                page.click("div#cf-turnstile", force=True)
-                                debug.log("  已点击 Turnstile 容器")
-                                sleep(0.5)
-                                debug.screenshot(
-                                    page, "cf_container_nudge", "Turnstile容器点击后"
-                                )
-                            except Exception as e:
-                                debug.log(f"  容器点击失败: {e}")
-
-                            try:
-                                reset_result = page.evaluate(
-                                    """() => {
-                                        if (window.turnstile) {
-                                            turnstile.reset('#cf-turnstile');
-                                            return 'reset called';
-                                        }
-                                        return 'turnstile not available';
-                                    }"""
-                                )
-                                debug.log(f"  Turnstile JS reset: {reset_result}")
-                                sleep(1)
-                                debug.screenshot(
-                                    page, "cf_after_js_reset", "Turnstile JS reset后"
-                                )
-                            except Exception as e:
-                                debug.log(f"  Turnstile JS reset 失败: {e}")
-
-                            debug.log("等待 Turnstile token 写入（验证通过），超时 30s")
-                            token_set = False
-                            waited3 = 0
-                            while waited3 < 30000:
-                                try:
-                                    val = page.eval_on_selector(
-                                        widget_token_sel, "el => el.value", timeout=500
-                                    )
-                                    if val:
-                                        token_set = True
-                                        debug.log(
-                                            f"  Token 写入成功 (waited={waited3}ms)"
-                                        )
-                                        break
-                                except Exception:
-                                    pass
-                                page.wait_for_timeout(step_ms)
-                                waited3 += step_ms
-
-                            if not token_set:
-                                debug.log(
-                                    "  30s 内 token 未写入，Cloudflare Turnstile 验证无法完成。"
-                                    "可能原因：浏览器指纹被识别为机器人、代理未正确路由 challenges.cloudflare.com 流量。"
-                                )
-                                debug.screenshot(
-                                    page, "cf_mode_c_timeout", "ModeC超时无token"
-                                )
-                                debug.save_html(page, "cf_mode_c_timeout")
-                    except Exception:
-                        debug.log(
-                            "  Widget 未初始化（cf-turnstile 为空），Turnstile JS 未运行"
-                        )
-
-            else:
-                cf_signals = _CheckinDebugSession._detect_cf_signals(page)
-                if cf_signals:
-                    debug.log(
-                        f"【警告】未检测到 CF 容器，但页面有 CF 信号: {cf_signals}"
-                    )
-                    debug.screenshot(
-                        page, "cf_signals_no_container", "有CF信号但无容器"
-                    )
-                    debug.save_html(page, "cf_signals_no_container")
-
-            debug.log("开始轮询签到结果（最长 60s）")
-            _RESULT_PHRASES = [
-                "签到成功",
-                "签到失败",
-                "已经签到",
-                "明天再来",
-                "获得积分",
-                "签到奖励",
-                "积分+",
-            ]
-            _SCAN_JS = (
-                "() => {"
-                "  const t = document.body.innerText || '';"
-                "  const phrases = " + str(_RESULT_PHRASES) + ";"
-                "  const hit = phrases.find(p => t.includes(p));"
-                "  if (!hit) return null;"
-                "  const idx = t.indexOf(hit);"
-                "  return t.slice(Math.max(0, idx - 10), idx + 80).trim();"
-                "}"
-            )
-            deadline_ms = 60000
-            interval_ms = 500
-            elapsed = 0
-            result_text = None
-            _screenshot_interval = 5000
-            _last_screenshot_at = 0
-            while elapsed < deadline_ms:
-                captured = page.evaluate("() => window.__checkinResult")
-                if captured:
-                    result_text = str(captured)
-                    debug.log(
-                        f"MutationObserver 捕获结果 (elapsed={elapsed}ms): {result_text!r}"
-                    )
-                    break
-                scanned = page.evaluate(_SCAN_JS)
-                if scanned:
-                    result_text = str(scanned)
-                    debug.log(
-                        f"页面扫描捕获结果 (elapsed={elapsed}ms): {result_text!r}"
-                    )
-                    break
-
-                if elapsed - _last_screenshot_at >= _screenshot_interval:
-                    debug.screenshot(
-                        page, f"poll_{elapsed // 1000}s", f"轮询中 {elapsed // 1000}s"
-                    )
-                    _last_screenshot_at = elapsed
-
-                page.wait_for_timeout(interval_ms)
-                elapsed += interval_ms
-
-            if result_text:
-                debug.log(f"原始结果文本: {result_text!r}")
-                ok, msg = HDHivePlaywrightClient._parse_checkin_result_text(
-                    result_text, label
-                )
-                debug.screenshot(
-                    page, "final_result", f"签到{'成功' if ok else '失败'}: {msg}"
-                )
-                return ok, msg
-
-            debug.log("轮询超时，未捕获到任何签到结果文本")
-            debug.screenshot(page, "result_timeout", "等待签到结果超时")
-            debug.log_page_state(page, "结果超时")
-            debug.save_html(page, "result_timeout")
-            return False, f"{label}：等待结果超时"
-
-        def _run_session() -> Tuple[bool, str]:
-            with self._page_with_login() as page:
-                return _do_checkin(page)
-
         try:
-            result = _run_session()
+            with self._page_with_login(debug=debug) as page:
+                if page.url.rstrip("/") == self.DEFAULT_BASE_URL:
+                    self._wait_for_cloudflare(page, debug)
+                else:
+                    self._goto(page, self.DEFAULT_BASE_URL, debug)
+                if urlparse(page.url).path.rstrip("/") == self.LOGIN_PAGE:
+                    raise HDHiveLoginError(
+                        "RE0 登录已失效，请检查账户密码", login_redirect=True
+                    )
+                result = run_checkin(page, gamble, debug)
         except HDHiveLoginError as e:
             result = (False, str(e))
         except PlaywrightTimeoutError as e:
             result = (False, f"{label}操作超时: {e}")
         except Exception as e:
             result = (False, f"{label}浏览器签到失败: {e}")
-
         debug.finalize(*result)
         return result
 
@@ -1915,192 +1567,69 @@ class HDHivePlaywrightClient:
         except Exception as e:
             raise HDHiveBrowserError(f"登录失败: {e}") from e
 
-    @staticmethod
-    def _scrape_resource_cards_js() -> str:
-        """
-        返回从页面 DOM 提取 115网盘 资源卡片信息的 JavaScript
-
-        :return str: 可传给 page.evaluate() 的 JS 函数字符串
-        """
-        return r"""
-        () => {
-            const sizeRe = /(\d+\.?\d*)\s*(TB|GB|MB|G(?!B)|M(?!B))\b/i;
-            const dateRe = /发布于\s*([\d/\-]+)/;
-            const resRe = /\b(4K|8K|2K|1080[piP]?|720[piP]?|480[piP]?)\b/;
-            const pointsRe = /(\d+)\s*积分/;
-
-            // Collect all elements (including <a> cards) containing exactly one
-            // "发布于" AND a file size indicator.
-            const candidates = [];
-            for (const el of document.querySelectorAll('a,div,article,li,section')) {
-                const t = el.innerText || '';
-                if (!t.includes('发布于') || !sizeRe.test(t)) continue;
-                if ((t.match(/发布于/g) || []).length !== 1) continue;
-                if (t.length < 30 || t.length > 5000) continue;
-                candidates.push(el);
-            }
-
-            // Keep only minimal elements: skip any element that contains
-            // another candidate (the contained one is more specific).
-            const minimal = candidates.filter(
-                el => !candidates.some(other => other !== el && el.contains(other))
-            );
-
-            const metaTerms = new Set([
-                '4K','8K','2K','免费','官组','管理员','WEB-DL','WEBRip','BDRip','REMUX','HDTV',
-                '简中','繁中','简英','繁英','内封','外挂','内嵌','简日','繁日','简韩','繁韩',
-                '1080P','1080p','720P','720p','480P','480p',
-                '蓝光原盘','ISO'
-            ]);
-
-            return minimal.map(card => {
-                const text = card.innerText || '';
-                const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-                const dateMatch = text.match(dateRe);
-                const sizeMatch = text.match(sizeRe);
-                const resMatch = text.match(resRe);
-                const pointsMatch = text.match(pointsRe);
-                const isFree = text.includes('免费');
-
-                const tags = [];
-                if (text.includes('官组') || text.includes('管理员')) tags.push('官组');
-                if (isFree) tags.push('免费');
-                if (pointsMatch) tags.push(pointsMatch[0].trim());
-
-                // Username line: the line just before the date line
-                const dateLineIdx = lines.findIndex(l => /发布于/.test(l));
-                const user = dateLineIdx > 0 ? lines[dateLineIdx - 1] : (lines[0] || '');
-
-                // Title: lines that don't look like metadata
-                const titleLines = lines.filter(l => {
-                    if (l.length < 3) return false;
-                    if (metaTerms.has(l)) return false;
-                    if (/^发布于/.test(l)) return false;
-                    if (/^\d+\s*积分$/.test(l)) return false;
-                    if (/^\d+\.?\d*\s*(T?B|G[Bi]?|M[Bi]?)$/i.test(l)) return false;
-                    if (l === user) return false;
-                    return true;
-                });
-                let title = titleLines
-                    .map(l => l.replace(/^\d+\s*积分\s*/, '').trim())
-                    .filter(Boolean)
-                    .join(' ')
-                    .trim();
-
-                // Walk up to the nearest <a> ancestor to get the resource href
-                let hrefEl = card;
-                while (hrefEl && hrefEl.tagName !== 'A') {
-                    hrefEl = hrefEl.parentElement;
-                }
-                const href = hrefEl ? (hrefEl.getAttribute('href') || '') : '';
-
-                return {
-                    user,
-                    posted_at: dateMatch ? dateMatch[1] : '',
-                    tags,
-                    title,
-                    resolution: resMatch ? resMatch[1] : '',
-                    size: sizeMatch ? (sizeMatch[1] + ' ' + sizeMatch[2].toUpperCase()) : '',
-                    is_free: isFree,
-                    unlock_points: isFree ? 0 : (pointsMatch ? parseInt(pointsMatch[1]) : null),
-                    href,
-                };
-            });
-        }
-        """
-
     def _get_resources_via_browser(
         self,
         media_type: str,
         tmdb_id: str | int,
     ) -> List[Dict[str, Any]]:
-        """
-        浏览器自动化实现：直接导航到媒体详情页获取 115网盘资源
+        if media_type not in ("movie", "tv") or not str(tmdb_id).isdigit():
+            raise HDHiveBrowserError("RE0 搜索需要有效的媒体类型和 TMDB ID")
+        detail_url = f"{self.DEFAULT_BASE_URL}/tmdb/{media_type}/{tmdb_id}"
+        captured: List[Dict[str, Any]] = []
 
-        :param media_type (str): ``movie`` 或 ``tv``
-        :param tmdb_id (int): TMDB 作品 ID
+        def _handle_response(response: Any) -> None:
+            try:
+                if response.status == 200 and "json" in response.headers.get(
+                    "content-type", ""
+                ):
+                    captured.extend(extract_hdhive_resource_rows(response.json()))
+            except Exception:
+                pass
 
-        :return List: 资源信息字典列表
-
-        :raises HDHiveLoginError: 认证或 Cookie 失效且无法自动重新登录
-        :raises HDHiveBrowserError: 浏览器页面操作失败
-        """
-        root = self.DEFAULT_BASE_URL
-        detail_url = f"{root}/tmdb/{media_type}/{tmdb_id}"
-
-        def _do_fetch(page: Any) -> List[Dict[str, Any]]:
-            captured: List[Dict[str, Any]] = []
-
-            def _handle_response(response: Any) -> None:
+        try:
+            with self._page_with_login() as page:
+                page.on("response", _handle_response)
                 try:
-                    if response.status != 200:
-                        return
-                    if "json" not in response.headers.get("content-type", ""):
-                        return
-                    body = response.json()
-                    captured.extend(extract_hdhive_resource_rows(body))
-                except Exception:
-                    pass
-
-            page.on("response", _handle_response)
-            page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-
-            if "/login" in page.url:
-                raise HDHiveLoginError(
-                    "Cookie 被重定向到登录页",
-                    login_redirect=True,
-                )
-
-            try:
-                dismiss = page.locator("button:has-text('我知道了')")
-                dismiss.first.wait_for(state="visible", timeout=1500)
-                dismiss.first.click()
-                dismiss.first.wait_for(state="hidden", timeout=2000)
-            except Exception:
-                pass
-
-            _tab_115_sel = (
-                "button:has-text('115网盘'), [role='tab']:has-text('115网盘')"
-            )
-            try:
-                tab = page.locator(_tab_115_sel)
-                tab.first.wait_for(state="visible", timeout=10000)
-                tab.first.click()
-            except Exception:
-                page.evaluate("""
-                    () => {
-                        for (const t of document.querySelectorAll('[role="tab"]')) {
-                            if ((t.innerText || '').includes('115')) { t.click(); break; }
-                        }
-                    }
-                """)
-            _waited = 0
-            while _waited < 5000 and not captured:
-                page.wait_for_timeout(100)
-                _waited += 100
-
-            if captured:
-                return captured
-
-            try:
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(500)
-            except Exception:
-                pass
-            dom_data = page.evaluate(self._scrape_resource_cards_js())
-            return dom_data or []
-
-        def _run_session() -> List[Dict[str, Any]]:
-            try:
-                with self._page_with_login() as page:
-                    return _do_fetch(page)
-            except HDHiveError:
-                raise
-            except Exception as e:
-                raise HDHiveBrowserError(f"资源搜索浏览器操作失败: {e}") from e
-
-        return _run_session()
+                    self._goto(page, detail_url)
+                    deadline = monotonic() + 20
+                    navigation_error: Optional[Exception] = None
+                    last_chunks: Optional[List[str]] = None
+                    while monotonic() < deadline:
+                        if urlparse(page.url).path.rstrip("/") == self.LOGIN_PAGE:
+                            raise HDHiveLoginError(
+                                "RE0 登录已失效", login_redirect=True
+                            )
+                        try:
+                            chunks = page.evaluate(READ_RESOURCE_CHUNKS_JS)
+                        except Exception as e:
+                            if not _is_navigation_error(e):
+                                raise
+                            # CF 放行或站内重定向可能晚于 DOMContentLoaded，仅重读新页面
+                            navigation_error = e
+                            page.wait_for_timeout(250)
+                            continue
+                        navigation_error = None
+                        if chunks != last_chunks:
+                            rows = extract_hdhive_page_resources(chunks)
+                            if rows is not None:
+                                return rows
+                            last_chunks = chunks
+                        if captured:
+                            return extract_hdhive_resource_rows({"data": captured})
+                        page.wait_for_timeout(250)
+                    if navigation_error is not None:
+                        raise HDHiveBrowserError(
+                            "RE0 搜索页面持续跳转，20 秒内未能读取资源列表，请稍后重试"
+                        ) from navigation_error
+                    raise HDHiveBrowserError(
+                        "未能读取 RE0 资源列表，请检查页面是否加载成功"
+                    )
+                finally:
+                    page.remove_listener("response", _handle_response)
+        except HDHiveError:
+            raise
+        except Exception as e:
+            raise HDHiveBrowserError(f"资源搜索浏览器操作失败: {e}") from e
 
     def get_resources(
         self,
@@ -2123,7 +1652,7 @@ class HDHivePlaywrightClient:
 
     def unlock_resource(self, slug: str) -> Dict[str, Any]:
         """
-        通过浏览器解锁 HDHive 115网盘资源，返回资源链接
+        通过浏览器解锁 RE0 115网盘资源，返回资源链接
 
         :param slug (str): 资源 slug（``get_resources`` 返回的 ``href`` 最后一段 UUID）
 
@@ -2134,137 +1663,63 @@ class HDHivePlaywrightClient:
         """
         if not self._username or not self._password:
             raise HDHiveLoginError("未配置账号密码，无法解锁（会话需绑定用户）")
+        if not fullmatch(r"[A-Za-z0-9_-]+", slug):
+            raise HDHiveBrowserError("RE0 资源 slug 无效")
 
-        root = self.DEFAULT_BASE_URL
-        resource_url = f"{root}/resource/115/{slug}"
-
-        _EXTRACT_URL_JS = r"""
-            () => {
-                const urlPrefixRe = /^https?:\/\/(115cdn|115)\.com\//;
-                // Check input fields first (shown in the unlocked state)
-                for (const el of document.querySelectorAll('input')) {
-                    const v = (el.value || '').trim();
-                    if (urlPrefixRe.test(v)) return v;
-                }
-                // Look for a leaf element (no child elements) whose text content
-                // is the resource link, e.g.
-                // <div class="MuiBox-root mui-xxxxxx">https://115cdn.com/s/xxx?password=yyy&</div>
-                for (const el of document.querySelectorAll('div, span, p, a, code')) {
-                    if (el.children.length > 0) continue;
-                    const t = (el.textContent || '').trim();
-                    if (urlPrefixRe.test(t)) return t;
-                }
-                // Fallback: scan visible text for a 115 URL
-                const m = (document.body?.innerText || '').match(
-                    /https?:\/\/(115cdn|115)\.com\/\S+/
-                );
-                return m ? m[0].replace(/\s+$/, '') : null;
-            }
-        """
-
-        def _do_unlock(page: Any) -> Dict[str, Any]:
-            captured_url: Optional[str] = None
-
-            def _handle_response(response: Any) -> None:
-                nonlocal captured_url
-                try:
-                    if response.status != 200:
-                        return
-                    if "json" not in response.headers.get("content-type", ""):
-                        return
-                    body = response.json()
-                    if not isinstance(body, dict):
-                        return
-                    data = body.get("data") or {}
-                    if not isinstance(data, dict):
-                        return
-                    for key in ("full_url", "url", "link", "resource_url"):
-                        val = data.get(key)
-                        if val and search(r"(115cdn|115)\.com", str(val)):
-                            captured_url = str(val).strip()
-                            break
-                except Exception:
-                    pass
-
-            page.on("response", _handle_response)
-
-            page.goto(resource_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(1000)
-
-            if "/login" in page.url:
-                raise HDHiveLoginError(
-                    "Cookie 被重定向到登录页",
-                    login_redirect=True,
+        resource_url = f"{self.DEFAULT_BASE_URL}/resource/115/{slug}"
+        try:
+            with self._page_with_login() as page:
+                self._goto(page, resource_url)
+                confirm = page.get_by_role(
+                    "button", name=re_compile(r"^(确认解锁|确定解锁|Confirm unlock)$")
+                ).first
+                submitted = False
+                deadline = monotonic() + 30
+                while monotonic() < deadline:
+                    if urlparse(page.url).path.rstrip("/") == self.LOGIN_PAGE:
+                        raise HDHiveLoginError("RE0 登录已失效", login_redirect=True)
+                    if is_hdhive_share_url(page.url):
+                        url = page.url
+                    else:
+                        try:
+                            url = page.evaluate(EXTRACT_SHARE_URL_JS)
+                        except Exception as e:
+                            if not _is_navigation_error(e):
+                                raise
+                            # 解锁成功后会跨站跳转，下一轮读取跳转地址
+                            page.wait_for_timeout(250)
+                            continue
+                    if is_hdhive_share_url(url):
+                        return {
+                            "url": url,
+                            "full_url": url,
+                            "already_owned": not submitted,
+                        }
+                    error = page.locator('[data-slot="toast"].toast--danger').first
+                    if error.is_visible():
+                        raise HDHiveBrowserError(f"RE0 解锁失败：{error.inner_text()}")
+                    if not submitted and confirm.is_visible() and confirm.is_enabled():
+                        confirm.click(timeout=10000)
+                        submitted = True
+                        deadline = monotonic() + 30
+                    page.wait_for_timeout(250)
+                detail = (
+                    "解锁后未能获取 115 链接"
+                    if submitted
+                    else "未找到资源链接或「确认解锁」按钮"
                 )
-
-            confirm_loc = page.get_by_text("确定解锁", exact=True)
-            existing: Optional[str] = None
-            has_confirm = False
-            deadline = time() + 15
-            while time() < deadline:
-                try:
-                    existing = page.evaluate(_EXTRACT_URL_JS)
-                except Exception:
-                    existing = None
-                if existing:
-                    break
-                if confirm_loc.first.is_visible():
-                    has_confirm = True
-                    break
-                page.wait_for_timeout(500)
-
-            if existing:
-                return {"url": existing, "full_url": existing, "already_owned": True}
-
-            if not has_confirm:
-                raise HDHiveBrowserError(
-                    f"未找到资源链接或「确定解锁」按钮，页面可能未正确加载（URL: {page.url}）"
-                )
-
-            confirm_loc.first.click()
-
-            url: Optional[str] = None
-            deadline = time() + 20
-            while time() < deadline:
-                if captured_url:
-                    url = captured_url
-                    break
-                if search(r"(115cdn|115)\.com", page.url):
-                    url = page.url
-                    break
-                try:
-                    extracted = page.evaluate(_EXTRACT_URL_JS)
-                except Exception:
-                    extracted = None
-                if extracted:
-                    url = extracted
-                    break
-                page.wait_for_timeout(500)
-
-            if not url:
-                raise HDHiveBrowserError(
-                    f"解锁后未能获取 115 链接（当前 URL: {page.url}）"
-                )
-
-            return {"url": url, "full_url": url, "already_owned": False}
-
-        def _run_session() -> Dict[str, Any]:
-            try:
-                with self._page_with_login() as page:
-                    return _do_unlock(page)
-            except HDHiveError:
-                raise
-            except Exception as e:
-                raise HDHiveBrowserError(f"解锁浏览器操作失败: {e}") from e
-
-        return _run_session()
+                raise HDHiveBrowserError(f"{detail}（URL: {page.url}）")
+        except HDHiveError:
+            raise
+        except Exception as e:
+            raise HDHiveBrowserError(f"解锁浏览器操作失败: {e}") from e
 
 
 def is_hdhive_search_ready() -> bool:
     """
-    判断 HDHive 频道搜索是否已配置且可用
+    判断 RE0 频道搜索是否已配置且可用
 
-    HDHive 已上线加密会话绑定，认证操作必须在同一上下文内真实登录，因此必须配置
+    RE0 已上线加密会话绑定，认证操作必须在同一上下文内真实登录，因此必须配置
     账户密码（仅有持久化 Cookie 已不足以维持登录）
 
     :return bool: 可用返回 True
@@ -2278,7 +1733,7 @@ def is_hdhive_search_ready() -> bool:
 
 def get_hdhive_browser_client() -> Optional[HDHivePlaywrightClient]:
     """
-    获取已配置凭据的 HDHive 浏览器客户端
+    获取已配置凭据的 RE0 浏览器客户端
 
     按环境自动选用 cloakbrowser 或 Playwright 后端。认证操作会在各自的浏览器上下文内
     用账号密码真实登录以绑定加密会话，因此此处只需注入凭据即可；未配置账号密码时不可用。

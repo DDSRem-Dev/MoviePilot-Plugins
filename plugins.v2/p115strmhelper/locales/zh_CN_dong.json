@@ -20,7 +20,7 @@
     "strm_cleanup_msg_done_body": "拆了 {count} 块坏 STRM 砖",
     "strm_cleanup_msg_cancelled_title": "【115网盘】不拆了",
     "strm_cleanup_msg_cancelled_body": "这批先留在工地",
-    "p115_search_config_error": "砖头没摆好...要配置 TG 频道搜索或开启 HDHive 搜索并填写账户密码至少一个",
+    "p115_search_config_error": "砖头没摆好...要配置 TG 频道搜索或开启 RE0 搜索并填写账户密码至少一个",
     "p115_search_parameter_error": "啊？砖头标签贴错了...要 /sh 加关键词",
     "p115_media_search_failed": "媒体搜索塌了...晚点再砌或看日志",
     "p115_media_search_empty": "没砌到合适的片，换个词试试",

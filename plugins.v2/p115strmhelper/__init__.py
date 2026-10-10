@@ -294,7 +294,7 @@ class P115StrmHelper(_PluginBase):
             {
                 "cmd": "/hdhivechin",
                 "event": EventType.PluginAction,
-                "desc": "手动 HDHive 签到",
+                "desc": "手动 RE0 签到",
                 "category": "",
                 "data": {"action": "hdhive_checkin_manual"},
             },
@@ -883,7 +883,7 @@ class P115StrmHelper(_PluginBase):
             cron_service.append(
                 {
                     "id": "P115StrmHelper_hdhive_checkin",
-                    "name": "HDHive 签到调度",
+                    "name": "RE0 签到调度",
                     "trigger": CronTrigger.from_crontab("*/5 * * * *"),
                     "func": servicer.hdhive_checkin_scheduler_tick,
                     "kwargs": {},
@@ -1251,7 +1251,7 @@ class P115StrmHelper(_PluginBase):
     @eventmanager.register(EventType.PluginAction)
     def hdhive_checkin_manual(self, event: Event):
         """
-        远程命令 /hdhivechin 手动 HDHive 签到
+        远程命令 /hdhivechin 手动 RE0 签到
         """
         if not event:
             return
@@ -1264,7 +1264,7 @@ class P115StrmHelper(_PluginBase):
         post_message(
             channel=event.event_data.get("channel"),
             source=event.event_data.get("source"),
-            title="HDHive 手动签到" + ("成功" if ok else "失败"),
+            title="RE0 手动签到" + ("成功" if ok else "失败"),
             text="\n" + text + "\n",
             userid=userid,
         )

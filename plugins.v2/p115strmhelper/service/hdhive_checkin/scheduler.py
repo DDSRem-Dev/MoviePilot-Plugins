@@ -121,7 +121,7 @@ def hdhive_checkin_scheduler_tick() -> None:
     if next_ts is None:
         nxt = _pick_next_run_epoch(now, tz)
         configer.save_plugin_data(_KEY_NEXT_RUN, nxt)
-        logger.debug("【HDHive 签到】已安排下次执行时间戳 %s", nxt)
+        logger.debug("【RE0 签到】已安排下次执行时间戳 %s", nxt)
         next_ts = nxt
 
     if now.timestamp() < next_ts:

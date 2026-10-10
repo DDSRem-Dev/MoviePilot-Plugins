@@ -14,7 +14,7 @@
         <v-icon size="small" start>mdi:code-block-parentheses</v-icon>多端播放
       </v-tab>
       <v-tab value="tab-hdhive-checkin" class="sub-tab">
-        <v-icon size="small" start>mdi-calendar-check</v-icon>HDHive 签到
+        <v-icon size="small" start>mdi-calendar-check</v-icon>RE0 签到
       </v-tab>
       <v-tab value="tab-p115-checkin" class="sub-tab">
         <v-icon size="small" start>mdi-check-circle-outline</v-icon>115 签到
@@ -154,26 +154,26 @@
             <v-card-item>
               <v-card-title class="d-flex align-center">
                 <v-icon start>mdi-movie-search</v-icon>
-                <span class="text-h6">HDHive 搜索</span>
+                <span class="text-h6">RE0 搜索</span>
               </v-card-title>
             </v-card-item>
             <v-card-text>
-              <v-switch v-model="config.hdhive_search_enabled" label="启用 HDHive 搜索" color="primary" density="compact"
+              <v-switch v-model="config.hdhive_search_enabled" label="启用 RE0 搜索" color="primary" density="compact"
                 class="mb-4" />
               <v-row>
                 <v-col cols="12" md="6">
-                  <v-text-field v-model="config.hdhive_checkin_username" label="HDHive 账户" density="compact"
+                  <v-text-field v-model="config.hdhive_checkin_username" label="RE0 账户" density="compact"
                     variant="outlined" autocomplete="username" :disabled="!config.hdhive_search_enabled" />
                 </v-col>
                 <v-col cols="12" md="6">
-                  <v-text-field v-model="config.hdhive_checkin_password" label="HDHive 密码" type="password"
+                  <v-text-field v-model="config.hdhive_checkin_password" label="RE0 密码" type="password"
                     density="compact" variant="outlined" autocomplete="new-password"
                     :disabled="!config.hdhive_search_enabled" />
                 </v-col>
               </v-row>
               <v-alert type="info" variant="tonal" density="compact" icon="mdi-information">
                 <div class="text-caption">
-                  <div class="mb-1">• 账户密码与「HDHive 签到」页<strong>共用</strong>，任一页面修改会自动同步</div>
+                  <div class="mb-1">• 账户密码与「RE0 签到」页<strong>共用</strong>，任一页面修改会自动同步</div>
                   <div class="mb-1">• 使用浏览器自动化拉取资源；若遇 Cloudflare 验证，请为 MoviePilot 配置代理</div>
                   <div>• 与 TG 结果合并展示；仅 115 网盘资源；确认转存时才解锁</div>
                 </div>
@@ -184,10 +184,10 @@
           <v-alert type="info" variant="tonal" density="compact" class="mt-6" icon="mdi-information">
             <div class="text-body-2 mb-1"><strong>频道搜索说明（/sh）</strong></div>
             <div class="text-caption">
-              <div class="mb-1">• 请至少配置 <strong>Telegram 频道</strong> 或<strong>启用 HDHive 搜索并填写账户密码</strong>，否则无法使用
+              <div class="mb-1">• 请至少配置 <strong>Telegram 频道</strong> 或<strong>启用 RE0 搜索并填写账户密码</strong>，否则无法使用
                 <code>/sh</code> 检索资源
               </div>
-              <div>• HDHive 与 TG 结果会合并展示；HDHive 仅展示 115 网盘类资源，积分需求在列表中可见，确认转存时才解锁</div>
+              <div>• RE0 与 TG 结果会合并展示；RE0 仅展示 115 网盘类资源，积分需求在列表中可见，确认转存时才解锁</div>
             </div>
           </v-alert>
         </v-card-text>
@@ -243,11 +243,11 @@
         <v-card-text>
           <v-row>
             <v-col cols="12" md="6">
-              <v-text-field v-model="config.hdhive_checkin_username" label="HDHive账户" density="compact"
+              <v-text-field v-model="config.hdhive_checkin_username" label="RE0账户" density="compact"
                 variant="outlined" autocomplete="username" />
             </v-col>
             <v-col cols="12" md="6">
-              <v-text-field v-model="config.hdhive_checkin_password" label="HDHive密码" type="password" density="compact"
+              <v-text-field v-model="config.hdhive_checkin_password" label="RE0密码" type="password" density="compact"
                 variant="outlined" autocomplete="new-password" />
             </v-col>
           </v-row>
@@ -264,9 +264,9 @@
             </v-col>
           </v-row>
           <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>HDHive 签到</strong></div>
+            <div class="text-body-2 mb-1"><strong>RE0 签到</strong></div>
             <div class="text-caption">
-              <div class="mb-1">• 请填写 HDHive 账户与密码；与「频道搜索 → HDHive 搜索」<strong>共用</strong>同一配置</div>
+              <div class="mb-1">• 站点已更名为 RE0（原 HDHive）：https://re0.me/；请填写 RE0 账户与密码；与「频道搜索 → RE0 搜索」<strong>共用</strong>同一配置</div>
               <div class="mb-1">• 每日签到与赌狗签到<strong>只能二选一</strong>开启</div>
               <div class="mb-1">• 启用后将在设定时间窗口内<strong>每天随机一刻</strong>执行一次登录并签到</div>
               <div>• 也可在 Telegram 等渠道发送 <code>/hdhivechin</code> 手动触发签到</div>

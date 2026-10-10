@@ -20,13 +20,13 @@ def strip_hdhive_title_points_prefix(title: str) -> str:
 
 def format_list_block_impl(data: Dict[str, Any], line_prefix: str) -> str:
     """
-    HDHive 单行序号前缀 + 一行元数据（Markdown），不调用解锁接口
+    RE0 单行序号前缀 + 一行元数据（Markdown），不调用解锁接口
     """
     row = data.get("hdhive_raw") or {}
     title = strip_hdhive_title_points_prefix(
         (data.get("taskname") or "未知名称").strip()
     )
-    lines: list[str] = [f"{line_prefix}【HDHive】{title}"]
+    lines: list[str] = [f"{line_prefix}【RE0】{title}"]
     pts = row.get("unlock_points")
     if pts is None:
         pts_str = ""

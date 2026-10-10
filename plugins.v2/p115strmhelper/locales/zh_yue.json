@@ -20,7 +20,7 @@
     "strm_cleanup_msg_done_body": "删咗 {count} 个失效 STRM",
     "strm_cleanup_msg_cancelled_title": "【115网盘】算啦",
     "strm_cleanup_msg_cancelled_body": "呢批唔删啦",
-    "p115_search_config_error": "咩料啊？TG 頻道同開啟 HDHive 搜尋並填帳戶密碼至少要配一個先好 /sh 啦",
+    "p115_search_config_error": "咩料啊？TG 頻道同開啟 RE0 搜尋並填帳戶密碼至少要配一個先好 /sh 啦",
     "p115_search_parameter_error": "参数都唔识打，/sh 后面加关键字啦戇居！",
     "p115_media_search_failed": "媒体搜索失败，一阵再试或者睇下 MoviePilot 日志",
     "p115_media_search_empty": "搵唔到啱嘅媒体，换过个关键词试下",

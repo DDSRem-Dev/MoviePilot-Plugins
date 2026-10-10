@@ -20,7 +20,7 @@
     "strm_cleanup_msg_done_body": "已刪除 {count} 個失效 STRM 檔案",
     "strm_cleanup_msg_cancelled_title": "【115網盤】已取消",
     "strm_cleanup_msg_cancelled_body": "已取消該批次的待刪除操作",
-    "p115_search_config_error": "設定錯誤！請在插件中設定 TG 頻道搜尋或開啟 HDHive 搜尋並填寫帳戶密碼（至少其一）",
+    "p115_search_config_error": "設定錯誤！請在插件中設定 TG 頻道搜尋或開啟 RE0 搜尋並填寫帳戶密碼（至少其一）",
     "p115_search_parameter_error": "參數錯誤！ /sh 搜尋關鍵字",
     "p115_media_search_failed": "媒體搜尋失敗，請稍後重試或檢查 MoviePilot 日誌",
     "p115_media_search_empty": "找不到符合的媒體，請嘗試其它關鍵詞",

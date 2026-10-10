@@ -322,17 +322,17 @@ class ActionHandler(BaseActionHandler):
                 if data.get("source") == HDHiveSearch.SOURCE or data.get("hdhive_slug"):
                     slug = data.get("hdhive_slug")
                     if not slug:
-                        raise ValueError("HDHive 资源 slug 无效")
+                        raise ValueError("RE0 资源 slug 无效")
                     try:
                         pw_client = get_hdhive_browser_client()
                         if pw_client is None:
-                            raise HDHiveLoginError("未配置 HDHive 账号密码")
+                            raise HDHiveLoginError("未配置 RE0 账号密码")
                         unlocked = pw_client.unlock_resource(str(slug))
-                        logger.info("HDHive 浏览器解锁成功: %s", unlocked)
+                        logger.info("RE0 浏览器解锁成功: %s", unlocked)
                         share_url = (unlocked.get("full_url") or "").strip()
                     except HDHiveError as e:
                         logger.error(
-                            "HDHive 解锁失败: slug=%s, error=%s",
+                            "RE0 解锁失败: slug=%s, error=%s",
                             slug,
                             e,
                             exc_info=True,

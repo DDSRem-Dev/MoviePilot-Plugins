@@ -20,7 +20,7 @@
     "strm_cleanup_msg_done_body": "已删除 {count} 个失效 STRM 文件喵",
     "strm_cleanup_msg_cancelled_title": "【115网盘】已取消喵",
     "strm_cleanup_msg_cancelled_body": "已取消该批次的待删除操作喵",
-    "p115_search_config_error": "配置错误了喵 ~~ 主人要配置 TG 频道搜索或开启 HDHive 搜索并填写账户密码至少一个喵",
+    "p115_search_config_error": "配置错误了喵 ~~ 主人要配置 TG 频道搜索或开启 RE0 搜索并填写账户密码至少一个喵",
     "p115_search_parameter_error": "主人，参数不对喵 ~~ 应该这样用喵：/sh 搜索关键词",
     "p115_media_search_failed": "媒体搜索失败喵，请稍后再试或看日志喵",
     "p115_media_search_empty": "没有找到合适的媒体喵，换个关键词试试喵",

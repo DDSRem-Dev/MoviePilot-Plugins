@@ -1,6 +1,6 @@
 import { onMounted, onUnmounted, reactive } from 'vue';
 
-const HDHIVE_ORIGIN = 'https://hdhive.com';
+const HDHIVE_ORIGIN = 'https://re0.me';
 const OAUTH_TIMEOUT_MS = 120000;
 const POPUP_FEATURES = 'width=520,height=720';
 
@@ -125,7 +125,7 @@ export function useHdhiveOAuth(api, message, pluginId) {
   };
 
   const onOAuthMessage = (event) => {
-    // HDHive 的 postmessage 可能来自 hdhive.com，也可能来自 redirect_uri 所在域名（broker callback 页）
+    // RE0 的 postmessage 可能来自 re0.me，也可能来自 redirect_uri 所在域名（broker callback 页）
     const redirectOrigin = oauth.redirectUri ? new URL(oauth.redirectUri).origin : '';
     if (event.origin !== HDHIVE_ORIGIN && event.origin !== redirectOrigin) return;
     if (!oauth.pending) return;

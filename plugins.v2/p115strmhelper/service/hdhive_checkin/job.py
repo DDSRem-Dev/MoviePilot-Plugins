@@ -24,7 +24,7 @@ def run_hdhive_checkin_once(
     send_notify: bool = True,
 ) -> Tuple[bool, str]:
     """
-    使用浏览器自动化登录 HDHive 并执行签到（cloakbrowser 或 Playwright）
+    使用浏览器自动化登录 RE0 并执行签到（cloakbrowser 或 Playwright）
 
     :param manual: 为 True 时表示远程命令触发，不强制要求已开启每日/赌狗开关
     :param send_notify: 是否在结果时按全局通知开关发送插件消息
@@ -36,8 +36,8 @@ def run_hdhive_checkin_once(
     user = (configer.hdhive_checkin_username or "").strip()
     pwd = (configer.hdhive_checkin_password or "").strip()
     if not user or not pwd:
-        msg = "未配置 HDHive 账户或密码"
-        logger.warning("【HDHive 签到】%s", msg)
+        msg = "未配置 RE0 账户或密码"
+        logger.warning("【RE0 签到】%s", msg)
         return False, msg
 
     if not manual:
@@ -54,7 +54,7 @@ def run_hdhive_checkin_once(
         and not configer.hdhive_checkin_gamble_enabled
     ):
         gamble = False
-        logger.info("【HDHive 签到】手动触发：每日/赌狗均未开启，按每日签到执行")
+        logger.info("【RE0 签到】手动触发：每日/赌狗均未开启，按每日签到执行")
 
     client = HDHivePlaywrightClient(headless=True)
     client.set_credentials(user, pwd)
@@ -65,7 +65,7 @@ def run_hdhive_checkin_once(
         for attempt in range(1, _HDHIVE_CHECKIN_MAX_RETRIES + 1):
             ok, detail = client.checkin(gamble=gamble)
             if ok:
-                logger.info("【HDHive 签到】%s 成功：%s", label, detail)
+                logger.info("【RE0 签到】%s 成功：%s", label, detail)
                 if manual:
                     tz = pytz_timezone(settings.TZ)
                     today_str = datetime.now(tz=tz).strftime("%Y-%m-%d")
@@ -73,7 +73,7 @@ def run_hdhive_checkin_once(
                 break
             if attempt < _HDHIVE_CHECKIN_MAX_RETRIES:
                 logger.warning(
-                    "【HDHive 签到】%s 第 %d/%d 次尝试失败：%s，%d 秒后重试",
+                    "【RE0 签到】%s 第 %d/%d 次尝试失败：%s，%d 秒后重试",
                     label,
                     attempt,
                     _HDHIVE_CHECKIN_MAX_RETRIES,
@@ -83,7 +83,7 @@ def run_hdhive_checkin_once(
                 sleep(_HDHIVE_CHECKIN_RETRY_DELAY)
             else:
                 logger.warning(
-                    "【HDHive 签到】%s 已重试 %d 次仍失败：%s",
+                    "【RE0 签到】%s 已重试 %d 次仍失败：%s",
                     label,
                     _HDHIVE_CHECKIN_MAX_RETRIES,
                     detail,
@@ -92,27 +92,27 @@ def run_hdhive_checkin_once(
         if send_notify and configer.notify:
             post_message(
                 mtype=NotificationType.Plugin,
-                title=f"HDHive {label} {'成功' if ok else '失败'}",
+                title=f"RE0 {label} {'成功' if ok else '失败'}",
                 text="\n" + detail + "\n",
             )
         return ok, detail
     except HDHiveError as e:
-        logger.error("【HDHive 签到】登录异常：%s", e, exc_info=True)
+        logger.error("【RE0 签到】登录异常：%s", e, exc_info=True)
         err = str(e)
         if send_notify and configer.notify:
             post_message(
                 mtype=NotificationType.Plugin,
-                title="HDHive 签到失败",
+                title="RE0 签到失败",
                 text="\n" + err + "\n",
             )
         return False, err
     except Exception as e:
-        logger.error("【HDHive 签到】执行异常：%s", e, exc_info=True)
+        logger.error("【RE0 签到】执行异常：%s", e, exc_info=True)
         err = str(e)
         if send_notify and configer.notify:
             post_message(
                 mtype=NotificationType.Plugin,
-                title="HDHive 签到异常",
+                title="RE0 签到异常",
                 text="\n" + err + "\n",
             )
         return False, err

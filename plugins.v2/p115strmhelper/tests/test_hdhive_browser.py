@@ -10,6 +10,16 @@ from utils.hdhive import extract_hdhive_resource_rows
 class TestExtractHDHiveResourceRows(TestCase):
     """测试 HDHive 资源响应筛选"""
 
+    def test_keeps_re0_resource_url(self) -> None:
+        """
+        新域名资源链接继续参与搜索结果合并
+        """
+        resource = {
+            "title": "resource entry",
+            "href": "https://re0.me/resource/115/example-slug",
+        }
+        self.assertEqual(extract_hdhive_resource_rows({"data": [resource]}), [resource])
+
     def test_ignores_unrelated_rows_with_source_field(self):
         """测试忽略含 source 字段的非资源列表"""
         body = {
