@@ -1079,7 +1079,7 @@ class P115StrmHelper(_PluginBase):
         )
 
     @eventmanager.register(EventType.PluginAction)
-    def p115_full_sync(self, event: Event):
+    def p115_full_sync(self, event: Event) -> None:
         """
         远程全量同步
         """
@@ -1088,16 +1088,17 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "p115_full_sync":
             return
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            title=i18n.translate("start_full_sync"),
-            userid=self._get_event_userid(event_data),
-        )
-        servicer.full_sync_strm_files()
+        with servicer.sync_operation():
+            post_message(
+                channel=event.event_data.get("channel"),
+                source=event.event_data.get("source"),
+                title=i18n.translate("start_full_sync"),
+                userid=self._get_event_userid(event_data),
+            )
+            servicer.full_sync_strm_files()
 
     @eventmanager.register(EventType.PluginAction)
-    def p115_inc_sync(self, event: Event):
+    def p115_inc_sync(self, event: Event) -> None:
         """
         远程增量同步
         """
@@ -1106,16 +1107,17 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "p115_inc_sync":
             return
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            title=i18n.translate("start_inc_sync"),
-            userid=self._get_event_userid(event_data),
-        )
-        servicer.increment_sync_strm_files(send_msg=True)
+        with servicer.sync_operation():
+            post_message(
+                channel=event.event_data.get("channel"),
+                source=event.event_data.get("source"),
+                title=i18n.translate("start_inc_sync"),
+                userid=self._get_event_userid(event_data),
+            )
+            servicer.increment_sync_strm_files(send_msg=True)
 
     @eventmanager.register(EventType.PluginAction)
-    def p115_strm(self, event: Event):
+    def p115_strm(self, event: Event) -> None:
         """
         全量生成指定网盘目录STRM
         """
@@ -1124,82 +1126,83 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "p115_strm":
             return
-        userid = self._get_event_userid(event_data)
-        args = event_data.get("arg_str")
-        if not args:
-            logger.error(f"【全量STRM生成】缺少参数：{event_data}")
-            post_message(
-                channel=event.event_data.get("channel"),
-                source=event.event_data.get("source"),
-                title=i18n.translate("p115_strm_parameter_error"),
-                userid=userid,
-            )
-            return
-        if (
-            not configer.full_sync_strm_paths
-            or not configer.moviepilot_address
-            or not configer.user_download_mediaext
-        ):
-            post_message(
-                channel=event.event_data.get("channel"),
-                source=event.event_data.get("source"),
-                title=i18n.translate("p115_strm_full_sync_config_error"),
-                userid=userid,
-            )
-            return
+        with servicer.sync_operation():
+            userid = self._get_event_userid(event_data)
+            args = event_data.get("arg_str")
+            if not args:
+                logger.error(f"【全量STRM生成】缺少参数：{event_data}")
+                post_message(
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    title=i18n.translate("p115_strm_parameter_error"),
+                    userid=userid,
+                )
+                return
+            if (
+                not configer.full_sync_strm_paths
+                or not configer.moviepilot_address
+                or not configer.user_download_mediaext
+            ):
+                post_message(
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    title=i18n.translate("p115_strm_full_sync_config_error"),
+                    userid=userid,
+                )
+                return
 
-        status, paths = PathUtils.get_p115_strm_path(
-            paths=configer.full_sync_strm_paths, media_path=args
-        )
-        if not status:
+            status, paths = PathUtils.get_p115_strm_path(
+                paths=configer.full_sync_strm_paths, media_path=args
+            )
+            if not status:
+                post_message(
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    title=f"{args} {i18n.translate('p115_strm_match_path_error')}",
+                    userid=userid,
+                )
+                return
+            strm_helper = FullSyncStrmHelper(
+                client=servicer.client,
+                mediainfodownloader=servicer.mediainfodownloader,
+            )
+            strm_helper.strm_exec_history_kind = "full_partial"
+            strm_helper.strm_exec_history_extra = {"arg_str": args}
             post_message(
                 channel=event.event_data.get("channel"),
                 source=event.event_data.get("source"),
-                title=f"{args} {i18n.translate('p115_strm_match_path_error')}",
+                title=i18n.translate("p115_strm_start_sync", paths=args),
                 userid=userid,
             )
-            return
-        strm_helper = FullSyncStrmHelper(
-            client=servicer.client,
-            mediainfodownloader=servicer.mediainfodownloader,
-        )
-        strm_helper.strm_exec_history_kind = "full_partial"
-        strm_helper.strm_exec_history_extra = {"arg_str": args}
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            title=i18n.translate("p115_strm_start_sync", paths=args),
-            userid=userid,
-        )
-        strm_helper.generate_strm_files(
-            full_sync_strm_paths=paths,
-        )
-        (
-            strm_count,
-            mediainfo_count,
-            strm_fail_count,
-            mediainfo_fail_count,
-            remove_unless_strm_count,
-            strm_cleanup_deferred_count,
-        ) = strm_helper.get_generate_total()
-        text = f"""
+            strm_helper.generate_strm_files(
+                full_sync_strm_paths=paths,
+            )
+            (
+                strm_count,
+                mediainfo_count,
+                strm_fail_count,
+                mediainfo_fail_count,
+                remove_unless_strm_count,
+                strm_cleanup_deferred_count,
+            ) = strm_helper.get_generate_total()
+            text = f"""
 📂 网盘路径：{args}
 📄 生成STRM文件 {strm_count} 个
 ⬇️ 下载媒体文件 {mediainfo_count} 个
 ❌ 生成STRM失败 {strm_fail_count} 个
 🚫 下载媒体失败 {mediainfo_fail_count} 个
 """
-        if remove_unless_strm_count != 0:
-            text += f"🗑️ 清理无效STRM文件 {remove_unless_strm_count} 个"
-        if strm_cleanup_deferred_count != 0:
-            text += f"\n⏳ 待二次确认清理无效 STRM {strm_cleanup_deferred_count} 个"
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            userid=userid,
-            title=i18n.translate("full_sync_done_title"),
-            text=text,
-        )
+            if remove_unless_strm_count != 0:
+                text += f"🗑️ 清理无效STRM文件 {remove_unless_strm_count} 个"
+            if strm_cleanup_deferred_count != 0:
+                text += f"\n⏳ 待二次确认清理无效 STRM {strm_cleanup_deferred_count} 个"
+            post_message(
+                channel=event.event_data.get("channel"),
+                source=event.event_data.get("source"),
+                userid=userid,
+                title=i18n.translate("full_sync_done_title"),
+                text=text,
+            )
 
     @eventmanager.register(EventType.PluginAction)
     def p115_search(self, event: Event):
@@ -1518,76 +1521,77 @@ class P115StrmHelper(_PluginBase):
         text = event.event_data.get("text")
         if not text:
             return
-        share_url = ShareLinkResolver.extract_share_url_from_text(text)
-        if not share_url:
-            return
+        with servicer.sync_operation():
+            share_url = ShareLinkResolver.extract_share_url_from_text(text)
+            if not share_url:
+                return
 
-        can_transfer, can_strm, u115 = self._share_link_capabilities(text)
-        event_data = event.event_data
-        channel = event_data.get("channel")
-        source = event_data.get("source")
-        userid = self._get_event_userid(event_data)
+            can_transfer, can_strm, u115 = self._share_link_capabilities(text)
+            event_data = event.event_data
+            channel = event_data.get("channel")
+            source = event_data.get("source")
+            userid = self._get_event_userid(event_data)
 
-        if can_transfer and can_strm:
-            try:
-                session = session_manager.get_or_create(
-                    event_data, plugin_id=self.__class__.__name__
-                )
-                session.business.share_recieve_url = share_url
-                session.business.share_strm_u115_url = u115
-                session.go_to("share_link_intent")
-                self._render_and_send(session)
-            except Exception as e:
-                logger.error(f"处理分享链接意图菜单失败: {e}", exc_info=True)
-            return
+            if can_transfer and can_strm:
+                try:
+                    session = session_manager.get_or_create(
+                        event_data, plugin_id=self.__class__.__name__
+                    )
+                    session.business.share_recieve_url = share_url
+                    session.business.share_strm_u115_url = u115
+                    session.go_to("share_link_intent")
+                    self._render_and_send(session)
+                except Exception as e:
+                    logger.error(f"处理分享链接意图菜单失败: {e}", exc_info=True)
+                return
 
-        if can_strm and not can_transfer:
-            servicer.share_interactive_gen_strm_queue.enqueue_and_notify_user(
-                share_url=u115,
-                channel=channel,
-                source=source,
-                userid=userid,
-            )
-            return
-
-        if can_transfer:
-            if len(configer.share_recieve_paths) <= 1:
-                servicer.sharetransferhelper.add_share(
-                    url=share_url,
+            if can_strm and not can_transfer:
+                servicer.share_interactive_gen_strm_queue.enqueue_and_notify_user(
+                    share_url=u115,
                     channel=channel,
                     source=source,
                     userid=userid,
                 )
                 return
-            try:
-                session = session_manager.get_or_create(
-                    event_data, plugin_id=self.__class__.__name__
-                )
 
-                action = Action(
-                    command="share_recieve_path",
-                    view="share_recieve_paths",
-                    value=share_url,
-                )
-
-                immediate_messages = self.action_handler.process(session, action)
-                if immediate_messages:
-                    for msg in immediate_messages:
-                        self.__send_message(session, text=msg.get("text"), title="错误")
+            if can_transfer:
+                if len(configer.share_recieve_paths) <= 1:
+                    servicer.sharetransferhelper.add_share(
+                        url=share_url,
+                        channel=channel,
+                        source=source,
+                        userid=userid,
+                    )
                     return
+                try:
+                    session = session_manager.get_or_create(
+                        event_data, plugin_id=self.__class__.__name__
+                    )
 
-                session.go_to("share_recieve_paths")
-                self._render_and_send(session)
-            except Exception as e:
-                logger.error(f"处理分享转存命令失败: {e}")
-            return
+                    action = Action(
+                        command="share_recieve_path",
+                        view="share_recieve_paths",
+                        value=share_url,
+                    )
 
-        servicer.sharetransferhelper.add_share(
-            url=share_url,
-            channel=channel,
-            source=source,
-            userid=userid,
-        )
+                    immediate_messages = self.action_handler.process(session, action)
+                    if immediate_messages:
+                        for msg in immediate_messages:
+                            self.__send_message(session, text=msg.get("text"), title="错误")
+                        return
+
+                    session.go_to("share_recieve_paths")
+                    self._render_and_send(session)
+                except Exception as e:
+                    logger.error(f"处理分享转存命令失败: {e}")
+                return
+
+            servicer.sharetransferhelper.add_share(
+                url=share_url,
+                channel=channel,
+                source=source,
+                userid=userid,
+            )
 
     @eventmanager.register(EventType.UserMessage)
     def user_add_offline_links(self, event: Event):
@@ -1619,12 +1623,12 @@ class P115StrmHelper(_PluginBase):
         """
         远程分享转存
         """
-        args = None
-        event_data = {}
-        if event:
-            event_data = event.event_data
-            if not event_data or event_data.get("action") != "p115_add_share":
-                return
+        if not event:
+            return
+        event_data = event.event_data
+        if not event_data or event_data.get("action") != "p115_add_share":
+            return
+        with servicer.sync_operation():
             args = event_data.get("arg_str")
             if not args:
                 logger.error(f"【分享转存】缺少参数：{event_data}")
@@ -1636,52 +1640,52 @@ class P115StrmHelper(_PluginBase):
                 )
                 return
 
-        share_url = (
-            ShareLinkResolver.extract_share_url_from_text(args) if args else None
-        )
-        if not share_url:
-            if args:
-                logger.error(f"【分享转存】无法从参数中解析分享链接：{event_data}")
-                post_message(
-                    channel=event_data.get("channel"),
-                    source=event_data.get("source"),
-                    title=i18n.translate("p115_add_share_parameter_error"),
-                    userid=self._get_event_userid(event_data),
-                )
-            return
-
-        if len(configer.share_recieve_paths) <= 1:
-            servicer.sharetransferhelper.add_share(
-                url=share_url,
-                channel=event.event_data.get("channel"),
-                source=event.event_data.get("source"),
-                userid=self._get_event_userid(event_data),
+            share_url = (
+                ShareLinkResolver.extract_share_url_from_text(args) if args else None
             )
-            return
-
-        try:
-            session = session_manager.get_or_create(
-                event.event_data, plugin_id=self.__class__.__name__
-            )
-
-            action = Action(
-                command="share_recieve_path",
-                view="share_recieve_paths",
-                value=share_url,
-            )
-
-            immediate_messages = self.action_handler.process(session, action)
-            # 报错，截断后续运行
-            if immediate_messages:
-                for msg in immediate_messages:
-                    self.__send_message(session, text=msg.get("text"), title="错误")
+            if not share_url:
+                if args:
+                    logger.error(f"【分享转存】无法从参数中解析分享链接：{event_data}")
+                    post_message(
+                        channel=event_data.get("channel"),
+                        source=event_data.get("source"),
+                        title=i18n.translate("p115_add_share_parameter_error"),
+                        userid=self._get_event_userid(event_data),
+                    )
                 return
 
-            # 设置页面
-            session.go_to("share_recieve_paths")
-            self._render_and_send(session)
-        except Exception as e:
-            logger.error(f"处理分享转存命令失败: {e}")
+            if len(configer.share_recieve_paths) <= 1:
+                servicer.sharetransferhelper.add_share(
+                    url=share_url,
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    userid=self._get_event_userid(event_data),
+                )
+                return
+
+            try:
+                session = session_manager.get_or_create(
+                    event.event_data, plugin_id=self.__class__.__name__
+                )
+
+                action = Action(
+                    command="share_recieve_path",
+                    view="share_recieve_paths",
+                    value=share_url,
+                )
+
+                immediate_messages = self.action_handler.process(session, action)
+                # 报错，截断后续运行
+                if immediate_messages:
+                    for msg in immediate_messages:
+                        self.__send_message(session, text=msg.get("text"), title="错误")
+                    return
+
+                # 设置页面
+                session.go_to("share_recieve_paths")
+                self._render_and_send(session)
+            except Exception as e:
+                logger.error(f"处理分享转存命令失败: {e}")
 
     @eventmanager.register(EventType.PluginAction)
     def p115_share_strm(self, event: Event):
@@ -1691,68 +1695,69 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data if event else {}
         if not event_data or event_data.get("action") != "p115_share_strm":
             return
-        args = event_data.get("arg_str")
-        userid = self._get_event_userid(event_data)
-        channel = event_data.get("channel")
-        source = event_data.get("source")
-        if not args:
-            logger.error(f"【分享交互生成STRM】缺少参数：{event_data}")
-            post_message(
-                channel=channel,
-                source=source,
-                title=i18n.translate("p115_share_strm_parameter_error"),
-                userid=userid,
-            )
-            return
-
-        share_urls = ShareLinkResolver.extract_all_u115_share_urls_from_text(args)
-        if not share_urls:
-            if ShareLinkResolver.extract_share_url_from_text(args):
-                post_message(
-                    channel=channel,
-                    source=source,
-                    title=i18n.translate("p115_share_strm_not_u115_error"),
-                    userid=userid,
-                )
-            else:
+        with servicer.sync_operation():
+            args = event_data.get("arg_str")
+            userid = self._get_event_userid(event_data)
+            channel = event_data.get("channel")
+            source = event_data.get("source")
+            if not args:
+                logger.error(f"【分享交互生成STRM】缺少参数：{event_data}")
                 post_message(
                     channel=channel,
                     source=source,
                     title=i18n.translate("p115_share_strm_parameter_error"),
                     userid=userid,
                 )
-            return
+                return
 
-        err_key = ShareInteractiveGenStrmQueue.validate_prerequisites()
-        if err_key:
+            share_urls = ShareLinkResolver.extract_all_u115_share_urls_from_text(args)
+            if not share_urls:
+                if ShareLinkResolver.extract_share_url_from_text(args):
+                    post_message(
+                        channel=channel,
+                        source=source,
+                        title=i18n.translate("p115_share_strm_not_u115_error"),
+                        userid=userid,
+                    )
+                else:
+                    post_message(
+                        channel=channel,
+                        source=source,
+                        title=i18n.translate("p115_share_strm_parameter_error"),
+                        userid=userid,
+                    )
+                return
+
+            err_key = ShareInteractiveGenStrmQueue.validate_prerequisites()
+            if err_key:
+                post_message(
+                    channel=channel,
+                    source=source,
+                    title=i18n.translate(err_key),
+                    userid=userid,
+                )
+                return
+
+            pending = 0
+            for share_url in share_urls:
+                pending = servicer.share_interactive_gen_strm_queue.enqueue(
+                    share_url=share_url,
+                    channel=channel,
+                    source=source,
+                    userid=userid,
+                )
+
             post_message(
                 channel=channel,
                 source=source,
-                title=i18n.translate(err_key),
+                title=i18n.translate("p115_share_strm_done_title"),
+                text=i18n.translate(
+                    "p115_share_strm_multi_queued",
+                    count=len(share_urls),
+                    pending=pending,
+                ),
                 userid=userid,
             )
-            return
-
-        pending = 0
-        for share_url in share_urls:
-            pending = servicer.share_interactive_gen_strm_queue.enqueue(
-                share_url=share_url,
-                channel=channel,
-                source=source,
-                userid=userid,
-            )
-
-        post_message(
-            channel=channel,
-            source=source,
-            title=i18n.translate("p115_share_strm_done_title"),
-            text=i18n.translate(
-                "p115_share_strm_multi_queued",
-                count=len(share_urls),
-                pending=pending,
-            ),
-            userid=userid,
-        )
 
     @eventmanager.register(EventType.PluginAction)
     def p115_add_offline(self, event: Event):

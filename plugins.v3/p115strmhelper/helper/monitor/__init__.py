@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from re import search as re_search, IGNORECASE
 from shutil import rmtree
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, current_thread
 from time import monotonic, sleep
 from traceback import format_exc
 from typing import Dict, List, Optional, Set, Tuple
@@ -13,9 +13,9 @@ from p115client import P115Client
 from p115client.tool import get_attr, get_id_to_path
 
 from app.chain.storage import StorageChain
-from app.log import logger
+from app.sdk.logging import logger
 from app.schemas import FileItem
-from app.utils.system import SystemUtils
+from app.sdk.utilities import SystemUtils
 
 from ...core.config import configer
 from ...helper.strm import MonitorStrmHelper
@@ -302,6 +302,7 @@ class DirectoryStabilityTracker:
             OrderedDict()
         )
         self._lock = Lock()
+        self._lifecycle_lock = Lock()
         self._thread: Optional[Thread] = None
         self._stop_event: Optional[Event] = None
 
@@ -680,7 +681,11 @@ class DirectoryStabilityTracker:
             active_mon_path_set = {
                 str(Path(path).absolute()) for path in active_mon_paths if path
             }
-        with self._lock:
+        with self._lifecycle_lock, self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                if self._stop_event is not None and self._stop_event.is_set():
+                    raise RuntimeError("目录稳定性跟踪线程尚未退出，不能切换客户端")
+                return
             if active_mon_path_set is not None:
                 stale_keys = [
                     upload_key
@@ -714,10 +719,6 @@ class DirectoryStabilityTracker:
                     state.client = client
                 for state in self._pending_directories.values():
                     state.client = client
-            if self._thread is not None and self._thread.is_alive():
-                if self._stop_event is None or not self._stop_event.is_set():
-                    return
-                logger.warning("【目录上传】旧稳定性跟踪线程仍在退出中，启动新线程接管")
             stop_event = Event()
             self._stop_event = stop_event
             self._thread = Thread(
@@ -729,24 +730,35 @@ class DirectoryStabilityTracker:
             self._thread.start()
             logger.debug("【目录上传】稳定性跟踪线程已启动")
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 10) -> bool:
         """
-        停止跟踪线程并保留待处理集合
+        停止跟踪线程并保留待处理集合及未退出线程
+
+        :param timeout (float): 等待线程退出的最长秒数
+
+        :return bool: 跟踪线程已退出返回 True
         """
         with self._lock:
-            thread = self._thread
-            stop_event = self._stop_event
-            if stop_event is not None:
-                stop_event.set()
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=10)
-            if thread.is_alive():
-                logger.warning("【目录上传】稳定性跟踪线程未在 10 秒内退出")
-                return
-        with self._lock:
-            if self._thread is thread:
-                self._thread = None
-                self._stop_event = None
+            if self._thread is current_thread():
+                if self._stop_event is not None:
+                    self._stop_event.set()
+                return False
+        with self._lifecycle_lock:
+            with self._lock:
+                thread = self._thread
+                stop_event = self._stop_event
+                if stop_event is not None:
+                    stop_event.set()
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=max(0, timeout))
+                if thread.is_alive():
+                    logger.warning("【目录上传】稳定性跟踪线程尚未退出，保留原线程")
+                    return False
+            with self._lock:
+                if self._thread is thread:
+                    self._thread = None
+                    self._stop_event = None
+                return True
 
 
 directory_upload_stability_tracker = DirectoryStabilityTracker()

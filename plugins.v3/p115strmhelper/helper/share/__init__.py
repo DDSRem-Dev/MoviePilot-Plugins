@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from queue import Empty, Queue
 from re import match
-from threading import Lock, Thread
-from time import sleep
-from typing import Literal, Optional
+from threading import Condition, Lock, Thread, current_thread
+from time import monotonic, sleep
+from typing import Any, Callable, Dict, Literal, Optional
 
 from p115center import P115Center
 from p115center.schemas import ShareInfo
@@ -13,10 +14,10 @@ from p115client.tool.iterdir import share_iterdir
 from p115client.util import share_extract_payload
 
 from app.chain.media import MediaChain
-from app.core.context import MediaInfo
-from app.core.metainfo import MetaInfo
-from app.log import logger
-from app.utils.string import StringUtils
+from app.sdk.media import MediaInfo
+from app.sdk.media import MetaInfo
+from app.sdk.logging import logger
+from app.sdk.utilities import StringUtils
 
 from ...core.aliyunpan import BAligo
 from ...core.config import configer
@@ -28,11 +29,37 @@ from ...utils.sentry import sentry_manager
 from ...utils.share_url_patterns import ALIYUN_SHARE_URL_MATCH
 
 
+def _track_share_operation(func: Callable) -> Callable:
+    @wraps(func)
+    def wrapper(self: "ShareTransferHelper", *args: Any, **kwargs: Any) -> Any:
+        worker = current_thread()
+        with self._share_condition:
+            if (
+                self._stopping
+                and worker is not self._add_share_worker_thread
+                and worker not in self._active_operations
+            ):
+                raise RuntimeError("分享转存已停止，暂不接收新任务")
+            self._active_operations[worker] = self._active_operations.get(worker, 0) + 1
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            with self._share_condition:
+                self._active_operations[worker] -= 1
+                if not self._active_operations[worker]:
+                    del self._active_operations[worker]
+                self._share_condition.notify_all()
+
+    return wrapper
+
+
 @sentry_manager.capture_all_class_exceptions
 class ShareTransferHelper:
     """
     分享链接转存
     """
+
+    _STOP = object()
 
     def __init__(self, client: P115Client, aligo: Optional[BAligo]):
         self.client = client
@@ -40,20 +67,56 @@ class ShareTransferHelper:
         self._add_share_queue = Queue()
         self._add_share_worker_thread = None
         self._add_share_worker_lock = Lock()
+        self._share_condition = Condition(self._add_share_worker_lock)
+        self._active_operations: Dict[Thread, int] = {}
+        self._stopping = False
+
+    def stop(self, timeout: float = 25.0) -> bool:
+        """
+        关闭分享准入并等待后台队列和直接转存调用结束
+
+        :param timeout (float): 等待所有在途操作退出的总时限
+
+        :return bool: 队列线程和直接调用均完成时返回 True
+        """
+        deadline = monotonic() + max(0, timeout)
+        with self._share_condition:
+            worker = self._add_share_worker_thread
+            if not self._stopping and worker and worker.is_alive():
+                self._add_share_queue.put(self._STOP)
+            self._stopping = True
+            if (
+                worker is current_thread()
+                or current_thread() in self._active_operations
+            ):
+                return False
+        if worker and worker.is_alive():
+            worker.join(timeout=max(0, deadline - monotonic()))
+        with self._share_condition:
+            if worker and worker.is_alive():
+                return False
+            if not self._share_condition.wait_for(
+                lambda: not self._active_operations,
+                timeout=max(0, deadline - monotonic()),
+            ):
+                return False
+            if self._add_share_queue.unfinished_tasks:
+                return False
+            self._add_share_worker_thread = None
+            return True
 
     def _ensure_add_share_worker_running(self):
         """
-        确保工作线程正在运行
+        持有任务锁时确保工作线程正在运行
         """
-        with self._add_share_worker_lock:
-            if (
-                self._add_share_worker_thread is None
-                or not self._add_share_worker_thread.is_alive()
-            ):
-                self._add_share_worker_thread = Thread(
-                    target=self._process_add_share_queue, daemon=True
-                )
-                self._add_share_worker_thread.start()
+        if (
+            self._add_share_worker_thread is None
+            or not self._add_share_worker_thread.is_alive()
+        ):
+            self._add_share_worker_thread = Thread(
+                target=self._process_add_share_queue, daemon=True
+            )
+            self._add_share_worker_thread.start()
 
     def _process_add_share_queue(self):
         """
@@ -63,7 +126,14 @@ class ShareTransferHelper:
             try:
                 task = self._add_share_queue.get(timeout=60)
             except Empty:
-                logger.debug("【分享转存】释放分享转存队列任务")
+                with self._add_share_worker_lock:
+                    if not self._add_share_queue.empty():
+                        continue
+                    self._add_share_worker_thread = None
+                    logger.debug("【分享转存】释放分享转存队列任务")
+                    break
+            if task is self._STOP:
+                self._add_share_queue.task_done()
                 break
 
             url, channel, source, userid, pan_path = task
@@ -145,6 +215,7 @@ class ShareTransferHelper:
         """
         return share_extract_payload(url)
 
+    @_track_share_operation
     def add_share_aliyunpan(
         self,
         url,
@@ -261,6 +332,7 @@ class ShareTransferHelper:
                 userid=userid,
             )
 
+    @_track_share_operation
     def add_share_115(
         self,
         url,
@@ -443,16 +515,24 @@ class ShareTransferHelper:
             return
 
     def add_share(
-        self, url, channel, userid, pan_path=None, source: Optional[str] = None
-    ):
+        self,
+        url: str,
+        channel: Optional[str | int],
+        userid: Optional[str],
+        pan_path: Optional[str | Path] = None,
+        source: Optional[str] = None,
+    ) -> None:
         """
         将分享任务加入队列
         """
-        self._add_share_queue.put((url, channel, source, userid, pan_path))
-        logger.info(
-            f"【分享转存】{url} 任务已加入分享转存队列，当前队列大小：{self._add_share_queue.qsize()}"
-        )
-        self._ensure_add_share_worker_running()
+        with self._add_share_worker_lock:
+            if self._stopping:
+                raise RuntimeError("分享转存已停止，暂不接收新任务")
+            self._add_share_queue.put((url, channel, source, userid, pan_path))
+            logger.info(
+                f"【分享转存】{url} 任务已加入分享转存队列，当前队列大小：{self._add_share_queue.qsize()}"
+            )
+            self._ensure_add_share_worker_running()
 
     @staticmethod
     def post_share_info(
@@ -478,7 +558,7 @@ class ShareTransferHelper:
         payload = ShareInfo(
             url=url,
             postime=datetime.now(timezone.utc),
-            source=mi.source if mi else None,
+            source=mi.media_source if mi else None,
             type=mi.type.value if mi and mi.type is not None else None,  # noqa
             title=mi.title if mi else None,
             en_title=mi.en_title if mi else None,

@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from uuid import uuid4
 
 from app.chain.transfer import TransferChain
-from app.log import logger
-from app.schemas import FileItem, NotificationType
+from app.sdk.logging import logger
+from app.schemas import FileItem, MessageType
 
 from ....core.cache import rename_media_fields_cacher
 from ....core.config import configer
@@ -37,6 +37,7 @@ class ShareAuditDownloadQueue:
         self._downloader: Optional[MediaInfoDownloader] = None
         self._tasks: Dict[str, Dict[str, Any]] = {}
         self._lock = Lock()
+        self._lifecycle_lock = Lock()
         self._wake_event = Event()
         self._stop_event = Event()
         self._worker_thread: Optional[Thread] = None
@@ -48,15 +49,32 @@ class ShareAuditDownloadQueue:
 
         :param downloader (MediaInfoDownloader): 媒体信息下载器实例
         """
-        self._downloader = downloader
+        with self._lifecycle_lock, self._lock:
+            persist_path = (
+                configer.PLUGIN_CONFIG_PATH / "share_audit_download_queue.json"
+            ).resolve()
+            if (
+                self._worker_thread
+                and self._worker_thread.is_alive()
+                and (
+                    downloader is not self._downloader
+                    or persist_path != self._persist_path
+                )
+            ):
+                raise RuntimeError("审核队列仍在运行，不能替换下载器或数据目录")
+            if self._persist_path is not None and self._persist_path != persist_path:
+                self._tasks = {}
+            self._persist_path = persist_path
+            self._downloader = downloader
 
     def start(self) -> None:
         """
         启动审核等待队列并恢复持久化任务
         """
-        with self._lock:
+        with self._lifecycle_lock, self._lock:
             if self._worker_thread and self._worker_thread.is_alive():
-                self._stop_event.clear()
+                if self._stop_event.is_set():
+                    raise RuntimeError("审核队列尚未停止，请等待旧任务退出后重试")
                 self._wake_event.set()
                 return
             self._load_tasks_locked()
@@ -72,17 +90,33 @@ class ShareAuditDownloadQueue:
             f"【分享审核下载】队列已启动，恢复 {self.pending_item_count()} 个文件"
         )
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         """
-        停止审核等待队列
+        请求停止审核等待队列并报告工作线程是否已退出
+
+        :return bool: 线程已退出返回 True，仍在执行时返回 False
         """
-        self._stop_event.set()
-        self._wake_event.set()
-        worker = self._worker_thread
-        if worker and worker.is_alive() and worker is not current_thread():
-            worker.join(timeout=10)
-        if not worker or not worker.is_alive():
-            self._worker_thread = None
+        with self._lock:
+            if self._worker_thread is current_thread():
+                self._stop_event.set()
+                self._wake_event.set()
+                return False
+        with self._lifecycle_lock:
+            with self._lock:
+                self._stop_event.set()
+                self._wake_event.set()
+                worker = self._worker_thread
+            if worker and worker.is_alive():
+                worker.join(timeout=10)
+            with self._lock:
+                if worker and worker.is_alive():
+                    logger.warning(
+                        "【分享审核下载】工作线程尚未退出，保留实例等待后续停止"
+                    )
+                    return False
+                if self._worker_thread is worker:
+                    self._worker_thread = None
+                return True
 
     def partition_downloads(
         self, downloads_list: List[Dict[str, Any]]
@@ -632,7 +666,7 @@ class ShareAuditDownloadQueue:
             lines.append(i18n.translate("share_audit_notify_reason", reason=detail))
         try:
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=title,
                 text="\n" + "\n".join(lines),
             )
@@ -680,7 +714,7 @@ class ShareAuditDownloadQueue:
         if self._persist_path is None:
             self._persist_path = (
                 configer.PLUGIN_CONFIG_PATH / "share_audit_download_queue.json"
-            )
+            ).resolve()
         return self._persist_path
 
     def _load_tasks_locked(self) -> None:

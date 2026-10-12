@@ -22,8 +22,8 @@ from p115client.tool.fs_files import fs_files_iter
 from p115client.tool.iterdir import iterdir
 from sqlalchemy.orm.exc import MultipleResultsFound
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from ...core.cache import DirectoryCache, idpathcacher
 from ...core.config import configer
@@ -915,6 +915,7 @@ class IncrementSyncStrmHelper:
                 pan_media_dir = pan_media_dir.rstrip("/")
                 target_dir = target_dir.rstrip("/")
 
+                local_tree_task_thread = None
                 try:
                     # 生成本地目录树文件
                     local_tree_task_thread = self.__generate_local_tree(
@@ -1051,6 +1052,9 @@ class IncrementSyncStrmHelper:
                     sentry_manager.sentry_hub.capture_exception(e)
                     logger.error(f"【增量STRM生成】增量同步 STRM 文件失败: {e}")
                     return
+                finally:
+                    if local_tree_task_thread is not None:
+                        local_tree_task_thread.join()
 
                 if queue:
                     wait_seconds = 20 + 10 * retry_count

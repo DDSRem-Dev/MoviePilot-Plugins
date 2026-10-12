@@ -49,16 +49,18 @@ def _load_queue_module():
             _package(package_name)
 
     transfer_module = ModuleType("app.chain.transfer")
-    transfer_module.TransferChain = MagicMock
+    transfer_module.TransferChain = MagicMock(
+        return_value=SimpleNamespace(do_transfer=MagicMock(return_value=(True, "")))
+    )
     install("app.chain.transfer", transfer_module)
 
-    log_module = ModuleType("app.log")
+    log_module = ModuleType("app.sdk.logging")
     log_module.logger = MagicMock()
-    install("app.log", log_module)
+    install("app.sdk.logging", log_module)
 
     schemas_module = ModuleType("app.schemas")
     schemas_module.FileItem = SimpleNamespace
-    schemas_module.NotificationType = SimpleNamespace(Plugin="plugin")
+    schemas_module.MessageType = SimpleNamespace(Plugin="plugin")
     install("app.schemas", schemas_module)
 
     config_module = ModuleType("p115strmhelper.core.config")
@@ -119,7 +121,7 @@ def _load_queue_module():
     module_name = "p115strmhelper.helper.strm.share.audit_download_queue"
     spec = spec_from_file_location(module_name, module_path)
     module = module_from_spec(spec)
-    modules[module_name] = module
+    install(module_name, module)
     try:
         spec.loader.exec_module(module)
     finally:

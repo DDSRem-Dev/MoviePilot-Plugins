@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.config import configer
 

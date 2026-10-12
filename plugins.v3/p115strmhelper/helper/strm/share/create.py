@@ -5,7 +5,7 @@ from os.path import exists as path_exists, getsize as path_getsize, join as path
 from pathlib import Path
 from queue import Empty, Queue
 from tempfile import gettempdir
-from threading import Lock, Thread
+from threading import Lock, Thread, current_thread
 from time import perf_counter, sleep
 from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -13,8 +13,8 @@ from p115client import check_response
 from p115client.tool.iterdir import share_iter_files
 from p115client.util import share_extract_payload
 
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 from ....core.cache import sharestrmcacher
 from ....core.config import configer
@@ -699,11 +699,15 @@ class ShareInteractiveGenStrmQueue:
     分享交互生成 STRM 的 FIFO 队列与后台工作线程
     """
 
+    _STOP = object()
+
     def __init__(self) -> None:
         self.mediainfodownloader: Optional[MediaInfoDownloader] = None
         self._task_queue: Queue = Queue()
         self._worker_thread: Optional[Thread] = None
         self._worker_lock = Lock()
+        self._lifecycle_lock = Lock()
+        self._stopping = False
 
     def bind_mediainfodownloader(
         self, mediainfodownloader: Optional[MediaInfoDownloader]
@@ -713,7 +717,53 @@ class ShareInteractiveGenStrmQueue:
 
         :param mediainfodownloader (MediaInfoDownloader): MediaInfoDownloader 实例，可为 None
         """
-        self.mediainfodownloader = mediainfodownloader
+        with self._lifecycle_lock, self._worker_lock:
+            if self._worker_thread and self._worker_thread.is_alive():
+                if (
+                    self._stopping
+                    or mediainfodownloader is not self.mediainfodownloader
+                ):
+                    raise RuntimeError("分享交互生成 STRM 任务尚未退出，不能更换下载器")
+                return
+            if self._task_queue.unfinished_tasks:
+                raise RuntimeError("分享交互生成 STRM 队列仍有未完成任务")
+            self.mediainfodownloader = mediainfodownloader
+            self._stopping = False
+
+    def _request_stop_locked(self) -> None:
+        if (
+            not self._stopping
+            and self._worker_thread
+            and self._worker_thread.is_alive()
+        ):
+            self._task_queue.put(self._STOP)
+        self._stopping = True
+
+    def stop(self, timeout: float = 25.0) -> bool:
+        """
+        停止接收新分享并等待已有任务退出
+
+        :param timeout (float): 等待后台线程退出的最长秒数
+
+        :return bool: 线程已退出且已有任务全部结算时返回 True
+        """
+        with self._worker_lock:
+            if self._worker_thread is current_thread():
+                self._request_stop_locked()
+                return False
+        with self._lifecycle_lock:
+            with self._worker_lock:
+                self._request_stop_locked()
+                worker = self._worker_thread
+            if worker and worker.is_alive():
+                worker.join(timeout=max(0, timeout))
+            with self._worker_lock:
+                if worker and worker.is_alive():
+                    return False
+                if self._task_queue.unfinished_tasks:
+                    return False
+                self._worker_thread = None
+                return True
 
     @staticmethod
     def validate_prerequisites() -> Optional[str]:
@@ -735,16 +785,15 @@ class ShareInteractiveGenStrmQueue:
 
     def _ensure_worker_running(self) -> None:
         """
-        确保工作线程已启动
+        持有任务锁时确保工作线程已启动
         """
-        with self._worker_lock:
-            if self._worker_thread is None or not self._worker_thread.is_alive():
-                self._worker_thread = Thread(
-                    target=self._process_queue,
-                    name="P115ShareInteractiveGenStrm",
-                    daemon=True,
-                )
-                self._worker_thread.start()
+        if self._worker_thread is None or not self._worker_thread.is_alive():
+            self._worker_thread = Thread(
+                target=self._process_queue,
+                name="P115ShareInteractiveGenStrm",
+                daemon=True,
+            )
+            self._worker_thread.start()
 
     def _process_queue(self) -> None:
         """
@@ -754,7 +803,14 @@ class ShareInteractiveGenStrmQueue:
             try:
                 task = self._task_queue.get(timeout=60)
             except Empty:
-                logger.debug("【分享交互生成STRM】队列空闲，工作线程退出")
+                with self._worker_lock:
+                    if not self._task_queue.empty():
+                        continue
+                    self._worker_thread = None
+                    logger.debug("【分享交互生成STRM】队列空闲，工作线程退出")
+                    break
+            if task is self._STOP:
+                self._task_queue.task_done()
                 break
             share_url, channel, source, userid = task
             try:
@@ -888,9 +944,12 @@ class ShareInteractiveGenStrmQueue:
         :param userid (str): 用户 ID
         :return int: 入队后队列中等待执行的任务数量
         """
-        self._task_queue.put((share_url, channel, source, userid))
-        self._ensure_worker_running()
-        return self._task_queue.qsize()
+        with self._worker_lock:
+            if self._stopping:
+                raise RuntimeError("分享交互生成 STRM 队列已停止，暂不接收新任务")
+            self._task_queue.put((share_url, channel, source, userid))
+            self._ensure_worker_running()
+            return self._task_queue.qsize()
 
     def enqueue_and_notify_user(
         self,

@@ -473,7 +473,8 @@ class ServiceHelper:
             except Exception as e:
                 logger.error(f"【监控生活事件】注册守护服务失败: {str(e)}")
 
-    def full_sync_strm_files(self):
+    @_track_sync_operation
+    def full_sync_strm_files(self) -> None:
         """
         全量同步（带并发互斥与优先级控制）
         """
@@ -531,7 +532,7 @@ class ServiceHelper:
             if strm_cleanup_deferred_count != 0:
                 text += f"\n⏳ 待二次确认清理无效 STRM {strm_cleanup_deferred_count} 个"
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("full_sync_done_title"),
                 text=text,
             )
@@ -546,7 +547,8 @@ class ServiceHelper:
             func=self.full_sync_strm_files,
         )
 
-    def full_sync_database(self):
+    @_track_sync_operation
+    def full_sync_database(self) -> None:
         """
         全量同步数据库
         """
@@ -584,7 +586,8 @@ class ServiceHelper:
         except Exception as e:
             logger.error(f"【分享STRM清理】定时任务失败: {e}", exc_info=True)
 
-    def share_strm_files(self):
+    @_track_sync_operation
+    def share_strm_files(self) -> None:
         """
         分享生成STRM
         """
@@ -600,7 +603,7 @@ class ServiceHelper:
             )
             if configer.get_config("notify"):
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("share_sync_done_title"),
                     text=f"\n📄 生成STRM文件 {strm_count} 个\n"
                     + f"⬇️ 下载媒体文件 {mediainfo_count} 个\n"
@@ -621,7 +624,8 @@ class ServiceHelper:
             func=self.share_strm_files,
         )
 
-    def increment_sync_strm_files(self, send_msg: bool = False):
+    @_track_sync_operation
+    def increment_sync_strm_files(self, send_msg: bool = False) -> None:
         """
         增量同步（带并发互斥与优先级控制）
         """
@@ -690,7 +694,7 @@ class ServiceHelper:
             if remove_unless_strm_count != 0:
                 text += f"🗑️ 清理无效STRM文件 {remove_unless_strm_count} 个"
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("inc_sync_done_title"),
                 text=text,
             )
