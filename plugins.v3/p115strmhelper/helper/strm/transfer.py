@@ -6,12 +6,12 @@ from p115client import P115Client
 from p115client.tool.attr import get_attr
 
 from app.chain.storage import StorageChain
-from app.core.config import settings
-from app.core.context import MediaInfo
-from app.core.meta import MetaBase
-from app.core.metainfo import MetaInfoPath
-from app.helper.directory import DirectoryHelper
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.media import MediaInfo
+from app.sdk.media import MetaBase
+from app.sdk.media import MetaInfoPath
+from app.application.directory import DirectoryHelper
+from app.sdk.logging import logger
 from app.schemas import TransferInfo, FileItem
 from app.schemas.types import EventType, ChainEventType
 
@@ -236,6 +236,8 @@ class TransferStrmHelper:
         :param local_media_dir (str): 本地媒体库目录
         :param pan_media_dir (str): 网盘媒体库目录
         :param database_helper (FileDbHelper): 文件数据库操作类实例
+
+        :raises RuntimeError: 下载地址获取或保存失败，交由宿主持久事件重试
         """
         try:
             file_item: FileItem = item_transfer.target_item
@@ -255,18 +257,20 @@ class TransferStrmHelper:
                 logger.error(
                     f"【监控整理STRM生成】{item_dest_name} 下载链接获取失败，无法下载该文件"
                 )
-                return
+                raise RuntimeError(f"{item_dest_name} 下载链接获取失败")
             _file_path = Path(local_media_dir) / PathUtils.sanitize_path_parts(
                 Path(item_dest_path).relative_to(pan_media_dir)
             )
-            mediainfodownloader.save_mediainfo_file(
+            if not mediainfodownloader.save_mediainfo_file(
                 file_path=Path(_file_path),
                 file_name=_file_path.name,
                 download_url=download_url,
-            )
+            ):
+                raise RuntimeError(f"{item_dest_name} 媒体信息文件保存失败")
         except Exception as e:
             sentry_manager.sentry_hub.capture_exception(e)
             logger.error(f"【监控整理STRM生成】媒体信息文件下载出现未知错误: {e}")
+            raise
 
     def do_generate(
         self,
@@ -282,6 +286,8 @@ class TransferStrmHelper:
         :param item (Dict): 事件数据项
         :param event_type (Union): 事件类型
         :param mediainfodownloader (MediaInfoDownloader): 媒体信息下载器实例
+
+        :raises RuntimeError: STRM 写入或字幕音轨下载失败，交由宿主重试投递
         """
         # 转移信息
         item_transfer: Optional[TransferInfo] = item.get("transferinfo")
@@ -428,7 +434,7 @@ class TransferStrmHelper:
             url=strm_url,
         )
         if not status:
-            return
+            raise RuntimeError(f"{item_dest_name} STRM 文件写入失败")
 
         # latest 模式：清理同集旧版本 STRM（文件名不同但季集相同的残留）
         overwrite_mode = self._get_overwrite_mode(

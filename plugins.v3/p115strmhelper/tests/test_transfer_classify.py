@@ -185,12 +185,11 @@ def _setup_mock_env() -> None:
     """
     for pkg in [
         "app",
-        "app.core",
+        "app.sdk",
         "app.chain",
         "app.db",
-        "app.helper",
+        "app.db.oper",
         "app.schemas",
-        "app.utils",
         "app.modules",
         "app.plugins",
         "p115client",
@@ -199,7 +198,7 @@ def _setup_mock_env() -> None:
         _make_pkg(pkg)
 
     _make_module(
-        "app.log",
+        "app.sdk.logging",
         logger=SimpleNamespace(
             info=lambda *a, **k: None,
             debug=lambda *a, **k: None,
@@ -208,26 +207,26 @@ def _setup_mock_env() -> None:
             error=lambda *a, **k: None,
         ),
     )
-    _make_module("app.core.config", settings=FakeSettings())
+    _make_module("app.sdk.config", settings=FakeSettings())
     _make_module(
-        "app.core.event",
+        "app.sdk.events",
         eventmanager=SimpleNamespace(send_event=lambda *a, **k: None),
     )
-    _make_module("app.core.context", MediaInfo=object)
-    _make_module("app.core.meta", MetaBase=object)
-    _make_module("app.core.metainfo", MetaInfoPath=FakeMetaInfoPath)
+    _make_module(
+        "app.sdk.media", MediaInfo=object, MetaBase=object, MetaInfoPath=FakeMetaInfoPath
+    )
     _make_module("app.chain.storage", StorageChain=FakeStorageChain)
     _make_module(
         "app.chain.transfer",
         TransferChain=object,
         task_lock=SimpleNamespace(),
     )
-    _make_module("app.db.transferhistory_oper", TransferHistoryOper=object)
-    _make_module("app.helper.directory", DirectoryHelper=object)
+    _make_module("app.db.oper.transferhistory", TransferHistoryOper=object)
+    _make_module("app.application.directory", DirectoryHelper=object)
     _make_module(
         "app.schemas",
         FileItem=FakeFileItem,
-        Notification=object,
+        Message=object,
         TransferInfo=object,
         TransferTask=object,
     )
@@ -242,10 +241,10 @@ def _setup_mock_env() -> None:
             AudioTransferFailed="AudioTransferFailed",
         ),
         MediaType=object,
-        NotificationType=object,
+        MessageType=object,
         ChainEventType=object,
     )
-    _make_module("app.utils.string", StringUtils=object)
+    _make_module("app.sdk.utilities", StringUtils=object)
     _make_module("p115client", P115Client=object, check_response=lambda *a, **k: None)
     _make_module("p115client.tool.edit", update_name=object)
     _make_module("p115client.tool.attr", get_attr=object)
@@ -757,20 +756,21 @@ class TestDoGenerate(TestCase):
 
     def test_download_media_file_no_download_url(self) -> None:
         """
-        下载链接获取失败时不保存文件
+        下载链接获取失败时不保存文件，并向 V3 持久事件反馈失败
         """
         module = self.transfer_module
         self.downloader.get_download_url.return_value = None
-        module.TransferStrmHelper()._download_media_file(
-            mediainfodownloader=self.downloader,
-            item_transfer=self._build_item("剑风传奇 - S01E01 - 第 1 集.ass")[
-                "transferinfo"
-            ],
-            item_dest_pickcode="a" * 17,
-            item_dest_path="/pan/媒体库/电视剧/x/剑风传奇 - S01E01 - 第 1 集.ass",
-            item_dest_name="剑风传奇 - S01E01 - 第 1 集.ass",
-            local_media_dir="/local/媒体库",
-            pan_media_dir="/pan/媒体库",
-            database_helper=MagicMock(),
-        )
+        with self.assertRaises(RuntimeError):
+            module.TransferStrmHelper()._download_media_file(
+                mediainfodownloader=self.downloader,
+                item_transfer=self._build_item("剑风传奇 - S01E01 - 第 1 集.ass")[
+                    "transferinfo"
+                ],
+                item_dest_pickcode="a" * 17,
+                item_dest_path="/pan/媒体库/电视剧/x/剑风传奇 - S01E01 - 第 1 集.ass",
+                item_dest_name="剑风传奇 - S01E01 - 第 1 集.ass",
+                local_media_dir="/local/媒体库",
+                pan_media_dir="/pan/媒体库",
+                database_helper=MagicMock(),
+            )
         self.downloader.save_mediainfo_file.assert_not_called()

@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from queue import Queue
-from threading import Lock, Thread
 from typing import Optional
 
-from app.log import logger
+from app.sdk.logging import logger
 from app.schemas.mediaserver import WebhookEventInfo
+
+from ...core.worker_queue import WorkerQueue
 
 
 @dataclass
@@ -28,17 +28,13 @@ class SyncDelWebhookTask:
     p115_force_delete_files: bool
 
 
-class SyncDelWebhookQueue:
+class SyncDelWebhookQueue(WorkerQueue):
     """
     Webhook 同步删除全局队列
     """
 
-    _SENTINEL = object()
-
     def __init__(self) -> None:
-        self._queue: Optional[Queue] = None
-        self._worker_thread: Optional[Thread] = None
-        self._lock = Lock()
+        super().__init__("P115StrmHelper-SyncDelWebhookQueue", "同步删除 Webhook 队列")
 
     def _worker(self) -> None:
         """
@@ -79,67 +75,15 @@ class SyncDelWebhookQueue:
             finally:
                 q.task_done()
 
-    def _ensure_started(self) -> None:
-        """
-        懒启动 worker（首次入队时调用）
-        """
-        with self._lock:
-            if self._worker_thread is not None and self._worker_thread.is_alive():
-                return
-            self._queue = Queue()
-            self._worker_thread = Thread(
-                target=self._worker,
-                name="P115StrmHelper-SyncDelWebhookQueue",
-                daemon=False,
-            )
-            self._worker_thread.start()
-            logger.debug("【同步删除 Webhook 队列】worker 已启动")
-
-    def stop(self) -> None:
-        """
-        停止 worker：发送哨兵并 join，尽量排空已入队任务前的处理
-        """
-        with self._lock:
-            q = self._queue
-            th = self._worker_thread
-            if q is None or th is None:
-                return
-            if not th.is_alive():
-                self._queue = None
-                self._worker_thread = None
-                return
-        try:
-            q.put(self._SENTINEL)
-            th.join(timeout=30)
-            if th.is_alive():
-                logger.warning("【同步删除 Webhook 队列】worker 未在 30 秒内退出")
-        except Exception as e:
-            logger.error(
-                f"【同步删除 Webhook 队列】停止 worker 异常: {e}",
-                exc_info=True,
-            )
-        finally:
-            with self._lock:
-                if self._worker_thread is th and self._queue is q:
-                    self._worker_thread = None
-                    self._queue = None
-
-    def enqueue(self, task: SyncDelWebhookTask) -> None:
+    def enqueue(self, task: SyncDelWebhookTask) -> bool:
         """
         将一条同步删除任务加入队列（无界，put_nowait 不阻塞事件线程）
 
         :param task (SyncDelWebhookTask): 任务快照（event_data 须已在调用方 deepcopy）
+
+        :return bool: 入队成功返回 True，停止后拒绝自动恢复
         """
-        self._ensure_started()
-        with self._lock:
-            q = self._queue
-        if q is None:
-            logger.warning("【同步删除 Webhook 队列】队列未就绪，跳过入队")
-            return
-        try:
-            q.put_nowait(task)
-        except Exception as e:
-            logger.error(f"【同步删除 Webhook 队列】入队失败: {e}", exc_info=True)
+        return self._enqueue_task(task, lazy_start=True)
 
 
 sync_del_webhook_queue = SyncDelWebhookQueue()

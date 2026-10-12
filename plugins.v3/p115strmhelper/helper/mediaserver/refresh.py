@@ -1,11 +1,11 @@
 from pathlib import Path
-from threading import Timer
 from typing import Optional, Dict, List
+from uuid import uuid4
 
 from app.chain.media import MediaChain
-from app.core.metainfo import MetaInfoPath
-from app.helper.mediaserver import MediaServerHelper as MpMediaServerHelper
-from app.log import logger
+from app.sdk.media import MetaInfoPath
+from app.sdk.services import MediaServerHelper as MpMediaServerHelper
+from app.sdk.logging import logger
 from app.schemas import ServiceInfo, RefreshMediaItem, MediaInfo
 
 from ...utils.path import PathUtils
@@ -133,16 +133,34 @@ class MediaServerRefresh:
         if not self.service_infos:
             return False
         if self.delay_seconds > 0:
+            from ...service.one_shot import schedule_plugin_one_shot
+
             logger.info(
                 f"{self.func_name}{file_name} 延迟 {self.delay_seconds} 秒后刷新媒体服务器"
             )
-            Timer(
-                self.delay_seconds,
-                self._do_refresh,
-                args=(file_path, file_name, mediainfo, refresh_all),
-            ).start()
-            return True
+            return schedule_plugin_one_shot(
+                service_id=f"mediaserver_refresh_{uuid4().hex}",
+                name=f"{self.func_name}媒体库刷新",
+                func=self._run_delayed_refresh,
+                func_kwargs={
+                    "file_path": file_path,
+                    "file_name": file_name,
+                    "mediainfo": mediainfo,
+                    "refresh_all": refresh_all,
+                },
+                delay_sec=self.delay_seconds,
+            )
         return self._do_refresh(file_path, file_name, mediainfo, refresh_all)
+
+    def _run_delayed_refresh(
+        self,
+        file_path: Optional[str],
+        file_name: Optional[str],
+        mediainfo: Optional[MediaInfo],
+        refresh_all: bool,
+    ) -> None:
+        if not self._do_refresh(file_path, file_name, mediainfo, refresh_all):
+            raise RuntimeError(f"{self.func_name}媒体库刷新请求失败，请检查日志")
 
     def _do_refresh(
         self,

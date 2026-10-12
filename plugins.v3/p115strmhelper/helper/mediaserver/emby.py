@@ -1,6 +1,4 @@
 from pathlib import Path
-from queue import Queue
-from threading import Thread
 from time import sleep
 from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import quote
@@ -8,12 +6,13 @@ from urllib.parse import quote
 from httpx import RequestError, post as httpx_post
 from p115center import P115Center
 
-from app.helper.mediaserver import MediaServerHelper
-from app.log import logger
+from app.sdk.services import MediaServerHelper
+from app.sdk.logging import logger
 from app.schemas import ServiceInfo
-from app.utils.http import RequestUtils
+from app.sdk.network import RequestUtils
 
 from ...core.config import configer
+from ...core.worker_queue import WorkerQueue
 from ...schemas.emby_mediainfo import EmbyMediainfoTask
 from ...utils.path import PathUtils
 from ...utils.sentry import sentry_manager
@@ -538,17 +537,15 @@ class EmbyMediaInfoOperate:
 
 
 @sentry_manager.capture_all_class_exceptions
-class EmbyMediainfoQueue:
+class EmbyMediainfoQueue(WorkerQueue):
     """
     Emby 媒体信息提取全局队列
     """
 
-    _SENTINEL = object()
     _TASK_SLEEP_AFTER_SEC: float = 4.0
 
     def __init__(self) -> None:
-        self._queue: Optional[Queue] = None
-        self._worker_thread: Optional[Thread] = None
+        super().__init__("P115StrmHelper-EmbyMediainfoQueue", "Emby 媒体信息队列")
 
     def _worker(self) -> None:
         """
@@ -592,42 +589,6 @@ class EmbyMediainfoQueue:
                 q.task_done()
                 sleep(self._TASK_SLEEP_AFTER_SEC)
 
-    def start(self) -> None:
-        """
-        启动 Emby 媒体信息提取队列 worker 线程
-        """
-        if self._worker_thread is not None and self._worker_thread.is_alive():
-            return
-        self._queue = Queue()
-        self._worker_thread = Thread(
-            target=self._worker,
-            name="P115StrmHelper-EmbyMediainfoQueue",
-            daemon=False,
-        )
-        self._worker_thread.start()
-        logger.debug("【Emby 媒体信息队列】worker 已启动")
-
-    def stop(self) -> None:
-        """
-        停止 Emby 媒体信息提取队列 worker 线程
-        """
-        if (
-            self._queue is None
-            or self._worker_thread is None
-            or not self._worker_thread.is_alive()
-        ):
-            return
-        try:
-            self._queue.put(self._SENTINEL)
-            self._worker_thread.join(timeout=30)
-            if self._worker_thread.is_alive():
-                logger.warning("【Emby 媒体信息队列】worker 未在 30 秒内退出")
-        except Exception as e:
-            logger.error(f"【Emby 媒体信息队列】停止 worker 异常: {e}", exc_info=True)
-        finally:
-            self._worker_thread = None
-            self._queue = None
-
     def enqueue(
         self,
         func_name: str,
@@ -636,7 +597,7 @@ class EmbyMediainfoQueue:
         mp_mediaserver: Optional[str] = None,
         mediaservers: Optional[List[str]] = None,
         size: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
         """
         将一条 Emby 媒体信息提取任务加入全局队列
 
@@ -646,26 +607,22 @@ class EmbyMediainfoQueue:
         :param mp_mediaserver (str): MoviePilot 媒体服务器路径配置，可选
         :param mediaservers (List): 媒体服务器名称列表，可选
         :param size (int): 文件大小（字节），可选
+
+        :return bool: 入队成功返回 True，队列未启动或已停止返回 False
         """
-        q = self._queue
-        if q is None:
-            logger.warning(
-                "【Emby 媒体信息队列】队列未初始化，请先启动 worker，跳过入队"
-            )
-            return
         try:
-            q.put(
-                EmbyMediainfoTask(
-                    func_name=func_name,
-                    mp_mediaserver=mp_mediaserver,
-                    mediaservers=mediaservers,
-                    sha1=sha1,
-                    path=path,
-                    size=size,
-                )
+            task = EmbyMediainfoTask(
+                func_name=func_name,
+                mp_mediaserver=mp_mediaserver,
+                mediaservers=mediaservers,
+                sha1=sha1,
+                path=path,
+                size=size,
             )
         except Exception as e:
-            logger.error(f"【Emby 媒体信息队列】入队失败: {e}", exc_info=True)
+            logger.error(f"【Emby 媒体信息队列】任务参数无效: {e}", exc_info=True)
+            return False
+        return self._enqueue_task(task)
 
 
 emby_mediainfo_queue = EmbyMediainfoQueue()
