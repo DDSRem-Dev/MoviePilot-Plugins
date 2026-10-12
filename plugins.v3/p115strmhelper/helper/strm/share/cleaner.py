@@ -5,15 +5,16 @@ from time import perf_counter, time as time_unix
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from app.db.transferhistory_oper import TransferHistoryOper
-from app.log import logger
-from app.schemas import NotificationType
+from app.sdk.queries import TransferHistorySnapshot
+from app.sdk.logging import logger
+from app.schemas import MessageType
 
 from share_strm_scan import Pair, ShareStrmScanCache
 
 from ....core.config import configer
 from ....core.i18n import i18n
 from ....core.message import post_message
+from ....db_manager.moviepilot_transfer import TransferHBOper
 from ....helper.mediasyncdel import MediaSyncDelHelper
 from ....utils.path import PathRemoveUtils
 from ....utils.sharded_list import ShardedPluginListStore
@@ -241,7 +242,7 @@ class ShareStrmMissingMediaStore:
 
     @staticmethod
     def row_from_transfer_history(
-        th: Any,
+        th: TransferHistorySnapshot,
         strm_path: str,
         share_code: str,
         receive_code: str,
@@ -249,7 +250,7 @@ class ShareStrmMissingMediaStore:
         """
         组装写入分片存储的「缺失媒体」字典（含固定字段与整理记录子集）
 
-        :param th (Any): ``TransferHistory`` 模型实例
+        :param th (TransferHistorySnapshot): 宿主只读整理历史快照
         :param strm_path (str): STRM 路径
         :param share_code (str): 分享码
         :param receive_code (str): 接收码（提取码）
@@ -267,10 +268,8 @@ class ShareStrmMissingMediaStore:
             "type": getattr(th, "type", None),
             "title": getattr(th, "title", None),
             "year": getattr(th, "year", None),
-            "tmdbid": getattr(th, "tmdbid", None),
-            "tvdbid": getattr(th, "tvdbid", None),
-            "imdbid": getattr(th, "imdbid", None),
-            "doubanid": getattr(th, "doubanid", None),
+            "media_source": th.media_source.value if th.media_source else None,
+            "media_id": th.media_id,
             "seasons": getattr(th, "seasons", None),
             "episodes": getattr(th, "episodes", None),
             "image": getattr(th, "image", None),
@@ -641,7 +640,7 @@ class ShareStrmCleaner:
         try:
             text = self._format_share_strm_cleanup_notify_text(summary)
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("share_strm_cleanup_notify_title"),
                 text="\n" + text,
             )
@@ -681,7 +680,7 @@ class ShareStrmCleaner:
                     )
                 )
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("share_strm_cleanup_batch_exec_title"),
                 text="\n" + "\n".join(lines),
             )
@@ -728,7 +727,7 @@ class ShareStrmCleaner:
 
             paths_only: List[str] = []
             missing_rows: List[Dict[str, Any]] = []
-            oper = TransferHistoryOper() if record_missing else None
+            oper = TransferHBOper() if record_missing else None
             skipped_no_history = 0
 
             for root in roots:

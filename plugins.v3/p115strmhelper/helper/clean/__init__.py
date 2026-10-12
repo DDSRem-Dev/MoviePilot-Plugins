@@ -5,7 +5,7 @@ from p115client import P115Client, check_response
 from p115client.tool.attr import normalize_attr
 from p115client.tool.fs_files import fs_files_iter
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.config import configer
 from ...utils.sentry import sentry_manager

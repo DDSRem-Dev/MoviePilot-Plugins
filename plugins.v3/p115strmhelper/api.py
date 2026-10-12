@@ -1258,17 +1258,19 @@ class Api:
             if not configer.get_config("enabled") or not configer.get_config("cookies"):
                 return ApiResponse(code=1, msg="插件未启用或未配置cookie")
 
-            def _run() -> None:
-                try:
-                    share_strm_cleaner.run_full_cleanup()
-                except Exception as ex:
-                    logger.error(
-                        f"【分享STRM清理】后台扫描失败: {ex}",
-                        exc_info=True,
-                    )
+            with servicer.sync_operation():
 
-            Thread(target=_run, daemon=True, name="share-strm-cleanup-scan").start()
-            return ApiResponse(msg="分享 STRM 清理扫描已启动")
+                def _run() -> None:
+                    try:
+                        share_strm_cleaner.run_full_cleanup()
+                    except Exception as ex:
+                        logger.error(
+                            f"【分享STRM清理】后台扫描失败: {ex}",
+                            exc_info=True,
+                        )
+
+                servicer.start_background_sync(_run, "share-strm-cleanup-scan")
+                return ApiResponse(msg="分享 STRM 清理扫描已启动")
         except Exception as e:
             return ApiResponse(code=1, msg=str(e))
 

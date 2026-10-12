@@ -531,7 +531,8 @@ class ServiceHelper:
             func=self.full_sync_database,
         )
 
-    def share_strm_cleanup_run(self):
+    @_track_sync_operation
+    def share_strm_cleanup_run(self) -> None:
         """
         定时任务：分享 STRM 失效清理扫描
         """
@@ -741,7 +742,8 @@ class ServiceHelper:
                 except Exception as e:
                     logger.error(f"【目录上传】{mon_path} 启动实时监控失败：{e}")
 
-    def main_cleaner(self):
+    @_track_sync_operation
+    def main_cleaner(self) -> None:
         """
         主清理模块
         """

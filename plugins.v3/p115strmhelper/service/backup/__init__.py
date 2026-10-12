@@ -1,17 +1,36 @@
+from functools import wraps
 from threading import Lock, Thread
 from time import sleep
-from typing import Callable, Optional, Set
+from typing import Any, Callable, Optional, Set
 
 from p115client import P115Client
 
-from app.log import logger
-from app.scheduler import Scheduler
+from app.sdk.logging import logger
+from app.sdk.scheduler import list_scheduler_jobs
 
 from ...core.config import configer
 from ...helper.backup import BackupStrmHelper, backup_helper
 from ...schemas.backup import StrmBackupItem
 from ...service.one_shot import schedule_plugin_one_shot
 from ...utils.sentry import sentry_manager
+
+
+def _track_backup_execution(func: Callable) -> Callable:
+    @wraps(func)
+    def wrapper(
+        self: "BackupService", task_name: str, *args: Any, **kwargs: Any
+    ) -> Any:
+        with self._backup_task_lock:
+            if self._stopping and task_name not in self._backup_running_tasks:
+                raise RuntimeError("备份服务已停止，该任务已不属于当前运行槽")
+            self._active_executions += 1
+        try:
+            return func(self, task_name, *args, **kwargs)
+        finally:
+            with self._backup_task_lock:
+                self._active_executions -= 1
+
+    return wrapper
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -25,6 +44,18 @@ class BackupService:
         self._backup_task_lock = Lock()
         self._backup_running_tasks: Set[str] = set()
         self._reserved_task_started: Set[str] = set()
+        self._stopping = False
+        self._active_executions = 0
+
+    def stop(self) -> bool:
+        """
+        标记停止并反馈已受理任务是否全部结束
+
+        :return bool: 没有执行中或待执行的已占位任务时返回 True
+        """
+        with self._backup_task_lock:
+            self._stopping = True
+            return not self._backup_running_tasks and not self._active_executions
 
     def _try_acquire_backup_task(self, task_name: str) -> bool:
         """
@@ -115,6 +146,7 @@ class BackupService:
                 f"【STRM备份】备份失败: {task_name}, 错误: {history.error_msg}"
             )
 
+    @_track_backup_execution
     def run_backup_task(self, task_name: str) -> None:
         """
         执行备份任务
@@ -133,6 +165,7 @@ class BackupService:
         finally:
             self._release_backup_task(task_name)
 
+    @_track_backup_execution
     def _run_backup_task_reserved(self, task_name: str) -> None:
         """
         执行已占位的备份任务
@@ -169,10 +202,11 @@ class BackupService:
                     return
                 if task_name in self._reserved_task_started:
                     return
-            scheduler = Scheduler()
-            with scheduler._lock:
-                jobs = getattr(scheduler, "_jobs", None) or {}
-                job_exists = job_id in jobs
+            try:
+                job_exists = any(job.id == job_id for job in list_scheduler_jobs())
+            except Exception as e:
+                logger.warning(f"【STRM备份】无法核实调度状态，保留运行槽: {e}")
+                return
             if job_exists:
                 return
             self._release_backup_task(task_name)
@@ -205,7 +239,7 @@ class BackupService:
 
         :return bool: 调度注册成功返回 True
         """
-        job_id = f"P115StrmHelper_{service_id}"
+        job_id = f"{configer.plugin_id}_once_{service_id}"
         if schedule_plugin_one_shot(
             service_id=service_id,
             name=job_name,
@@ -276,6 +310,7 @@ class BackupService:
         else:
             logger.error(f"【STRM恢复】恢复失败: {task_name}, 错误: {error_msg}")
 
+    @_track_backup_execution
     def run_restore_task(self, task_name: str, backup_path: str) -> None:
         """
         执行恢复任务
@@ -295,6 +330,7 @@ class BackupService:
         finally:
             self._release_backup_task(task_name)
 
+    @_track_backup_execution
     def _run_restore_task_reserved(
         self,
         task_name: str,

@@ -2211,30 +2211,31 @@ class P115StrmHelper(_PluginBase):
         if not source_path:
             return
 
-        try:
-            storage_chain = StorageChain()
-            if storage_chain.delete_media_file(fileitem=fileitem):
-                logger.info(
-                    f"【自动删除低质量源文件】已删除 {fileitem.storage} 源文件: {source_path}"
-                )
-            else:
-                logger.error(
-                    f"【自动删除低质量源文件】删除 {fileitem.storage} 源文件失败: {source_path}"
-                )
-                return
+        with servicer.sync_operation():
+            try:
+                storage_chain = StorageChain()
+                if storage_chain.delete_media_file(fileitem=fileitem):
+                    logger.info(
+                        f"【自动删除低质量源文件】已删除 {fileitem.storage} 源文件: {source_path}"
+                    )
+                else:
+                    logger.error(
+                        f"【自动删除低质量源文件】删除 {fileitem.storage} 源文件失败: {source_path}"
+                    )
+                    return
 
-            # 发送通知
-            if configer.notify:
-                post_message(
-                    mtype=NotificationType.Plugin,
-                    title="【自动删除低质量源文件】源文件已删除",
-                    text=f"\n因媒体库已存在更高质量文件，已自动删除源文件:\n{source_path}",
+                # 发送通知
+                if configer.notify:
+                    post_message(
+                        mtype=MessageType.Plugin,
+                        title="【自动删除低质量源文件】源文件已删除",
+                        text=f"\n因媒体库已存在更高质量文件，已自动删除源文件:\n{source_path}",
+                    )
+            except Exception as e:
+                logger.error(
+                    f"【自动删除低质量源文件】删除源文件失败: {source_path} - {e}",
+                    exc_info=True,
                 )
-        except Exception as e:
-            logger.error(
-                f"【自动删除低质量源文件】删除源文件失败: {source_path} - {e}",
-                exc_info=True,
-            )
 
     def stop_service(self) -> bool:
         """
