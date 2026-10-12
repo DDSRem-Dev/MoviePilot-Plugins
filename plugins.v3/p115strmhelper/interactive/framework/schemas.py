@@ -3,7 +3,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, TypeVar
 
-from app.schemas.types import MessageChannel
+from app.schemas.types import NotificationChannel
 
 
 @dataclass
@@ -31,7 +31,7 @@ class BaseMessage:
     """
 
     # 消息类型
-    channel: Optional[MessageChannel] = None
+    channel: Optional[NotificationChannel] = None
     # 来源名
     source: Optional[str] = None
     # 用户 ID

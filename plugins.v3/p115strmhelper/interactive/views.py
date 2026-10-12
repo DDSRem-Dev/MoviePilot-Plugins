@@ -2,7 +2,7 @@ import math
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional, List
 
-from app.schemas.message import ChannelCapabilityManager
+from app.schemas.notification import ChannelCapabilityManager
 
 from ..helper.search import HDHiveSearch, MediaSearcher, TgSearcher
 from ..core.i18n import i18n

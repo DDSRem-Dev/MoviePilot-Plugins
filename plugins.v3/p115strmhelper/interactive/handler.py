@@ -2,8 +2,8 @@ from typing import List, Dict
 
 import httpx
 
-from app.log import logger
-from app.core.config import settings
+from app.sdk.logging import logger
+from app.sdk.config import settings
 
 from .framework.registry import command_registry, view_registry
 from .framework.callbacks import Action
@@ -227,55 +227,56 @@ class ActionHandler(BaseActionHandler):
         """
         处理离线下载操作
         """
-        try:
-            if action.value is None:
-                raise ValueError("value 不能为空。")
-            # 索引号
-            item_index = int(action.value)
-            if 0 <= item_index < len(configer.offline_download_paths):
-                path = configer.offline_download_paths[item_index]
-                session.view.name = "close"
-                # 选择目录为整理目录则进行网盘整理，否则只添加离线下载任务
-                url_list = session.business.offline_download_urls
-                if (
-                    path in configer.pan_transfer_paths
-                    and configer.pan_transfer_enabled
-                ):
-                    ok, added_count = servicer.offlinehelper.add_urls_to_transfer(
-                        url_list
-                    )
+        with servicer.sync_operation():
+            try:
+                if action.value is None:
+                    raise ValueError("value 不能为空。")
+                # 索引号
+                item_index = int(action.value)
+                if 0 <= item_index < len(configer.offline_download_paths):
+                    path = configer.offline_download_paths[item_index]
+                    session.view.name = "close"
+                    # 选择目录为整理目录则进行网盘整理，否则只添加离线下载任务
+                    url_list = session.business.offline_download_urls
+                    if (
+                        path in configer.pan_transfer_paths
+                        and configer.pan_transfer_enabled
+                    ):
+                        ok, added_count = servicer.offlinehelper.add_urls_to_transfer(
+                            url_list
+                        )
+                    else:
+                        ok, added_count = servicer.offlinehelper.add_urls_to_path(
+                            url_list, path
+                        )
+                    if ok:
+                        post_message(
+                            channel=session.message.channel,
+                            source=session.message.source,
+                            title=i18n.translate(
+                                "p115_add_offline_success", count=added_count
+                            ),
+                            userid=session.message.userid,
+                        )
+                    else:
+                        post_message(
+                            channel=session.message.channel,
+                            source=session.message.source,
+                            title=i18n.translate("p115_add_offline_fail"),
+                            userid=session.message.userid,
+                        )
                 else:
-                    ok, added_count = servicer.offlinehelper.add_urls_to_path(
-                        url_list, path
-                    )
-                if ok:
-                    post_message(
-                        channel=session.message.channel,
-                        source=session.message.source,
-                        title=i18n.translate(
-                            "p115_add_offline_success", count=added_count
-                        ),
-                        userid=session.message.userid,
-                    )
-                else:
-                    post_message(
-                        channel=session.message.channel,
-                        source=session.message.source,
-                        title=i18n.translate("p115_add_offline_fail"),
-                        userid=session.message.userid,
-                    )
-            else:
-                raise IndexError("索引超出范围。")
-        except (ValueError, IndexError, TypeError) as e:
-            logger.error(
-                f"处理 offline_download 失败: value={action.value}, error={e}",
-                exc_info=True,
-            )
-            session.go_to("start")
-            return [
-                {"type": "error_message", "text": "处理离线下载时发生错误，请重试。"}
-            ]
-        return None
+                    raise IndexError("索引超出范围。")
+            except (ValueError, IndexError, TypeError) as e:
+                logger.error(
+                    f"处理 offline_download 失败: value={action.value}, error={e}",
+                    exc_info=True,
+                )
+                session.go_to("start")
+                return [
+                    {"type": "error_message", "text": "处理离线下载时发生错误，请重试。"}
+                ]
+            return None
 
     @command_registry.command(name="search", code="sr")
     def handle_search(self, session: Session, action: Action):

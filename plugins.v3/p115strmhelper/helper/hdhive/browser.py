@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlparse
 
 from orjson import dumps, loads
 
-from app.core.config import settings
+from app.sdk.config import settings
 
 from ...core.config import configer
 from ...utils.hdhive import (

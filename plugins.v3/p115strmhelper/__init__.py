@@ -1274,16 +1274,17 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "hdhive_checkin_manual":
             return
-        userid = self._get_event_userid(event_data)
+        with servicer.sync_operation():
+            userid = self._get_event_userid(event_data)
 
-        ok, text = run_hdhive_checkin_once(manual=True, send_notify=False)
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            title="RE0 手动签到" + ("成功" if ok else "失败"),
-            text="\n" + text + "\n",
-            userid=userid,
-        )
+            ok, text = run_hdhive_checkin_once(manual=True, send_notify=False)
+            post_message(
+                channel=event.event_data.get("channel"),
+                source=event.event_data.get("source"),
+                title="RE0 手动签到" + ("成功" if ok else "失败"),
+                text="\n" + text + "\n",
+                userid=userid,
+            )
 
     @eventmanager.register(EventType.PluginAction)
     def p115_checkin_manual(self, event: Event):
@@ -1295,18 +1296,19 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "p115_checkin_manual":
             return
-        userid = self._get_event_userid(event_data)
+        with servicer.sync_operation():
+            userid = self._get_event_userid(event_data)
 
-        ok, text = run_p115_checkin_once(
-            client=servicer.client, manual=True, send_notify=False
-        )
-        post_message(
-            channel=event.event_data.get("channel"),
-            source=event.event_data.get("source"),
-            title="115 手动签到" + ("成功" if ok else "失败"),
-            text="\n" + text + "\n",
-            userid=userid,
-        )
+            ok, text = run_p115_checkin_once(
+                client=servicer.client, manual=True, send_notify=False
+            )
+            post_message(
+                channel=event.event_data.get("channel"),
+                source=event.event_data.get("source"),
+                title="115 手动签到" + ("成功" if ok else "失败"),
+                text="\n" + text + "\n",
+                userid=userid,
+            )
 
     @eventmanager.register(EventType.MessageAction)
     def message_action(self, event: Event):
@@ -1327,46 +1329,47 @@ class P115StrmHelper(_PluginBase):
             if target_plugin_id and target_plugin_id != own_plugin_id:
                 return
 
-            callback_text = event_data.get("text", "")
+            with servicer.sync_operation():
+                callback_text = event_data.get("text", "")
 
-            if strm_cleanup_interaction.try_handle_message_action(event_data):
-                return
-
-            # 1. 解码 Action callback_text = c:xxx|w:xxx|v|xxx
-            session_id, action = decode_action(callback_text=callback_text)
-            if not session_id or not action:
-                # 如果解码失败或不属于本插件，则忽略
-                return
-
-            # 2. 获取会话
-            session = session_manager.get(session_id)
-            if not session:
-                context = {
-                    "channel": event_data.get("channel"),
-                    "source": event_data.get("source"),
-                    "userid": event_data.get("userid") or event_data.get("user"),
-                    "original_message_id": event_data.get("original_message_id"),
-                    "original_chat_id": event_data.get("original_chat_id"),
-                }
-                self.post_message(
-                    **context,
-                    title="⚠️ 会话已过期",
-                    text="操作已超时。\n请重新发起 `/sh` 命令。",
-                )
-                return
-
-            # 3. 更新会话上下文
-            session.update_message_context(event_data)
-
-            # 4. 委托给 ActionHandler 处理业务逻辑
-            immediate_messages = self.action_handler.process(session, action)
-            if immediate_messages:
-                for msg in immediate_messages:
-                    self.__send_message(session, text=msg.get("text"), title="错误")
+                if strm_cleanup_interaction.try_handle_message_action(event_data):
                     return
 
-            # 5. 渲染新视图并发送
-            self._render_and_send(session)
+                # 1. 解码 Action callback_text = c:xxx|w:xxx|v|xxx
+                session_id, action = decode_action(callback_text=callback_text)
+                if not session_id or not action:
+                    # 如果解码失败或不属于本插件，则忽略
+                    return
+
+                # 2. 获取会话
+                session = session_manager.get(session_id)
+                if not session:
+                    context = {
+                        "channel": event_data.get("channel"),
+                        "source": event_data.get("source"),
+                        "userid": event_data.get("userid") or event_data.get("user"),
+                        "original_message_id": event_data.get("original_message_id"),
+                        "original_chat_id": event_data.get("original_chat_id"),
+                    }
+                    self.post_message(
+                        **context,
+                        title="⚠️ 会话已过期",
+                        text="操作已超时。\n请重新发起 `/sh` 命令。",
+                    )
+                    return
+
+                # 3. 更新会话上下文
+                session.update_message_context(event_data)
+
+                # 4. 委托给 ActionHandler 处理业务逻辑
+                immediate_messages = self.action_handler.process(session, action)
+                if immediate_messages:
+                    for msg in immediate_messages:
+                        self.__send_message(session, text=msg.get("text"), title="错误")
+                        return
+
+                # 5. 渲染新视图并发送
+                self._render_and_send(session)
         except Exception as e:
             logger.debug(f"出错了：{e}", exc_info=True)
 
@@ -1409,7 +1412,7 @@ class P115StrmHelper(_PluginBase):
 
     def __delete_message(
         self,
-        channel: MessageChannel,
+        channel: NotificationChannel,
         source: str,
         message_id: Union[str, int],
         chat_id: Optional[Union[str, int]] = None,
@@ -1469,47 +1472,48 @@ class P115StrmHelper(_PluginBase):
             )
             return
 
-        if len(configer.offline_download_paths) <= 1:
-            ok, added_count = servicer.offlinehelper.add_urls_to_transfer(url_list)
-            if ok:
-                post_message(
-                    channel=event_data.get("channel"),
-                    source=event_data.get("source"),
-                    title=i18n.translate("p115_add_offline_success", count=added_count),
-                    userid=userid,
-                )
-            else:
-                post_message(
-                    channel=event_data.get("channel"),
-                    source=event_data.get("source"),
-                    title=i18n.translate("p115_add_offline_fail"),
-                    userid=userid,
-                )
-            return
-
-        try:
-            session = session_manager.get_or_create(
-                event_data, plugin_id=self.__class__.__name__
-            )
-
-            action = Action(
-                command="offline_download_path",
-                view="offline_download_paths",
-                value=url_list,
-            )
-
-            immediate_messages = self.action_handler.process(session, action)
-            # 报错，截断后续运行
-            if immediate_messages:
-                for msg in immediate_messages:
-                    self.__send_message(session, text=msg.get("text"), title="错误")
+        with servicer.sync_operation():
+            if len(configer.offline_download_paths) <= 1:
+                ok, added_count = servicer.offlinehelper.add_urls_to_transfer(url_list)
+                if ok:
+                    post_message(
+                        channel=event_data.get("channel"),
+                        source=event_data.get("source"),
+                        title=i18n.translate("p115_add_offline_success", count=added_count),
+                        userid=userid,
+                    )
+                else:
+                    post_message(
+                        channel=event_data.get("channel"),
+                        source=event_data.get("source"),
+                        title=i18n.translate("p115_add_offline_fail"),
+                        userid=userid,
+                    )
                 return
 
-            # 设置页面
-            session.go_to("offline_download_paths")
-            self._render_and_send(session)
-        except Exception as e:
-            logger.error(f"处理离线下载命令失败: {e}")
+            try:
+                session = session_manager.get_or_create(
+                    event_data, plugin_id=self.__class__.__name__
+                )
+
+                action = Action(
+                    command="offline_download_path",
+                    view="offline_download_paths",
+                    value=url_list,
+                )
+
+                immediate_messages = self.action_handler.process(session, action)
+                # 报错，截断后续运行
+                if immediate_messages:
+                    for msg in immediate_messages:
+                        self.__send_message(session, text=msg.get("text"), title="错误")
+                    return
+
+                # 设置页面
+                session.go_to("offline_download_paths")
+                self._render_and_send(session)
+            except Exception as e:
+                logger.error(f"处理离线下载命令失败: {e}")
 
     @eventmanager.register(EventType.UserMessage)
     def user_add_share(self, event: Event):

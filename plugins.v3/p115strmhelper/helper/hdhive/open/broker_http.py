@@ -2,8 +2,8 @@ from typing import Dict
 
 from httpx import Client
 
-from app.core.config import settings
-from app.utils.http import AsyncRequestUtils
+from app.sdk.config import settings
+from app.sdk.network import AsyncRequestUtils
 
 from ....core.config import configer
 from .constants import HDHIVE_OAUTH_BROKER_BASE

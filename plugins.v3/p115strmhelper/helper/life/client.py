@@ -1,8 +1,8 @@
 from filecmp import cmp as files_equal
 from shutil import move as shutil_move, rmtree
 from collections import defaultdict
-from threading import Timer, Event, Thread
-from time import sleep, strftime, localtime, time
+from threading import Timer, Event, Thread, Lock, current_thread
+from time import sleep, strftime, localtime, time, monotonic
 from typing import Any, Dict, List, Optional, Set, Tuple
 from pathlib import Path
 from itertools import batched
@@ -43,9 +43,9 @@ from p115client.tool.life import (
     BEHAVIOR_TYPE_TO_NAME,
 )
 
-from app.schemas import NotificationType, FileItem
-from app.log import logger
-from app.core.config import settings
+from app.schemas import MessageType, FileItem
+from app.sdk.logging import logger
+from app.sdk.config import settings
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
 
@@ -97,6 +97,9 @@ class MonitorLife:
         self._client = client
         self.mediainfodownloader = mediainfodownloader
         self.stop_event = stop_event
+        self._background_lock = Lock()
+        self._background_threads: Set[Thread] = set()
+        self._stopping = False
 
         self._monitor_life_notification_timer = None
         self._monitor_life_notification_queue = defaultdict(
@@ -128,11 +131,41 @@ class MonitorLife:
         """
         安排通知发送，如果一分钟内没有新事件则发送
         """
-        if self._monitor_life_notification_timer:
-            self._monitor_life_notification_timer.cancel()
+        with self._background_lock:
+            if self._monitor_life_notification_timer:
+                self._monitor_life_notification_timer.cancel()
+            self._background_threads = {
+                thread for thread in self._background_threads if thread.is_alive()
+            }
+            timer = Timer(60.0, self._send_notification)
+            self._monitor_life_notification_timer = timer
+            self._background_threads.add(timer)
+            try:
+                timer.start()
+            except Exception:
+                self._background_threads.discard(timer)
+                raise
 
-        self._monitor_life_notification_timer = Timer(60.0, self._send_notification)
-        self._monitor_life_notification_timer.start()
+    def stop(self, timeout: float = 25.0) -> bool:
+        """
+        停止接收手动整理并等待已启动任务及原定通知完成
+
+        :param timeout (float): 本次等待线程退出的总秒数
+
+        :return bool: 所有已跟踪线程退出时返回 True，否则保留资源供重试
+        """
+        deadline = monotonic() + max(0.0, timeout)
+        with self._background_lock:
+            self._stopping = True
+            threads = tuple(self._background_threads)
+        for thread in threads:
+            if thread is not current_thread() and thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - monotonic()))
+        with self._background_lock:
+            self._background_threads = {
+                thread for thread in self._background_threads if thread.is_alive()
+            }
+            return not self._background_threads
 
     def _send_notification(self):
         """
@@ -153,7 +186,7 @@ class MonitorLife:
 
         if text_parts and configer.get_config("notify"):
             post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title=i18n.translate("life_sync_done_title"),
                 text="\n" + "\n".join(text_parts),
             )
@@ -1583,7 +1616,7 @@ class MonitorLife:
                     )
                     _history_count = len(transfer_history) if transfer_history else 0
                     post_message(
-                        mtype=NotificationType.Plugin,
+                        mtype=MessageType.Plugin,
                         title=i18n.translate("life_sync_media_del_title"),
                         text=f"\n{del_type_text}\n"
                         f"{i18n.translate('sync_del_record_count', count=_history_count)}\n"
@@ -2478,7 +2511,19 @@ class MonitorLife:
             except Exception as e:
                 logger.error(f"【监控生活事件】手动整理任务执行失败: {path}, 错误: {e}")
 
-        transfer_thread = Thread(target=run_transfer, daemon=True)
-        transfer_thread.start()
+        with self._background_lock:
+            if self._stopping:
+                logger.warning("【监控生活事件】服务正在停止，无法启动手动整理")
+                return False
+            self._background_threads = {
+                thread for thread in self._background_threads if thread.is_alive()
+            }
+            transfer_thread = Thread(target=run_transfer, daemon=True)
+            self._background_threads.add(transfer_thread)
+            try:
+                transfer_thread.start()
+            except Exception:
+                self._background_threads.discard(transfer_thread)
+                raise
         logger.info(f"【监控生活事件】已启动手动整理任务线程: {path}")
         return True

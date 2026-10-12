@@ -329,7 +329,7 @@ class ServiceHelper:
                             )
                             if configer.notify:
                                 post_message(
-                                    mtype=NotificationType.Plugin,
+                                    mtype=MessageType.Plugin,
                                     title=i18n.translate(
                                         "monitor_life_auto_restart_title"
                                     ),
@@ -350,24 +350,22 @@ class ServiceHelper:
         with self.monitor_life_lock:
             self._start_monitor_life_internal(register_guard_service=False)
 
-    def _stop_monitor_life_internal(self):
+    def _stop_monitor_life_internal(self) -> bool:
         """
-        停止生活事件监控线程
+        请求停止生活事件监控并保留尚未退出的线程句柄
         """
+        if self.monitor_stop_event:
+            self.monitor_stop_event.set()
         if self.monitor_life_thread and self.monitor_life_thread.is_alive():
             logger.info("【监控生活事件】停止生活事件监控线程")
-            if self.monitor_stop_event:
-                self.monitor_stop_event.set()
-
             self.monitor_life_thread.join(timeout=25)
             if self.monitor_life_thread.is_alive():
                 logger.warning("【监控生活事件】线程未在预期时间内结束")
-            else:
-                logger.info("【监控生活事件】线程已正常退出")
-
-            self.monitor_life_thread = None
-            if self.monitor_stop_event:
-                self.monitor_stop_event = None
+                return False
+            logger.info("【监控生活事件】线程已正常退出")
+        self.monitor_life_thread = None
+        self.monitor_stop_event = None
+        return True
 
     def _start_monitor_life_internal(self, register_guard_service: bool = True):
         """
@@ -420,58 +418,14 @@ class ServiceHelper:
         else:
             self._stop_monitor_life_internal()
 
-    def _update_monitor_life_guard_service(self):
+    def _update_monitor_life_guard_service(self) -> None:
         """
-        只重新注册115生活事件线程守护服务
+        由宿主重新同步声明的周期服务，保留当前实例的有效一次性任务
         """
-        pid = "P115StrmHelper"
-        service_id = "P115StrmHelper_monitor_life_guard"
-        job_id = f"{pid}_{service_id}"
-
-        should_register = (
-            configer.monitor_life_enabled
-            and configer.monitor_life_paths
-            and configer.monitor_life_event_modes
-        ) or (configer.pan_transfer_enabled and configer.pan_transfer_paths)
-
-        if not should_register:
-            logger.debug("【监控生活事件】守护服务未启用，跳过注册")
-            return
-
-        guard_service = {
-            "id": service_id,
-            "name": "115生活事件线程守护",
-            "trigger": CronTrigger.from_crontab("* * * * *"),
-            "func": self.check_monitor_life_guard,
-            "kwargs": {},
-        }
-
-        scheduler = Scheduler()
-        scheduler.remove_plugin_job(pid, job_id)
-
-        with scheduler._lock:
-            try:
-                sid = f"{pid}_{service_id}"
-                scheduler._jobs[job_id] = {
-                    "func": guard_service["func"],
-                    "name": guard_service["name"],
-                    "pid": pid,
-                    "provider_name": "115网盘STRM助手",
-                    "kwargs": guard_service.get("func_kwargs") or {},
-                    "running": False,
-                }
-                scheduler._scheduler.add_job(
-                    scheduler.start,
-                    guard_service["trigger"],
-                    id=sid,
-                    name=guard_service["name"],
-                    **(guard_service.get("kwargs") or {}),
-                    kwargs={"job_id": job_id},
-                    replace_existing=True,
-                )
-                logger.debug("【监控生活事件】已重新注册115生活事件线程守护服务")
-            except Exception as e:
-                logger.error(f"【监控生活事件】注册守护服务失败: {str(e)}")
+        try:
+            update_plugin_job(configer.plugin_id)
+        except Exception as e:
+            logger.error(f"【监控生活事件】注册守护服务失败: {e}", exc_info=True)
 
     @_track_sync_operation
     def full_sync_strm_files(self) -> None:
@@ -699,12 +653,14 @@ class ServiceHelper:
                 text=text,
             )
 
+    @_track_sync_operation
     def hdhive_checkin_scheduler_tick(self) -> None:
         """
         HDHive 签到调度
         """
         hdhive_checkin_scheduler_tick()
 
+    @_track_sync_operation
     def p115_checkin_scheduler_tick(self) -> None:
         """
         115 签到调度
@@ -797,7 +753,8 @@ class ServiceHelper:
         if configer.get_config("clear_recyclebin_enabled"):
             client.clear_recyclebin()
 
-    def offline_status(self):
+    @_track_sync_operation
+    def offline_status(self) -> None:
         """
         监控 115 网盘离线下载进度
         """

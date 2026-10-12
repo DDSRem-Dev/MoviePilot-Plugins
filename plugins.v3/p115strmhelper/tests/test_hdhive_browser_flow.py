@@ -23,7 +23,7 @@ def _load_browser() -> Any:
         (f"{prefix}.helper.hdhive", root / "helper" / "hdhive"),
         (f"{prefix}.utils", root / "utils"),
         ("app", None),
-        ("app.core", None),
+        ("app.sdk", None),
     ):
         module = ModuleType(name)
         module.__path__ = [str(path)] if path else []
@@ -38,7 +38,7 @@ def _load_browser() -> Any:
                 )
             },
         ),
-        ("app.core.config", {"settings": MagicMock()}),
+        ("app.sdk.config", {"settings": MagicMock()}),
         ("orjson", {"loads": loads, "dumps": lambda value: dumps(value).encode()}),
     ):
         module = ModuleType(name)
