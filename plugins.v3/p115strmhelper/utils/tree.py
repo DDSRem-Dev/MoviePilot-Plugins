@@ -1,11 +1,12 @@
 __all__ = ["DirectoryTree"]
 
 from abc import ABC, abstractmethod
+from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Generator, List, Optional, Union
 
-from app.core.config import settings
-from app.helper.redis import RedisHelper
+from app.sdk.config import settings
+from app.adapters.cache.redis import RedisHelper
 
 import txt_tree_storage
 
@@ -166,8 +167,9 @@ class RedisStorage(DirectoryTreeStorage):
         self.redis_helper._connect()  # noqa
         self.client = self.redis_helper.client
 
-        self._set_key = f"dirtree:set:{tree_name}"
-        self._list_key = f"dirtree:list:{tree_name}"
+        namespace = sha256(f"{__package__}:{tree_name}".encode()).hexdigest()
+        self._set_key = f"dirtree:set:{namespace}"
+        self._list_key = f"dirtree:list:{namespace}"
 
     def add_paths(self, paths: Iterable[str], append: bool = False):
         """
@@ -289,12 +291,12 @@ class DirectoryTree:
         """
         初始化目录树实例
 
-        :param file_path (Path): 目录树对应的文件路径（其 stem 用于生成 Redis 键名）
+        :param file_path (Path): 目录树对应的文件路径，完整路径与实例模块共同确定 Redis 键名
         :param force_backend (str): 强制指定后端类型，"redis" 或 "txt"；None 时按 settings.CACHE_BACKEND_TYPE
         """
         backend = force_backend or settings.CACHE_BACKEND_TYPE
         if backend == "redis":
-            self._storage: DirectoryTreeStorage = RedisStorage(file_path.stem)
+            self._storage: DirectoryTreeStorage = RedisStorage(str(file_path.resolve()))
         else:
             self._storage: DirectoryTreeStorage = TxtFileStorage(file_path)
         self._file_path = file_path
@@ -407,6 +409,6 @@ class DirectoryTree:
             return
         self._storage.clear()
         if backend == "redis":
-            self._storage = RedisStorage(self._file_path.stem)
+            self._storage = RedisStorage(str(self._file_path.resolve()))
         else:
             self._storage = TxtFileStorage(self._file_path)

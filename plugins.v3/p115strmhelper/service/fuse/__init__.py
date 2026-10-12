@@ -1,6 +1,6 @@
 from subprocess import CalledProcessError, TimeoutExpired, run
 from platform import system
-from threading import Lock, Thread
+from threading import Lock, Thread, current_thread
 from typing import Optional
 from pathlib import Path
 
@@ -31,7 +31,7 @@ from ...core.config import configer
 from ...helper.fuse import P115FuseOperations
 from ...utils.sentry import sentry_manager
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 def _get_fuse_error_message(error_code: int) -> str:
@@ -107,14 +107,16 @@ class FuseManager:
     FUSE 文件系统管理器
     """
 
-    def __init__(self, client: Optional[P115Client] = None):
+    def __init__(self, client: Optional[P115Client] = None) -> None:
         self.client = client
         self.fuse_thread: Optional[Thread] = None
         self.fuse_lock = Lock()
         self.fuse_operations: Optional[P115FuseOperations] = None
         self.fuse_mountpoint: Optional[str] = None
 
-    def start_fuse(self, mountpoint: Optional[str] = None, readdir_ttl: float = 60):
+    def start_fuse(
+        self, mountpoint: Optional[str] = None, readdir_ttl: float = 60
+    ) -> bool:
         """
         启动 FUSE 文件系统
 
@@ -126,12 +128,16 @@ class FuseManager:
         with self.fuse_lock:
             return self._start_fuse_internal(mountpoint, readdir_ttl)
 
-    def stop_fuse(self):
+    def stop_fuse(self) -> bool:
         """
-        停止 FUSE 文件系统
+        停止 FUSE 文件系统并报告工作线程是否退出
+
+        :return bool: 工作线程已退出返回 True，超时保留原实例并返回 False
         """
+        if self.fuse_thread is current_thread():
+            return False
         with self.fuse_lock:
-            self._stop_fuse_internal()
+            return self._stop_fuse_internal()
 
     def _start_fuse_internal(
         self, mountpoint: Optional[str] = None, readdir_ttl: float = 60
@@ -150,7 +156,8 @@ class FuseManager:
 
         if self.fuse_thread and self.fuse_thread.is_alive():
             logger.info("【FUSE】检测到已有线程在运行，停止旧线程中...")
-            self._stop_fuse_internal()
+            if not self._stop_fuse_internal():
+                return False
 
         mountpoint_path = Path(mountpoint)
         if not mountpoint_path.exists():
@@ -225,7 +232,7 @@ class FuseManager:
             logger.error(f"【FUSE】启动失败: {e}", exc_info=True)
             return False
 
-    def _stop_fuse_internal(self):
+    def _stop_fuse_internal(self) -> bool:
         """
         停止 FUSE 文件系统线程
         """
@@ -233,7 +240,7 @@ class FuseManager:
             self.fuse_thread = None
             self.fuse_operations = None
             self.fuse_mountpoint = None
-            return
+            return True
 
         logger.info("【FUSE】停止 FUSE 文件系统")
 
@@ -251,15 +258,18 @@ class FuseManager:
                         f"【FUSE】懒卸载也失败: {self.fuse_mountpoint} - {e2}"
                     )
 
+        if self.fuse_thread is current_thread():
+            return False
         self.fuse_thread.join(timeout=10)
         if self.fuse_thread.is_alive():
-            logger.warning("【FUSE】线程未在预期时间内结束")
-        else:
-            logger.info("【FUSE】线程已正常退出")
+            logger.warning("【FUSE】线程尚未退出，保留挂载实例等待后续停止")
+            return False
+        logger.info("【FUSE】线程已正常退出")
 
         self.fuse_thread = None
         self.fuse_operations = None
         self.fuse_mountpoint = None
+        return True
 
     @staticmethod
     def _is_fuse_mount(mountpoint: str) -> bool:

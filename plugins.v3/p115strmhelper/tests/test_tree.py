@@ -104,8 +104,8 @@ class TestRedisStorageAddPaths(TestCase):
         storage = RedisStorage("test_tree")
         storage.add_paths(["/a/b/c.mkv"])
 
-        mock_pipe.expire.assert_any_call("dirtree:set:test_tree", 604800)
-        mock_pipe.expire.assert_any_call("dirtree:list:test_tree", 604800)
+        mock_pipe.expire.assert_any_call(storage._set_key, 604800)
+        mock_pipe.expire.assert_any_call(storage._list_key, 604800)
         mock_pipe.execute.assert_called_once()
 
     @patch("utils.tree.RedisHelper")

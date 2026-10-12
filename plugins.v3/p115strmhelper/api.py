@@ -1791,7 +1791,12 @@ class Api:
         FUSE 卸载
         """
         try:
-            servicer.stop_fuse()
+            if not servicer.stop_fuse():
+                return ApiResponse(
+                    code=-1,
+                    msg="FUSE 工作线程尚未退出，请稍后重试卸载",
+                    data=None,
+                )
             return ApiResponse(code=0, msg="FUSE 文件系统已卸载", data=None)
         except Exception as e:
             logger.error(f"【FUSE】卸载失败: {e}", exc_info=True)

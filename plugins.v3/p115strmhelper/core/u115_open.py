@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, Future, as_completed
+from collections import ChainMap
 from itertools import batched
 from os import PathLike
 from random import randint
@@ -20,7 +21,6 @@ from typing import (
     Iterable,
 )
 
-from httpx import Client, RequestError, HTTPStatusError
 from sqlalchemy.orm.exc import MultipleResultsFound
 from oss2 import StsAuth, Bucket, SizedFileAdapter, determine_part_size
 from oss2.models import PartInfo
@@ -34,13 +34,13 @@ from cryptography.hazmat.primitives import hashes
 from diskcache import Deque
 
 from app import schemas
-from app.log import logger
-from app.core.config import global_vars
-from app.helper.storage import StorageHelper
+from app.sdk.logging import logger
+from app.sdk.config import global_vars
+from app.modules.filemanager.storages.u115 import NoCheckInException, U115Pan
 from app.chain.storage import StorageChain
 from app.modules.filemanager.storages import transfer_process
-from app.schemas import NotificationType
-from app.utils.string import StringUtils
+from app.schemas import MessageType
+from app.sdk.utilities import StringUtils
 
 from ..core.config import configer
 from ..core.p115_client import create_client
@@ -54,29 +54,17 @@ from ..utils.path import PathUtils
 from ..utils.limiter import RateLimiter
 
 
-p115_open_lock = Lock()
-
-
 @sentry_manager.capture_all_class_exceptions
 class U115OpenHelper:
     """
     115 Open Api
     """
 
-    _auth_state = {}
-
-    base_url = "https://proapi.115.com"
-
     chunk_size = 10 * 1024 * 1024
 
-    retry_delay = 70
-
-    _get_download_url_limiter = RateLimiter(qps=1.0)
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.session = Client(follow_redirects=True, timeout=20.0)
-        self._init_session()
+        self._storage = U115Pan()
 
         self.fail_upload_count = 0
 
@@ -88,168 +76,57 @@ class U115OpenHelper:
             slow_timeout=configer.get_slow_timeout(),
         )
 
-    def _init_session(self):
-        """
-        初始化
-        """
-        self.session.headers.update(
-            {
-                "User-Agent": "W115Storage/2.0",
-                "Accept-Encoding": "gzip, deflate",
-                "Content-Type": "application/x-www-form-urlencoded",
-            }
-        )
-
-    def _check_session(self):
-        """
-        检查会话是否过期
-        """
-        if not self.access_token:
-            raise U115NoCheckInException(
-                "【P115Open】未获取到有效的 115 Open 访问令牌（未授权或已失效）。"
-                "请在 MoviePilot「设置 → 存储」中为 115 网盘完成授权"
-            )
-
     @property
     def access_token(self) -> Optional[str]:
         """
-        访问 token
-        """
-        with p115_open_lock:
-            try:
-                storagehelper = StorageHelper()
-                u115_info = storagehelper.get_storage(storage="u115")
-                if not u115_info:
-                    return None
-                tokens = u115_info.config
-                refresh_token = tokens.get("refresh_token")
-                if not refresh_token:
-                    return None
-                expires_in = tokens.get("expires_in", 0)
-                refresh_time = tokens.get("refresh_time", 0)
-                if expires_in and refresh_time + expires_in < int(time()):
-                    tokens = self.__refresh_access_token(refresh_token)
-                    if tokens:
-                        storagehelper.set_storage(
-                            storage="u115",
-                            conf={"refresh_time": int(time()), **tokens},
-                        )
-                    else:
-                        return None
-                access_token = tokens.get("access_token")
-                if access_token:
-                    self.session.headers.update(
-                        {"Authorization": f"Bearer {access_token}"}
-                    )
-                return access_token
-            except Exception as e:
-                logger.error(f"【P115Open】获取访问 Token 出现未知错误: {e}")
-                return None
+        通过宿主存储实例取得令牌，刷新和存储由宿主管理
 
-    def __refresh_access_token(self, refresh_token: str) -> Optional[dict]:
+        :return str: 当前访问令牌，未授权或读取失败时返回 None
         """
-        刷新 access_token
-
-        :param refresh_token: 刷新令牌
-
-        :return: 数据字典
-        """
-        resp = self.session.post(
-            "https://passportapi.115.com/open/refreshToken",
-            data={"refresh_token": refresh_token},
-        )
-        if resp is None:
-            logger.error(
-                f"【P115Open】刷新 access_token 失败：refresh_token={refresh_token}"
-            )
+        try:
+            return self._storage.access_token
+        except Exception:
+            logger.error("【P115Open】获取宿主访问令牌失败", exc_info=True)
             return None
-        result = resp.json()
-        if result.get("code") != 0:
-            logger.warn(
-                f"【P115Open】刷新 access_token 失败：{result.get('code')} - {result.get('message')}！"
-            )
-            return None
-        return result.get("data")
 
     def _request_api(
         self,
         method: str,
         endpoint: str,
         result_key: Optional[str] = None,
+        *,
+        accepted_codes: Tuple[int, ...] = (0,),
         **kwargs,
-    ) -> Optional[Union[dict, list]]:
+    ) -> Optional[Union[Dict, List]]:
         """
-        API 请求函数
+        复用宿主存储请求引擎的授权、限流、冷却和重试
+
+        :param method (str): HTTP 方法
+        :param endpoint (str): Open API 相对路径
+        :param result_key (str): 需要提取的响应字段
+        :param accepted_codes (Tuple): 当前调用方能处理的业务码
+        :param kwargs (Dict): 传递给宿主请求引擎的参数
+
+        :return Union: 宿主返回的数据，失败时返回 None
         """
-        # 检查会话
-        self._check_session()
-
-        # 错误日志标志
-        no_error_log = kwargs.pop("no_error_log", False)
-        # 重试次数
-        retry_times = kwargs.pop("retry_limit", 5)
-
-        try:
-            resp = self.session.request(method, f"{self.base_url}{endpoint}", **kwargs)
-        except RequestError as e:
-            logger.error(f"【P115Open】{method} 请求 {endpoint} 网络错误: {str(e)}")
-            return None
-
-        if resp is None:
-            logger.warn(f"【P115Open】{method} 请求 {endpoint} 失败！")
-            return None
-
-        kwargs["retry_limit"] = retry_times
-
-        # 处理速率限制
-        if resp.status_code == 429:
-            reset_time = 5 + int(resp.headers.get("X-RateLimit-Reset", 60))
-            logger.debug(
-                f"【P115Open】{method} 请求 {endpoint} 限流，等待{reset_time}秒后重试"
+        if "headers" in kwargs:
+            # 宿主重试可能刷新令牌，实际发送时再读取最新授权头
+            kwargs["headers"] = ChainMap(
+                dict(kwargs["headers"] or {}), self._storage._request_utils._headers
             )
-            sleep(reset_time)
-            return self._request_api(method, endpoint, result_key, **kwargs)
-
-        # 处理请求错误
         try:
-            resp.raise_for_status()
-        except HTTPStatusError as e:
-            if retry_times <= 0:
-                logger.error(
-                    f"【P115Open】{method} 请求 {endpoint} 错误 {e}，重试次数用尽！"
-                )
-                return None
-            kwargs["retry_limit"] = retry_times - 1
-            sleep_duration = 2 ** (5 - retry_times + 1)
-            logger.info(
-                f"【P115Open】{method} 请求 {endpoint} 错误 {e}，等待 {sleep_duration} 秒后重试..."
+            return self._storage._request_api(
+                method,
+                endpoint,
+                result_key,
+                accepted_codes=accepted_codes,
+                **kwargs,
             )
-            sleep(sleep_duration)
-            return self._request_api(method, endpoint, result_key, **kwargs)
-
-        # 返回数据
-        ret_data = resp.json()
-        if ret_data.get("code") != 0:
-            error_msg = ret_data.get("message")
-            if not no_error_log:
-                logger.warn(f"【P115Open】{method} 请求 {endpoint} 出错：{error_msg}")
-            if "已达到当前访问上限" in error_msg:
-                if retry_times <= 0:
-                    logger.error(
-                        f"【P115Open】{method} 请求 {endpoint} 达到访问上限，重试次数用尽！"
-                    )
-                    return None
-                kwargs["retry_limit"] = retry_times - 1
-                logger.info(
-                    f"【P115Open】{method} 请求 {endpoint} 达到访问上限，等待 {self.retry_delay} 秒后重试..."
-                )
-                sleep(self.retry_delay)
-                return self._request_api(method, endpoint, result_key, **kwargs)
-            return None
-
-        if result_key:
-            return ret_data.get(result_key)
-        return ret_data
+        except NoCheckInException as error:
+            raise U115NoCheckInException(
+                "【P115Open】未获取到有效的 115 Open 访问令牌（未授权或已失效）。"
+                "请在 MoviePilot「设置 → 存储」中为 115 网盘完成授权"
+            ) from error
 
     @staticmethod
     def _delay_get_item(path: Path) -> Optional[schemas.FileItem]:
@@ -277,7 +154,6 @@ class U115OpenHelper:
         :param pickcode: 提取码
         :param user_agent: 请求 UA 头
         """
-        self._get_download_url_limiter.acquire()
         download_info = self._request_api(
             "POST",
             "/open/ufile/downurl",
@@ -349,6 +225,7 @@ class U115OpenHelper:
         """
         文件上传
         """
+        notifier = upload_notifier.capture()
 
         def encode_callback(cb: str) -> str:
             """
@@ -394,7 +271,7 @@ class U115OpenHelper:
             """
             if configer.notify and configer.upload_module_notify:
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("upload_module_title"),
                     text=f"\n{i18n.translate('upload_wait_text', name=target_name)}\n",
                 )
@@ -423,7 +300,7 @@ class U115OpenHelper:
             if not configer.notify or not configer.upload_open_result_notify:
                 return
 
-            upload_notifier.add(
+            notifier.add(
                 success=success,
                 target_name=target_name,
                 file_size=file_size,
@@ -952,6 +829,7 @@ class U115OpenHelper:
             resp = self._request_api(
                 "POST",
                 "/open/folder/add",
+                accepted_codes=(0, 20004),
                 data={"pid": int(parent_item.fileid or "0"), "file_name": name},
             )
             if not resp:

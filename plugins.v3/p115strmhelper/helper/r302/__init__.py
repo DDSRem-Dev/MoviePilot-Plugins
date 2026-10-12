@@ -1,20 +1,25 @@
 from asyncio import (
+    AbstractEventLoop,
     create_task,
-    get_event_loop,
+    Event,
+    get_running_loop,
     Lock,
-    run as asyncio_run,
+    run_coroutine_threadsafe,
+    shield,
     sleep as asyncio_sleep,
     to_thread,
+    wrap_future,
 )
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager
 from errno import EIO, ENOENT
+from threading import Lock as ThreadLock
 from typing import AsyncIterator, Awaitable, Callable, cast, Dict, Optional, Tuple
 from urllib.error import HTTPError
 from urllib.parse import parse_qsl, unquote, urlsplit, urlencode
 
-from httpx import AsyncClient, Limits, Timeout
+from httpx import AsyncClient, Limits, Response, Timeout
 from orjson import loads
 from p115cipher import rsa_decrypt, rsa_encrypt
 from p115client import P115Client
@@ -22,7 +27,7 @@ from p115client import check_response as p115_check_response
 from p115client.exception import P115OSError
 from p115pickcode import to_id
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...core.cache import r302cacher
 from ...core.config import configer
@@ -42,13 +47,20 @@ class Redirect:
     302 跳转模块
     """
 
-    _http_client: Optional[AsyncClient] = None
-
-    def __init__(self, client: P115Client, pid: Optional[int] = None):
+    def __init__(self, client: P115Client, pid: Optional[int] = None) -> None:
         self.client = client
         self.u115openhelper = U115OpenHelper()
         self._downurl_locks: Dict[Tuple[str, str], Tuple[Lock, int]] = {}
         self._downurl_locks_guard = Lock()
+        self._http_client: Optional[AsyncClient] = None
+        self._http_loop: Optional[AbstractEventLoop] = None
+        self._http_lock = ThreadLock()
+        self._http_closing = False
+        self._http_close_future: Optional[Future] = None
+        self._http_pending = 0
+        self._http_drained = Event()
+        self._http_drained.set()
+        self._http_cookies = dict(configer.cookies_dict) if configer.cookies else None
 
         self.pid = pid
 
@@ -88,54 +100,120 @@ class Redirect:
                 else:
                     self._downurl_locks[key] = (current_lock, users - 1)
 
-    @classmethod
-    def http_client(cls) -> AsyncClient:
+    def http_client(self) -> AsyncClient:
         """
-        获取 HTTP 客户端，如果未初始化则自动初始化
-        """
-        if cls._http_client is None:
-            cookies = configer.cookies_dict if configer.cookies else None
-            cls._http_client = AsyncClient(
-                follow_redirects=True,
-                timeout=Timeout(10.0, connect=5.0),
-                limits=Limits(
-                    max_connections=200,
-                    max_keepalive_connections=100,
-                ),
-                cookies=cookies,
-            )
-        return cls._http_client
+        获取当前实例及当前事件循环专属的 HTTP 连接池
 
-    @classmethod
-    async def close_http_client(cls):
-        """
-        关闭 HTTP 客户端连接池
-        """
-        if cls._http_client is not None:
-            await cls._http_client.aclose()
-            cls._http_client = None
+        :return AsyncClient: 当前实例的 HTTP 客户端
 
-    @classmethod
-    def close_http_client_sync(cls):
+        :raises RuntimeError: 连接池已开始关闭或调用来自其他事件循环
         """
-        同步关闭 HTTP 客户端连接池
-        """
-        if cls._http_client is not None:
+        loop = get_running_loop()
+        with self._http_lock:
+            if self._http_closing:
+                raise RuntimeError("302 HTTP 连接池正在关闭，不能接受新请求")
+            if self._http_loop is not None and self._http_loop is not loop:
+                raise RuntimeError("302 HTTP 连接池不能跨事件循环使用")
+            if self._http_client is None:
+                self._http_client = AsyncClient(
+                    follow_redirects=True,
+                    timeout=Timeout(10.0, connect=5.0),
+                    limits=Limits(
+                        max_connections=200,
+                        max_keepalive_connections=100,
+                    ),
+                    cookies=self._http_cookies,
+                )
+            self._http_loop = loop
+            return self._http_client
+
+    async def _request_http(self, method: str, url: str, **kwargs) -> Response:
+        client = self.http_client()
+        with self._http_lock:
+            if self._http_closing:
+                raise RuntimeError("302 HTTP 连接池正在关闭，不能接受新请求")
+            self._http_pending += 1
+            self._http_drained.clear()
+        try:
+            return await client.request(method, url, **kwargs)
+        finally:
+            with self._http_lock:
+                self._http_pending -= 1
+                if self._http_pending == 0:
+                    self._http_drained.set()
+
+    async def _close_http_pool(self) -> bool:
+        try:
+            await self._http_drained.wait()
+            await self._http_client.aclose()
+        except Exception:
+            logger.error("【302跳转服务】关闭 HTTP 连接池失败", exc_info=True)
+            raise
+        with self._http_lock:
+            self._http_client = None
+        return True
+
+    def _request_http_close(self) -> Optional[Future]:
+        with self._http_lock:
+            self._http_closing = True
+            if self._http_close_future is not None:
+                return self._http_close_future
+            if self._http_client is None:
+                self._http_close_future = Future()
+                self._http_close_future.set_result(True)
+                return self._http_close_future
+            if self._http_loop is None or not self._http_loop.is_running():
+                logger.warning("【302跳转服务】HTTP 所属事件循环未运行，无法完成关闭")
+                return None
+            close = self._close_http_pool()
             try:
-                loop = get_event_loop()
-                if loop.is_running():
-                    create_task(cls.close_http_client())
-                else:
-                    loop.run_until_complete(cls.close_http_client())
+                self._http_close_future = run_coroutine_threadsafe(
+                    close, self._http_loop
+                )
             except RuntimeError:
-                try:
-                    asyncio_run(cls.close_http_client())
-                except RuntimeError:
-                    with ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            lambda: asyncio_run(cls.close_http_client())
-                        )
-                        future.result(timeout=5)
+                close.close()
+                logger.error(
+                    "【302跳转服务】无法提交 HTTP 连接池关闭任务", exc_info=True
+                )
+                return None
+            return self._http_close_future
+
+    async def close_http_client(self) -> bool:
+        """
+        等待在途 HTTP 请求结束并在所属事件循环关闭连接池
+
+        :return bool: 关闭完成返回 True，所属循环不可用时返回 False
+        """
+        future = self._request_http_close()
+        if future is None:
+            return False
+        return await shield(wrap_future(future))
+
+    def close_http_client_sync(self) -> bool:
+        """
+        请求关闭连接池并向宿主报告可观察的关闭结果
+
+        事件循环线程内不阻塞等待，关闭未完成时返回 False 供后续重试
+        普通线程最多等待五秒，不切换连接池所属循环
+
+        :return bool: 关闭完成返回 True，未完成或失败返回 False
+        """
+        future = self._request_http_close()
+        if future is None:
+            return False
+        if not future.done():
+            try:
+                get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                return False
+        try:
+            return future.result(timeout=5) is True
+        except FutureTimeoutError:
+            return False
+        except Exception:
+            return False
 
     @staticmethod
     def get_first(m: Mapping, *keys, default=None):
@@ -302,14 +380,16 @@ class Redirect:
         suffix = name.rpartition(".")[-1]
         if suffix.isalnum():
             payload["suffix"] = suffix
-        resp = await self.http_client().get(
+        resp = await self._request_http(
+            "GET",
             f"{api}?{urlencode(payload)}",
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))
         if self.get_first(json, "errno", "errNo") == 20021:
             payload.pop("suffix")
-            resp = await self.http_client().get(
+            resp = await self._request_http(
+                "GET",
                 f"{api}?{urlencode(payload)}",
             )
             check_response(resp)
@@ -382,7 +462,8 @@ class Redirect:
             is_copy = post_pickcode != pickcode
             try:
                 for retry_index in range(len(_COPY_DOWNLOAD_RETRY_DELAYS) + 1):
-                    resp = await self.http_client().post(
+                    resp = await self._request_http(
+                        "POST",
                         "http://proapi.115.com/android/2.0/ufile/download",
                         data={
                             "data": rsa_encrypt(

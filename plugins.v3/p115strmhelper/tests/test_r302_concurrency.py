@@ -72,7 +72,7 @@ class _CookieHttpClient:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def post(self, *args: Any, **kwargs: Any) -> Any:
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
         self.calls += 1
         await asyncio.sleep(0.03)
         return SimpleNamespace(content=b'{"state":true,"data":"encrypted"}')
@@ -138,9 +138,9 @@ def _load_r302_module() -> Any:
     ):
         install(package_name, _package(package_name))
 
-    log_module = ModuleType("app.log")
+    log_module = ModuleType("app.sdk.logging")
     log_module.logger = MagicMock()
-    install("app.log", log_module)
+    install("app.sdk.logging", log_module)
 
     cipher_module = ModuleType("p115cipher")
     cipher_module.rsa_encrypt = lambda value: b"encrypted"

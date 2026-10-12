@@ -813,12 +813,15 @@ class ServiceHelper:
             return False
         return self.fuse_manager.start_fuse(mountpoint, readdir_ttl)
 
-    def stop_fuse(self):
+    def stop_fuse(self) -> bool:
         """
         停止 FUSE 文件系统
+
+        :return bool: FUSE 工作线程已退出或尚未初始化时返回 True
         """
         if self.fuse_manager:
-            self.fuse_manager.stop_fuse()
+            return self.fuse_manager.stop_fuse()
+        return True
 
     @contextmanager
     def sync_operation(self) -> Iterator[None]:

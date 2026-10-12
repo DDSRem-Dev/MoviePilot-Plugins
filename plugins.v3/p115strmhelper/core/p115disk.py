@@ -11,13 +11,13 @@ from oss2.exceptions import ServerError
 from oss2.models import PartInfo
 from oss2.utils import b64encode_as_string, SizedFileAdapter
 from p115center import P115Center, UploadInfo
-from p115client import P115Client, check_response
+from p115client import check_response
 from p115client.const import _CACHE_DIR
 
-from app.core.config import global_vars
-from app.log import logger
+from app.sdk.config import global_vars
+from app.sdk.logging import logger
 from app.modules.filemanager.storages import transfer_process
-from app.schemas import FileItem, NotificationType
+from app.schemas import FileItem, MessageType
 
 from ..core.config import configer
 from ..core.i18n import i18n
@@ -29,18 +29,13 @@ class P115DiskCore:
     模拟 P115Disk 插件接口
     """
 
-    def __init__(self, client: P115Client):
-        try:
-            from app.plugins.p115disk.p115_api import P115Api  # noqa: F401
+    def __init__(self, p115_api: Any) -> None:
+        """
+        复用本次存储操作所属的 API、缓存、锁与限流器
 
-            P115_API_AVAILABLE = True
-        except (ImportError, ModuleNotFoundError):
-            P115_API_AVAILABLE = False
-            P115Api = Any
-
-        if P115_API_AVAILABLE:
-            self._p115_api = P115Api(client=client, disk_name="115网盘Plus")
-
+        :param p115_api (Any): 补丁收到的实际 P115Api 实例
+        """
+        self._p115_api = p115_api
         self.p115_center = P115Center(configer.get_config("machine_id"))
 
     def upload(
@@ -58,6 +53,7 @@ class P115DiskCore:
 
         :return: 上传成功返回文件项，失败返回None
         """
+        notifier = upload_notifier.capture()
 
         def read_range_hash(range_str: str) -> str:
             """
@@ -118,7 +114,7 @@ class P115DiskCore:
             """
             if configer.notify and configer.upload_module_notify:
                 post_message(
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=i18n.translate("upload_module_title"),
                     text=f"\n{i18n.translate('upload_wait_text', name=target_name)}\n",
                 )
@@ -147,7 +143,7 @@ class P115DiskCore:
             if not configer.notify or not configer.upload_open_result_notify:
                 return
 
-            upload_notifier.add(
+            notifier.add(
                 success=success,
                 target_name=target_name,
                 file_size=file_size,
@@ -171,7 +167,11 @@ class P115DiskCore:
 
         # 计算文件特征值
         file_size = local_path.stat().st_size
-        file_sha1 = self._p115_api._calc_sha1(local_path)
+        try:
+            file_sha1 = self._p115_api._calc_sha1(local_path)
+        except InterruptedError:
+            logger.info(f"【P115Disk】{local_path} 上传已取消！")
+            return None
 
         # 清理缓存
         cache_id = self._p115_api._id_cache.get_id_by_dir(target_path.as_posix())
