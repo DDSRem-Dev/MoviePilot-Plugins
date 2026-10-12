@@ -132,6 +132,7 @@
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "release": true,
+        "v3": false,
         "system_version": ">=2.13.14",
         "level": 1,
         "history": {

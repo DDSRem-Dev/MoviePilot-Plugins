@@ -1,0 +1,158 @@
+name: Test p115strmhelper V3 compatibility
+
+on:
+  push:
+    paths:
+      - 'plugins.v3/p115strmhelper/**'
+      - '.github/workflows/test-p115strmhelper-v3.yml'
+  pull_request:
+    paths:
+      - 'plugins.v3/p115strmhelper/**'
+      - '.github/workflows/test-p115strmhelper-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: V3 compatibility (${{ matrix.os }}, Python 3.14)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      MOVIEPILOT_SOURCE: ${{ github.workspace }}/MoviePilot
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
+      VENV_PYTHON: ${{ github.workspace }}/.venv/${{ matrix.os == 'windows-latest' && 'Scripts/python.exe' || 'bin/python' }}
+      PYTHONUTF8: '1'
+      P115_TEST_POSTGRES_URL: postgresql+psycopg2://p115_test:p115_test@127.0.0.1:5432/p115_test
+
+    steps:
+      - name: Checkout plugin code
+        uses: actions/checkout@v7
+
+      - name: Checkout MoviePilot V3 branch
+        uses: actions/checkout@v7
+        with:
+          repository: jxxghp/MoviePilot
+          ref: v3
+          path: MoviePilot
+
+      - name: Record tested MoviePilot revision
+        run: git -C MoviePilot rev-parse HEAD
+
+      - name: Set up PostgreSQL
+        uses: ikalnytskyi/action-setup-postgres@v8
+        with:
+          username: p115_test
+          password: p115_test
+          database: p115_test
+          postgres-version: '17'
+
+      - name: Set up uv and standard Python
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: '0.13.0'
+          python-version: '3.14'
+
+      - name: Install locked standard host runtime
+        run: |
+          uv sync --project MoviePilot --locked --no-default-groups --group runtime-standard --no-install-project
+          uv pip freeze --python "$VENV_PYTHON" > host-constraints.txt
+
+      - name: Install plugin and test dependencies without upgrading host
+        run: |
+          uv pip install --python "$VENV_PYTHON" --constraint host-constraints.txt --find-links plugins.v3/p115strmhelper/wheels -r plugins.v3/p115strmhelper/pyproject.toml pytest fakeredis
+
+      - name: Check dependencies with the host CRC replacement
+        run: |
+          "$VENV_PYTHON" - <<'PYTHON'
+          import subprocess
+          import sys
+          from importlib.metadata import version
+
+          import crcmod
+
+          result = subprocess.run(
+              ['uv', 'pip', 'check', '--python', sys.executable],
+              capture_output=True, text=True,
+          )
+          output = result.stdout + result.stderr
+          print(output)
+          expected = "The package `oss2` requires `crcmod>=1.7`, but it's not installed"
+          issues = [line for line in output.splitlines() if line.startswith('The package ')]
+          if result.returncode and (issues != [expected] or 'Found 1 incompatibility' not in output):
+              raise SystemExit(result.returncode)
+          print('Host CRC provider:', version('crcmod-plus'), crcmod.__file__)
+          PYTHON
+
+      - name: Run V3 contracts with SQLite and PostgreSQL
+        run: |
+          "$VENV_PYTHON" - <<'PY'
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover(
+              'plugins.v3/p115strmhelper/tests', pattern='test_v3_*.py'
+          )
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          unexpected_skips = [
+              (str(case), reason) for case, reason in result.skipped
+              if reason != '同路径保护仅适用于 SQLite 目标'
+          ]
+          if unexpected_skips:
+              print('Unexpected skipped contracts:', unexpected_skips)
+          if not result.wasSuccessful() or not result.testsRun or unexpected_skips:
+              raise SystemExit(1)
+          PY
+
+      - name: Verify real host loading and clone isolation
+        run: >-
+          "$VENV_PYTHON" plugins.v3/p115strmhelper/tests/integration/test_host_loading.py -v
+
+      - name: Run original increment regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_increment_*.py' -v
+
+      - name: Run original transfer classification in an isolated process
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_transfer_classify.py' -v
+
+      - name: Run original Cookie client timeout regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_p115_client_timeout.py' -v
+
+      - name: Run original redirect concurrency regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_r302_concurrency.py' -v
+
+      - name: Run original local path cleanup regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_path_cleanup.py' -v
+
+      - name: Run original HDHive regressions with page mocks
+        env:
+          PYTHONPATH: plugins.v3/p115strmhelper
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_hdhive_*.py' -v
+
+      - name: Run original share audit queue regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_share_audit_download_queue.py' -v
+
+      - name: Verify bundled native imports
+        run: >-
+          "$VENV_PYTHON" -c 'import full_strm_sync, share_strm_scan, txt_tree_storage, ahocorasick'
+
+      - name: Run native tree contracts
+        working-directory: plugins.v3/p115strmhelper/rust_utils/txt_tree_storage
+        run: '"$VENV_PYTHON" -m pytest tests/test_parity.py -v'
+
+      - name: Run native share scan contracts
+        working-directory: plugins.v3/p115strmhelper/rust_utils/share_strm_scan
+        run: '"$VENV_PYTHON" -m unittest discover -s tests -v'

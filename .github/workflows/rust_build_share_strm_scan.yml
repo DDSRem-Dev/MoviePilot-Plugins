@@ -2,6 +2,15 @@ name: Rust Build share_strm_scan
 
 on:
   workflow_dispatch:
+    inputs:
+      source_directory:
+        description: '插件版本源码目录'
+        required: true
+        type: choice
+        options:
+          - plugins.v2
+          - plugins.v3
+        default: 'plugins.v2'
 
 jobs:
   extension_tests:
@@ -25,11 +34,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Build and install share_strm_scan
-        working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/
+        working-directory: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/
         run: pip install .
 
       - name: Run tests
-        working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/
+        working-directory: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/
         run: python -m unittest discover -s tests -v
 
   build_wheels:
@@ -94,7 +103,7 @@ jobs:
           command: build
           args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
-          working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/
+          working-directory: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/
 
       - name: Build x86_64 musl wheels
         if: matrix.os == 'ubuntu-latest' && !matrix.target
@@ -104,7 +113,7 @@ jobs:
           command: build
           args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
-          working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/
+          working-directory: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/
 
       - name: Build aarch64 musl wheels
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64'
@@ -114,13 +123,13 @@ jobs:
           command: build
           args: --release --out dist -i python${{ matrix.python-version }}
           manylinux: auto
-          working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/
+          working-directory: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: wheels-share-strm-scan-${{ matrix.python-version }}-${{ matrix.os }}-${{ matrix.target }}
-          path: plugins.v2/p115strmhelper/rust_utils/share_strm_scan/dist
+          path: ${{ inputs.source_directory }}/p115strmhelper/rust_utils/share_strm_scan/dist
 
   commit_wheels:
     name: Commit Wheels to Repository
@@ -133,20 +142,20 @@ jobs:
 
       - name: Remove old files
         run: |
-          rm -rf plugins.v2/p115strmhelper/wheels/share_strm_scan*
+          rm -rf ${{ inputs.source_directory }}/p115strmhelper/wheels/share_strm_scan*
 
       - name: Download all wheels
         uses: actions/download-artifact@v8
         with:
           pattern: wheels-share-strm-scan-*
           merge-multiple: true
-          path: plugins.v2/p115strmhelper/wheels/
+          path: ${{ inputs.source_directory }}/p115strmhelper/wheels/
 
       - name: Commit File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins.v2/p115strmhelper/wheels/
+          git add ${{ inputs.source_directory }}/p115strmhelper/wheels/
           if git diff --staged --quiet; then
             echo "没有新的 wheel 文件需要提交。"
           else
