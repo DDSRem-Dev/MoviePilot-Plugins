@@ -22,6 +22,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """
+    创建开放接口文件与目录缓存表
+    """
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
@@ -60,6 +63,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """
+    保留原开放接口缓存表的降级流程
+    """
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 

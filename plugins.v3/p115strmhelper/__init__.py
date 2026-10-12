@@ -233,6 +233,13 @@ class P115StrmHelper(_PluginBase):
             Path(configer.PLUGIN_CONFIG_PATH).mkdir(parents=True, exist_ok=True)
         return ensure_database()
 
+    def get_database_migrations(self) -> Path:
+        """
+        声明随插件版本发布的数据库迁移目录
+
+        :return Path: Alembic 迁移目录的绝对路径
+        """
+        return Path(__file__).resolve().parent / "database"
 
     def get_state(self) -> bool:
         """
@@ -1204,54 +1211,55 @@ class P115StrmHelper(_PluginBase):
         event_data = event.event_data
         if not event_data or event_data.get("action") != "p115_search":
             return
-        userid = self._get_event_userid(event_data)
+        with servicer.sync_operation():
+            userid = self._get_event_userid(event_data)
 
-        has_tg = bool(configer.tg_search_channels)
-        has_hdhive = is_hdhive_search_ready()
-        if not has_tg and not has_hdhive:
-            post_message(
-                channel=event.event_data.get("channel"),
-                source=event.event_data.get("source"),
-                title=i18n.translate("p115_search_config_error"),
-                userid=userid,
-            )
-            return
-
-        args = event_data.get("arg_str")
-        if not args:
-            logger.error(f"【搜索】缺少参数：{event_data}")
-            post_message(
-                channel=event.event_data.get("channel"),
-                source=event.event_data.get("source"),
-                title=i18n.translate("p115_search_parameter_error"),
-                userid=userid,
-            )
-            return
-
-        try:
-            session = session_manager.get_or_create(
-                event_data, plugin_id=self.__class__.__name__
-            )
-
-            search_keyword = args.strip()
-
-            action = Action(command="search", view="search_list", value=search_keyword)
-
-            immediate_messages = self.action_handler.process(session, action)
-            # 报错，截断后续运行
-            if immediate_messages:
-                for msg in immediate_messages:
-                    self.__send_message(session, text=msg.get("text"), title="错误")
+            has_tg = bool(configer.tg_search_channels)
+            has_hdhive = is_hdhive_search_ready()
+            if not has_tg and not has_hdhive:
+                post_message(
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    title=i18n.translate("p115_search_config_error"),
+                    userid=userid,
+                )
                 return
 
-            # 设置页面
-            if not action.view:
-                logger.error("处理 search 命令失败: 视图为空")
+            args = event_data.get("arg_str")
+            if not args:
+                logger.error(f"【搜索】缺少参数：{event_data}")
+                post_message(
+                    channel=event.event_data.get("channel"),
+                    source=event.event_data.get("source"),
+                    title=i18n.translate("p115_search_parameter_error"),
+                    userid=userid,
+                )
                 return
-            session.go_to(action.view)
-            self._render_and_send(session)
-        except Exception as e:
-            logger.error(f"处理 search 命令失败: {e}", exc_info=True)
+
+            try:
+                session = session_manager.get_or_create(
+                    event_data, plugin_id=self.__class__.__name__
+                )
+
+                search_keyword = args.strip()
+
+                action = Action(command="search", view="search_list", value=search_keyword)
+
+                immediate_messages = self.action_handler.process(session, action)
+                # 报错，截断后续运行
+                if immediate_messages:
+                    for msg in immediate_messages:
+                        self.__send_message(session, text=msg.get("text"), title="错误")
+                    return
+
+                # 设置页面
+                if not action.view:
+                    logger.error("处理 search 命令失败: 视图为空")
+                    return
+                session.go_to(action.view)
+                self._render_and_send(session)
+            except Exception as e:
+                logger.error(f"处理 search 命令失败: {e}", exc_info=True)
 
     @eventmanager.register(EventType.PluginAction)
     def hdhive_checkin_manual(self, event: Event):

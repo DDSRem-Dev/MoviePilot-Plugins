@@ -1,7 +1,6 @@
-from typing import Dict, List, Set
+from typing import Optional, Dict, List, Set
 
 from sqlalchemy import (
-    Column,
     Integer,
     String,
     Text,
@@ -14,10 +13,10 @@ from sqlalchemy import (
     update,
     func,
 )
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, Mapped, mapped_column
 
-from ...db_manager import db_update, db_query, P115StrmHelperBase
+from ...db_manager import db_update, db_query, P115StrmHelperBase, path_startswith
+from ...db_manager.replace import replace_rows
 
 
 class File(P115StrmHelperBase):
@@ -27,20 +26,26 @@ class File(P115StrmHelperBase):
 
     __tablename__ = "files"
 
-    id = Column(Integer, primary_key=True)
-    parent_id = Column(Integer, nullable=False)
-    name = Column(String(255), default="")
-    sha1 = Column(String(40), default="")
-    size = Column(BigInteger, default=0)
-    pickcode = Column(String(50), default="")
-    ctime = Column(BigInteger, default=0)
-    mtime = Column(BigInteger, default=0)
-    path = Column(Text, unique=True)
-    extra = Column(Text)
+    id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), primary_key=True
+    )
+    parent_id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), nullable=False
+    )
+    name: Mapped[Optional[str]] = mapped_column(String(255), default="", nullable=True)
+    sha1: Mapped[Optional[str]] = mapped_column(String(40), default="", nullable=True)
+    size: Mapped[Optional[int]] = mapped_column(BigInteger, default=0, nullable=True)
+    pickcode: Mapped[Optional[str]] = mapped_column(
+        String(50), default="", nullable=True
+    )
+    ctime: Mapped[Optional[int]] = mapped_column(BigInteger, default=0, nullable=True)
+    mtime: Mapped[Optional[int]] = mapped_column(BigInteger, default=0, nullable=True)
+    path: Mapped[Optional[str]] = mapped_column(Text, unique=True, nullable=True)
+    extra: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     @staticmethod
     @db_query
-    def get_by_path(db: Session, file_path: str):
+    def get_by_path(db: Session, file_path: str) -> Optional["File"]:
         """
         通过路径获取（当路径不唯一报错 MultipleResultsFound）
 
@@ -53,7 +58,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_query
-    def get_by_id(db: Session, file_id: int):
+    def get_by_id(db: Session, file_id: int) -> Optional["File"]:
         """
         通过ID获取
 
@@ -64,7 +69,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_query
-    def get_by_parent_id(db: Session, parent_id: int):
+    def get_by_parent_id(db: Session, parent_id: int) -> List["File"]:
         """
         通过parent_id获取
 
@@ -77,7 +82,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def delete_by_path(db: Session, file_path: str):
+    def delete_by_path(db: Session, file_path: str) -> bool:
         """
         通过路径删除（删除所有匹配值）
 
@@ -89,7 +94,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def delete_by_id(db: Session, file_id: int):
+    def delete_by_id(db: Session, file_id: int) -> bool:
         """
         通过ID删除
 
@@ -101,32 +106,31 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def upsert_batch_by_list(db: Session, batch: List[Dict]):
+    def upsert_batch_by_list(db: Session, batch: List[Dict]) -> bool:
         """
         通过列表批量写入或更新数据
 
         :param db (Session): 数据库会话
         :param batch (List): 待写入的数据列表
         """
-        stmt = sqlite_insert(File).prefix_with("OR REPLACE")
-        db.execute(stmt, batch)
+        replace_rows(db, File, batch)
         return True
 
     @staticmethod
     @db_update
-    def remove_by_path_batch(db: Session, path: str):
+    def remove_by_path_batch(db: Session, path: str) -> bool:
         """
         通过路径批量删除
 
         :param db (Session): 数据库会话
         :param path (str): 路径前缀
         """
-        db.execute(delete(File).where(File.path.startswith(path)))
+        db.execute(delete(File).where(path_startswith(db, File.path, path)))
         return True
 
     @staticmethod
     @db_update
-    def update_path(db: Session, file_id: int, new_path: str):
+    def update_path(db: Session, file_id: int, new_path: str) -> None:
         """
         更新指定ID的路径
 
@@ -140,7 +144,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def update_name(db: Session, file_id: int, new_name: str):
+    def update_name(db: Session, file_id: int, new_name: str) -> None:
         """
         更新指定ID的名称
 
@@ -152,7 +156,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def update_path_prefix(db: Session, old_prefix: str, new_prefix: str):
+    def update_path_prefix(db: Session, old_prefix: str, new_prefix: str) -> bool:
         """
         批量更新以 old_prefix 开头的路径
 
@@ -170,7 +174,7 @@ class File(P115StrmHelperBase):
             .where(
                 or_(
                     File.path == old_prefix,
-                    File.path.startswith(f"{old_prefix}/"),
+                    path_startswith(db, File.path, f"{old_prefix}/"),
                 )
             )
             .values(
@@ -192,7 +196,9 @@ class File(P115StrmHelperBase):
         :param ids (Set): 需要保留的 ID 集合
         """
         all_ids = set(
-            db.execute(select(File.id).where(File.path.startswith(path_prefix)))
+            db.execute(
+                select(File.id).where(path_startswith(db, File.path, path_prefix))
+            )
             .scalars()
             .all()
         )
@@ -208,7 +214,7 @@ class File(P115StrmHelperBase):
 
     @staticmethod
     @db_query
-    def get_any_pickcode(db: Session):
+    def get_any_pickcode(db: Session) -> Optional[str]:
         """
         获取任意一条 pickcode 不为空的记录的 pickcode
 

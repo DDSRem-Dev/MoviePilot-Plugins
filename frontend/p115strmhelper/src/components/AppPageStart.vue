@@ -191,6 +191,7 @@
                 <span><span class="text-medium-emphasis">接收码：</span>{{ item.receive_code || '—' }}</span>
               </div>
               <div v-if="hasAnyExternalId(item)" class="missing-mobile-card__ids">
+                <span v-if="hasNativeMediaId(item)">{{ nativeMediaIdLabel(item) }}</span>
                 <span v-if="item.tmdbid != null && item.tmdbid !== ''">TMDB: {{ item.tmdbid }}</span>
                 <span v-if="item.tvdbid != null && item.tvdbid !== ''">TVDB: {{ item.tvdbid }}</span>
                 <span v-if="item.imdbid != null && item.imdbid !== ''">IMDB: {{ item.imdbid }}</span>
@@ -238,6 +239,7 @@
           </template>
           <template #item.external_ids="{ item }">
             <div class="text-caption missing-id-stack">
+              <div v-if="hasNativeMediaId(item)">{{ nativeMediaIdLabel(item) }}</div>
               <div v-if="item.tmdbid != null && item.tmdbid !== ''">TMDB: {{ item.tmdbid }}</div>
               <div v-if="item.tvdbid != null && item.tvdbid !== ''">TVDB: {{ item.tvdbid }}</div>
               <div v-if="item.imdbid != null && item.imdbid !== ''">IMDB: {{ item.imdbid }}</div>
@@ -553,7 +555,19 @@ const formatTs = (t) => {
   return Number.isNaN(d.getTime()) ? String(t) : d.toLocaleString();
 };
 
+const hasNativeMediaId = (item) =>
+  Boolean(item.media_source && String(item.media_id ?? '').trim() && String(item.media_id).trim() !== '0');
+
+const nativeMediaIdLabel = (item) => {
+  const labels = {
+    themoviedb: 'TMDB', douban: '豆瓣', tvdb: 'TVDB', imdb: 'IMDB',
+    bangumi: 'Bangumi', anilist: 'AniList', musicbrainz: 'MusicBrainz',
+  };
+  return `${labels[item.media_source] || item.media_source}: ${item.media_id}`;
+};
+
 const hasAnyExternalId = (item) =>
+  hasNativeMediaId(item) ||
   (item.tmdbid != null && item.tmdbid !== '') ||
   (item.tvdbid != null && item.tvdbid !== '') ||
   (item.imdbid != null && item.imdbid !== '') ||

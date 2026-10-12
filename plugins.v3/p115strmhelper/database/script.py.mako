@@ -17,7 +17,7 @@ import sqlalchemy as sa
 % endif
 ${imports if imports else ""}
 
-# revision identifiers, used by Alembic.
+# revision identifiers, used by Alembic
 db_version = '${config.attributes.get("version", "")}'
 revision = ${repr(up_revision)}
 down_revision = ${repr(down_revision)}
@@ -26,8 +26,14 @@ depends_on = ${repr(depends_on)}
 
 
 def upgrade() -> None:
+    """
+    升级数据库结构
+    """
     ${upgrades if upgrades else "pass"}
 
 
 def downgrade() -> None:
+    """
+    回滚数据库结构
+    """
     ${downgrades if downgrades else "pass"}

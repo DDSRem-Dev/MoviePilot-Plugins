@@ -22,7 +22,7 @@ class OpenFileOper(DbOper):
             return OpenFile.get_all_id(self._db)
         return OpenFolder.get_all_id(self._db)
 
-    def upsert_batch(self, batch: List[Dict], type: Literal["file", "folder"] = "file"):
+    def upsert_batch(self, batch: List[Dict], type: Literal["file", "folder"] = "file") -> None:
         """
         批量写入
 

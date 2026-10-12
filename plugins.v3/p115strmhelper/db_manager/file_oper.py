@@ -80,7 +80,7 @@ class FileDbHelper(DbOper):
         return results
 
     @staticmethod
-    def process_life_file_item(event, file_path: str) -> List[Dict]:
+    def process_life_file_item(event: Dict, file_path: str) -> List[Dict]:
         """
         处理115生活事件文件 event
 
@@ -108,7 +108,7 @@ class FileDbHelper(DbOper):
         ]
 
     @staticmethod
-    def process_life_dir_item(event, file_path: str) -> List[Dict]:
+    def process_life_dir_item(event: Dict, file_path: str) -> List[Dict]:
         """
         处理115生活事件文件夹 event
 
@@ -130,7 +130,7 @@ class FileDbHelper(DbOper):
         ]
 
     @staticmethod
-    def process_fs_files_item(item) -> List[Dict]:
+    def process_fs_files_item(item: Dict) -> List[Dict]:
         """
         处理115原始返回数据
 
@@ -220,7 +220,7 @@ class FileDbHelper(DbOper):
                 }
             ]
 
-    def upsert_batch(self, batch: List[Dict]):
+    def upsert_batch(self, batch: List[Dict]) -> bool:
         """
         批量写入或更新数据
 
@@ -250,7 +250,7 @@ class FileDbHelper(DbOper):
 
         return True
 
-    def upsert_batch_by_list(self, list_type: str, batch: List[Dict]):
+    def upsert_batch_by_list(self, list_type: str, batch: List[Dict]) -> bool:
         """
         通过列表批量写入或更新数据
 
@@ -344,7 +344,7 @@ class FileDbHelper(DbOper):
             },
         }
 
-    def remove_by_path_batch(self, path: str, only_file: bool = False):
+    def remove_by_path_batch(self, path: str, only_file: bool = False) -> bool:
         """
         通过路径批量删除
 
@@ -358,7 +358,7 @@ class FileDbHelper(DbOper):
             Folder.remove_by_path_batch(self._db, path)
         return True
 
-    def remove_by_id_batch(self, id: int, only_file: bool = False):
+    def remove_by_id_batch(self, id: int, only_file: bool = False) -> bool:
         """
         通过文件夹 ID 批量删除
 
@@ -376,7 +376,7 @@ class FileDbHelper(DbOper):
             Folder.remove_by_path_batch(self._db, path)
         return True
 
-    def remove_by_path(self, path_type: str, path: str):
+    def remove_by_path(self, path_type: str, path: str) -> None:
         """
         删除指定路径的记录
 
@@ -388,7 +388,7 @@ class FileDbHelper(DbOper):
         else:
             Folder.delete_by_path(self._db, path)
 
-    def remove_by_id(self, id_type: str, id: int):
+    def remove_by_id(self, id_type: str, id: int) -> None:
         """
         通过 ID 删除记录
 

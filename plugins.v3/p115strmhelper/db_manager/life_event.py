@@ -9,7 +9,7 @@ class LifeEventDbHelper(DbOper):
     生活事件操作
     """
 
-    def upsert_batch_by_list(self, batch: List[Dict]):
+    def upsert_batch_by_list(self, batch: List[Dict]) -> None:
         """
         通过列表批量写入或更新数据
 

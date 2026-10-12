@@ -2,8 +2,8 @@ from asyncio import run as asyncio_run
 from typing import Any, Dict, List, Union
 
 from app.chain.media import MediaChain
-from app.core.config import settings
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.logging import logger
 
 
 class MediaSearcher:
@@ -14,11 +14,11 @@ class MediaSearcher:
     @staticmethod
     def _get_source(obj: Union[Dict[str, Any], Any]) -> Any:
         """
-        与 media 端点 ``__get_source`` 一致
+        与宿主媒体搜索端点的来源读取规则一致
         """
         if isinstance(obj, dict):
-            return obj.get("source")
-        return getattr(obj, "source", None)
+            return obj.get("media_source") or obj.get("source")
+        return getattr(obj, "media_source", None) or getattr(obj, "source", None)
 
     @classmethod
     async def _async_search_media_sorted(cls, title: str) -> List[Dict[str, Any]]:

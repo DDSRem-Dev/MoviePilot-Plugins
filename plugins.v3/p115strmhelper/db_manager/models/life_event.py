@@ -1,10 +1,10 @@
-from typing import List, Dict
+from typing import Optional, List, Dict
 
-from sqlalchemy import Column, Integer, String, BigInteger, select
-from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import Integer, String, BigInteger, select
+from sqlalchemy.orm import Session, Mapped, mapped_column
 
 from ...db_manager import db_update, db_query, P115StrmHelperBase
+from ...db_manager.replace import replace_rows
 
 
 class LifeEvent(P115StrmHelperBase):
@@ -14,22 +14,38 @@ class LifeEvent(P115StrmHelperBase):
 
     __tablename__ = "life_event"
 
-    id = Column(Integer, primary_key=True)
-    type = Column(Integer, nullable=False, index=True)
-    file_id = Column(Integer, nullable=False, index=True)
-    parent_id = Column(Integer, nullable=False, index=True)
-    file_name = Column(String(255), default="")
-    file_category = Column(Integer, nullable=False)
-    file_type = Column(Integer, nullable=False, index=True)
-    file_size = Column(BigInteger, default=0)
-    sha1 = Column(String(40), default="")
-    pick_code = Column(String(50), default="")
-    update_time = Column(BigInteger, default=0)
-    create_time = Column(BigInteger, default=0)
+    id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), primary_key=True
+    )
+    type: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    file_id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), nullable=False, index=True
+    )
+    parent_id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), nullable=False, index=True
+    )
+    file_name: Mapped[Optional[str]] = mapped_column(
+        String(255), default="", nullable=True
+    )
+    file_category: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_type: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    file_size: Mapped[Optional[int]] = mapped_column(
+        BigInteger, default=0, nullable=True
+    )
+    sha1: Mapped[Optional[str]] = mapped_column(String(40), default="", nullable=True)
+    pick_code: Mapped[Optional[str]] = mapped_column(
+        String(50), default="", nullable=True
+    )
+    update_time: Mapped[Optional[int]] = mapped_column(
+        BigInteger, default=0, nullable=True
+    )
+    create_time: Mapped[Optional[int]] = mapped_column(
+        BigInteger, default=0, nullable=True
+    )
 
     @staticmethod
     @db_update
-    def upsert_batch_by_list(db: Session, batch: List[Dict]):
+    def upsert_batch_by_list(db: Session, batch: List[Dict]) -> bool:
         """
         通过列表批量写入或更新数据
 
@@ -38,13 +54,12 @@ class LifeEvent(P115StrmHelperBase):
 
         :return bool: 始终返回 True
         """
-        stmt = sqlite_insert(LifeEvent).prefix_with("OR REPLACE")
-        db.execute(stmt, batch)
+        replace_rows(db, LifeEvent, batch)
         return True
 
     @staticmethod
     @db_query
-    def get_by_id(db: Session, file_id: int):
+    def get_by_id(db: Session, file_id: int) -> Optional["LifeEvent"]:
         """
         通过ID获取
 
@@ -57,7 +72,7 @@ class LifeEvent(P115StrmHelperBase):
 
     @staticmethod
     @db_query
-    def get_by_file_id(db: Session, file_id: int):
+    def get_by_file_id(db: Session, file_id: int) -> List["LifeEvent"]:
         """
         通过 file_id 获取
 
@@ -70,7 +85,7 @@ class LifeEvent(P115StrmHelperBase):
 
     @staticmethod
     @db_query
-    def get_by_type(db: Session, type_id: int):
+    def get_by_type(db: Session, type_id: int) -> List["LifeEvent"]:
         """
         通过 type 获取
 

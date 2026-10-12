@@ -1,10 +1,10 @@
-from typing import Set, List, Dict
+from typing import Optional, Set, List, Dict
 
-from sqlalchemy import Column, Integer, String, Text, select
-from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import Integer, BigInteger, String, Text, select
+from sqlalchemy.orm import Session, Mapped, mapped_column
 
 from ...db_manager import P115StrmHelperBase, db_query, db_update
+from ...db_manager.replace import replace_rows
 
 
 class OpenFolder(P115StrmHelperBase):
@@ -14,10 +14,14 @@ class OpenFolder(P115StrmHelperBase):
 
     __tablename__ = "open_folders"
 
-    id = Column(Integer, primary_key=True)
-    parent_id = Column(Integer, nullable=False)
-    name = Column(String(255), default="")
-    path = Column(Text, unique=True)
+    id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), primary_key=True
+    )
+    parent_id: Mapped[int] = mapped_column(
+        Integer().with_variant(BigInteger(), "postgresql"), nullable=False
+    )
+    name: Mapped[Optional[str]] = mapped_column(String(255), default="", nullable=True)
+    path: Mapped[Optional[str]] = mapped_column(Text, unique=True, nullable=True)
 
     @staticmethod
     @db_query
@@ -34,19 +38,18 @@ class OpenFolder(P115StrmHelperBase):
 
     @staticmethod
     @db_update
-    def upsert_batch_by_list(db: Session, batch: List[Dict]):
+    def upsert_batch_by_list(db: Session, batch: List[Dict]) -> None:
         """
         通过列表批量写入或更新数据
 
         :param db (Session): 数据库会话
         :param batch (List): 待写入的数据列表
         """
-        stmt = sqlite_insert(OpenFolder).prefix_with("OR REPLACE")
-        db.execute(stmt, batch)
+        replace_rows(db, OpenFolder, batch)
 
     @staticmethod
     @db_query
-    def get_by_id(db: Session, folder_id: int):
+    def get_by_id(db: Session, folder_id: int) -> Optional["OpenFolder"]:
         """
         通过ID获取
 
