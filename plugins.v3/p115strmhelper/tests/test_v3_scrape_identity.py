@@ -179,7 +179,7 @@ class TestV3ScrapeIdentity(TestCase):
         meta = self.meta_path(self.file)
         self.scrape.media_scrape_metadata(self.file, mediainfo=media, meta=meta)
         payload = self._payload()
-        self.assertEqual(payload.fileitem.path, str(self.season))
+        self.assertEqual(payload.fileitem.path, self.season.as_posix())
         self.assertEqual(payload.meta.begin_episode, 1)
         self.chain.recognize_by_meta.assert_not_called()
 
@@ -197,7 +197,7 @@ class TestV3ScrapeIdentity(TestCase):
                 self.settings.TV_RENAME_FORMAT = template
                 self.scrape.media_scrape_metadata(self.file, mediainfo=self._media())
                 payload = self._payload()
-                self.assertEqual(payload.fileitem.path, str(expected))
+                self.assertEqual(payload.fileitem.path, expected.as_posix())
                 self.assertEqual(payload.fileitem.type, kind)
         self.chain.recognize_by_meta.assert_not_called()
 
