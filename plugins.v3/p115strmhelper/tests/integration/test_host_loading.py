@@ -8,10 +8,11 @@ import subprocess
 import sys
 import unittest
 from contextlib import ExitStack
+from contextvars import ContextVar
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 from unittest.mock import patch
 
 from backup_api_contracts import (
@@ -502,23 +503,45 @@ def _check_stopped_offline_submission(instance: Any, check: unittest.TestCase) -
             check.assertTrue(api.servicer._sync_stopping)
 
 
-def _probe(host: Path) -> Dict[str, Any]:
-    sys.path.insert(0, str(host))
+def _block_network(stack: ExitStack) -> List[bool]:
     network_attempts = []
+    creating_socketpair = ContextVar("creating_socketpair", default=False)
+    original_connect = socket.socket.connect
+    original_socketpair = socket.socketpair
 
     def block_network(*args: Any, **kwargs: Any) -> None:
         network_attempts.append(True)
         raise AssertionError("宿主加载测试禁止真实网络请求")
 
+    def connect(sock: socket.socket, address: Any) -> None:
+        if creating_socketpair.get():
+            return original_connect(sock, address)
+        block_network(sock, address)
+
+    def socketpair(*args: Any, **kwargs: Any) -> Tuple[socket.socket, socket.socket]:
+        # Windows 的事件循环通过本机 TCP 连接创建内部唤醒通道
+        token = creating_socketpair.set(True)
+        try:
+            return original_socketpair(*args, **kwargs)
+        finally:
+            creating_socketpair.reset(token)
+
+    stack.enter_context(patch.object(socket, "socketpair", socketpair))
+    stack.enter_context(patch.object(socket.socket, "connect", connect))
+    for target, name in (
+        (socket.socket, "connect_ex"),
+        (socket.socket, "sendto"),
+        (socket, "getaddrinfo"),
+    ):
+        stack.enter_context(patch.object(target, name, block_network))
+    return network_attempts
+
+
+def _probe(host: Path) -> Dict[str, Any]:
+    sys.path.insert(0, str(host))
     check = unittest.TestCase()
     with ExitStack() as stack:
-        for target, name in (
-            (socket.socket, "connect"),
-            (socket.socket, "connect_ex"),
-            (socket.socket, "sendto"),
-            (socket, "getaddrinfo"),
-        ):
-            stack.enter_context(patch.object(target, name, block_network))
+        network_attempts = _block_network(stack)
         import sentry_sdk.transport
 
         stack.enter_context(
@@ -667,6 +690,28 @@ class TestV3HostLoading(unittest.TestCase):
     """
     在独立进程内验证真实 V3 宿主加载和插件分身资源隔离
     """
+
+    def test_network_guard_allows_only_internal_socketpair(self) -> None:
+        """
+        Windows 唤醒通道可用，普通连接和域名解析仍被阻止
+        """
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(socket, "socketpair", socket._fallback_socketpair))
+            attempts = _block_network(stack)
+            reader, writer = socket.socketpair()
+            with reader, writer:
+                reader.settimeout(2)
+                writer.sendall(b"wake")
+                self.assertEqual(reader.recv(4), b"wake")
+            self.assertEqual(attempts, [])
+            with socket.socket() as client:
+                with self.assertRaisesRegex(AssertionError, "禁止真实网络请求"):
+                    client.connect(("127.0.0.1", 9))
+                with self.assertRaisesRegex(AssertionError, "禁止真实网络请求"):
+                    client.connect_ex(("127.0.0.1", 9))
+            with self.assertRaisesRegex(AssertionError, "禁止真实网络请求"):
+                socket.getaddrinfo("isolated.invalid", 443)
+            self.assertEqual(len(attempts), 3)
 
     def test_instances_load_isolate_and_restart_services(self) -> None:
         """
