@@ -166,9 +166,9 @@ def check_strm_api_contracts(instance: Any, check: Any) -> None:
                     parse_qs(url.query),
                     {"pickcode": ["isolated42"], "file_name": ["电影.mkv"]},
                 )
-                scrape.assert_called_once_with(str(local / "电影.strm"))
+                scrape.assert_called_once_with((local / "电影.strm").as_posix())
                 refresh.return_value.refresh_mediaserver.assert_called_once_with(
-                    file_path=str(local / "电影.strm"), file_name="电影.strm"
+                    file_path=(local / "电影.strm").as_posix(), file_name="电影.strm"
                 )
                 check.assertEqual(
                     download.call_args.kwargs["downloads_list"],
@@ -176,7 +176,7 @@ def check_strm_api_contracts(instance: Any, check: Any) -> None:
                         {
                             "type": "local",
                             "pickcode": "isolated42",
-                            "path": str(local / "subtitle.srt"),
+                            "path": (local / "subtitle.srt").as_posix(),
                             "sha1": "ABC",
                         }
                     ],
