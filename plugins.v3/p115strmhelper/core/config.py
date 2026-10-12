@@ -9,16 +9,15 @@ from pydantic import (
     ValidationError,
     ConfigDict,
     Field,
+    PrivateAttr,
     field_validator,
     model_validator,
     field_serializer,
 )
 
-from app.log import logger
-from app.core.config import settings
-from app.utils.system import SystemUtils
-from app.db.systemconfig_oper import SystemConfigOper
-from app.db.plugindata_oper import PluginDataOper
+from app.sdk.logging import logger
+from app.sdk.config import settings
+from app.sdk.utilities import SystemUtils
 
 from ..sidebar_nav import sidebar_nav_keys_known
 from ..version import VERSION
@@ -59,6 +58,94 @@ class ConfigManager(BaseModel):
     插件配置管理器
     """
 
+    _plugin: Any = PrivateAttr(default=None)
+
+    def bind_plugin(self, plugin: Any) -> None:
+        """
+        绑定宿主插件实例，使配置与数据写入当前实例
+
+        :param plugin (Any): MoviePilot 插件实例
+        """
+        self._plugin = plugin
+
+    @property
+    def plugin_id(self) -> str:
+        """
+        返回宿主分配的插件实例标识
+
+        :return str: 当前插件实例 ID
+        """
+        return self._require_plugin().__class__.__name__
+
+    @property
+    def plugin_instance(self) -> Any:
+        """
+        返回已绑定的宿主插件实例供任务生命周期关联
+
+        :return Any: 当前插件实例
+        """
+        return self._require_plugin()
+
+    def _require_plugin(self) -> Any:
+        if self._plugin is None:
+            raise RuntimeError("插件实例尚未绑定，无法访问宿主配置或数据")
+        return self._plugin
+
+    def _resolve_instance_paths(self, values: Dict[str, Any]) -> Dict[str, Any]:
+        plugin = self._require_plugin()
+        result = dict(values)
+        instance_id = self.plugin_id
+        legacy_root = self._get_default_plugin_config_path()
+        legacy_paths = {
+            path for path in (legacy_root, legacy_root / "temp") if path.exists()
+        }
+        instance_root = Path(plugin.get_data_path())
+        is_clone = bool(plugin.is_clone)
+        previous_owner = result.get("data_path_owner")
+        inherited = is_clone and previous_owner and previous_owner != instance_id
+        source_paths = {}
+        if is_clone and not previous_owner:
+            source_id = plugin.plugin_source_id
+            source_config = plugin.get_config(source_id) or {}
+            source_paths = {
+                "PLUGIN_CONFIG_PATH": source_config.get("PLUGIN_CONFIG_PATH"),
+                "PLUGIN_TEMP_PATH": source_config.get("PLUGIN_TEMP_PATH"),
+            }
+            source_root = settings.PLUGIN_DATA_PATH / source_id
+        else:
+            source_root = legacy_root
+
+        for key, legacy_path, default_path, source_path in (
+            ("PLUGIN_CONFIG_PATH", legacy_root, instance_root, source_root),
+            (
+                "PLUGIN_TEMP_PATH",
+                legacy_root / "temp",
+                instance_root / "temp",
+                source_root / "temp",
+            ),
+        ):
+            configured = result.get(key)
+            if configured is not None:
+                configured = Path(configured)
+            copied = False
+            if is_clone and not previous_owner and configured is not None:
+                candidates = [legacy_path, source_path]
+                if source_paths.get(key):
+                    candidates.append(Path(source_paths[key]))
+                copied = any(
+                    configured.resolve() == path.resolve() for path in candidates
+                )
+            if inherited or copied:
+                result[key] = default_path
+            elif configured is not None:
+                result[key] = configured
+            elif not is_clone and legacy_path in legacy_paths:
+                result[key] = legacy_path
+            else:
+                result[key] = default_path
+        result["data_path_owner"] = instance_id
+        return result
+
     @staticmethod
     def _get_default_plugin_config_path() -> Path:
         """
@@ -69,18 +156,11 @@ class ConfigManager(BaseModel):
     @staticmethod
     def _get_default_plugin_db_path() -> Path:
         """
-        返回默认的插件数据库文件路径
+        返回仅用于首次 V3 导入的旧版数据库文件路径
         """
         return (
             ConfigManager._get_default_plugin_config_path() / "p115strmhelper_file.db"
         )
-
-    @staticmethod
-    def _get_default_plugin_database_script_location() -> Path:
-        """
-        返回默认的插件数据库结构目录路径
-        """
-        return settings.ROOT_PATH / "app" / "plugins" / "p115strmhelper" / "database"
 
     @staticmethod
     def _get_default_plugin_temp_path() -> Path:
@@ -290,26 +370,16 @@ class ConfigManager(BaseModel):
     PLUSIN_NAME: str = Field(
         default="P115StrmHelper", min_length=1, description="插件名称"
     )
-    DB_WAL_ENABLE: bool = Field(default=True, description="是否开启数据库WAL模式")
+    data_path_owner: Optional[str] = Field(
+        default=None, description="持久及临时目录所属实例，用于识别分身复制的路径"
+    )
     PLUGIN_CONFIG_PATH: Path = Field(
         default_factory=lambda: ConfigManager._get_default_plugin_config_path(),
         description="插件配置目录",
     )
     PLUGIN_DB_PATH: Path = Field(
         default_factory=lambda: ConfigManager._get_default_plugin_db_path(),
-        description="插件数据库目录",
-    )
-    PLUGIN_DATABASE_SCRIPT_LOCATION: Path = Field(
-        default_factory=lambda: (
-            ConfigManager._get_default_plugin_database_script_location()
-        ),
-        description="插件数据库表目录",
-    )
-    PLUGIN_DATABASE_VERSION_LOCATIONS: List[str] = Field(
-        default_factory=lambda: [
-            str(ConfigManager._get_default_plugin_config_path() / "database/versions")
-        ],
-        description="插件数据库版本目录列表",
+        description="首次升级导入的 V2 SQLite 源文件，V3 数据库由宿主管理",
     )
     PLUGIN_TEMP_PATH: Path = Field(
         default_factory=lambda: ConfigManager._get_default_plugin_temp_path(),
@@ -878,7 +948,6 @@ class ConfigManager(BaseModel):
     @field_serializer(
         "PLUGIN_CONFIG_PATH",
         "PLUGIN_DB_PATH",
-        "PLUGIN_DATABASE_SCRIPT_LOCATION",
         "PLUGIN_TEMP_PATH",
     )
     def _serialize_paths(self, v: Path) -> str:
@@ -935,7 +1004,14 @@ class ConfigManager(BaseModel):
         从字典加载配置
         """
         try:
-            for key, value in config_dict.items():
+            values = self._resolve_instance_paths(config_dict)
+            if self.data_path_owner == self.plugin_id and config_dict.get(
+                "data_path_owner"
+            ) in (None, self.plugin_id):
+                for key in ("PLUGIN_CONFIG_PATH", "PLUGIN_TEMP_PATH"):
+                    if key not in config_dict:
+                        values[key] = getattr(self, key)
+            for key, value in values.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
             self._update_aliyun_token()
@@ -971,6 +1047,26 @@ class ConfigManager(BaseModel):
         self._update_aliyun_token()
         return self.model_dump(mode="json")
 
+    def _prepare_update(self, updates: Dict[str, Any]) -> "ConfigManager":
+        current_data = self.model_dump(mode="json")
+        current_data.update(updates)
+        return self.model_validate(self._resolve_instance_paths(current_data))
+
+    def validate_updates(self, updates: Dict[str, Any]) -> bool:
+        """
+        校验更新但不发布配置或修改登录文件
+
+        :param updates (Dict): 待更新的配置项
+
+        :return bool: 校验通过返回 True
+        """
+        try:
+            self._prepare_update(updates)
+            return True
+        except (ValidationError, ValueError, TypeError, OSError):
+            logger.error("【配置管理器】配置更新校验失败", exc_info=True)
+            return False
+
     def update_config(self, updates: Dict[str, Any]) -> bool:
         """
         更新一个或多个配置项
@@ -985,10 +1081,11 @@ class ConfigManager(BaseModel):
                 key in updates for key in filename_template_keys
             )
 
-            current_data = self.model_dump(mode="json")
-            current_data.update(updates)
-            validated = self.model_validate(current_data)
-            for key in updates.keys():
+            validated = self._prepare_update(updates)
+            keys = dict.fromkeys(
+                [*updates, "PLUGIN_CONFIG_PATH", "PLUGIN_TEMP_PATH", "data_path_owner"]
+            )
+            for key in keys:
                 if hasattr(validated, key):
                     setattr(self, key, getattr(validated, key))
 
@@ -1011,10 +1108,10 @@ class ConfigManager(BaseModel):
     def update_plugin_config(self) -> Optional[bool]:
         """
         将当前配置状态保存到数据库
+
+        :return bool: 宿主配置接口的保存结果
         """
-        systemconfig = SystemConfigOper()
-        plugin_id = self.PLUSIN_NAME
-        return systemconfig.set(f"plugin.{plugin_id}", self.model_dump(mode="json"))
+        return self._require_plugin().update_config(self.model_dump(mode="json"))
 
     def get_user_agent(self, utype: int = -1) -> str:
         """
@@ -1106,41 +1203,41 @@ class ConfigManager(BaseModel):
             kwargs["app"] = "ios"
         return kwargs
 
-    def save_plugin_data(self, key: str, value: Any, plugin_id: Optional[str] = None):
+    def save_plugin_data(
+        self, key: str, value: Any, plugin_id: Optional[str] = None
+    ) -> None:
         """
         保存插件数据
-        :param key: 数据key
-        :param value: 数据值
-        :param plugin_id: plugin_id
+
+        :param key (str): 数据键
+        :param value (Any): 数据值
+        :param plugin_id (str): 显式目标实例，默认使用当前实例
         """
-        if not plugin_id:
-            plugin_id = self.PLUSIN_NAME
-        plugindata = PluginDataOper()
-        plugindata.save(plugin_id, key, value)
+        self._require_plugin().save_data(key, value, plugin_id=plugin_id)
 
     def get_plugin_data(
         self, key: Optional[str] = None, plugin_id: Optional[str] = None
     ) -> Any:
         """
         获取插件数据
-        :param key: 数据key
-        :param plugin_id: plugin_id
+
+        :param key (str): 数据键，为空时读取全部数据
+        :param plugin_id (str): 显式目标实例，默认使用当前实例
+
+        :return Any: 宿主返回的插件数据
         """
-        if not plugin_id:
-            plugin_id = self.PLUSIN_NAME
-        plugindata = PluginDataOper()
-        return plugindata.get_data(plugin_id, key)
+        return self._require_plugin().get_data(key, plugin_id=plugin_id)
 
     def del_plugin_data(self, key: str, plugin_id: Optional[str] = None) -> Any:
         """
         删除插件数据
-        :param key: 数据key
-        :param plugin_id: plugin_id
+
+        :param key (str): 数据键
+        :param plugin_id (str): 显式目标实例，默认使用当前实例
+
+        :return Any: 宿主删除接口的返回值
         """
-        if not plugin_id:
-            plugin_id = self.PLUSIN_NAME
-        plugindata = PluginDataOper()
-        return plugindata.del_data(plugin_id, key)
+        return self._require_plugin().del_data(key, plugin_id=plugin_id)
 
 
 configer = ConfigManager()

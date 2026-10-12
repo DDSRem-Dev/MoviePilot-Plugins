@@ -1,11 +1,11 @@
+from contextlib import contextmanager
+from functools import wraps
 from logging import ERROR
-from time import time
-from threading import Lock, Thread, Event as ThreadEvent
+from time import monotonic, time
+from threading import Condition, Lock, Thread, Event as ThreadEvent, current_thread
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from aligo.core import set_config_folder
-from apscheduler.triggers.cron import CronTrigger
 from watchfiles import watch, Change
 
 from ..core.aliyunpan import BAligo
@@ -48,9 +48,22 @@ from ..service.p115_checkin.scheduler import (
 )
 from ..utils.sentry import sentry_manager
 
-from app.log import logger
-from app.schemas import NotificationType
-from app.scheduler import Scheduler
+from app.sdk.logging import logger
+from app.schemas import MessageType
+from app.sdk.scheduler import list_scheduler_jobs, update_plugin_job
+
+
+def _track_sync_operation(func: Callable) -> Callable:
+    """
+    跟踪同步调用及同线程嵌套，让已登记全量任务留在增量关停屏障内
+    """
+
+    @wraps(func)
+    def wrapper(self: "ServiceHelper", *args: Any, **kwargs: Any) -> Any:
+        with self.sync_operation():
+            return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -92,11 +105,20 @@ class ServiceHelper:
         self._full_sync_running = False
         self._increment_sync_running = False
         self._full_sync_pending = False
+        self._sync_condition = Condition()
+        self._sync_operations: Dict[Thread, int] = {}
+        self._sync_stopping = False
 
-    def init_service(self):
+    def init_service(self) -> bool:
         """
         初始化服务
         """
+        if not self._stop_sync_operations(timeout=0):
+            logger.warning("【同步服务】旧任务尚未退出，拒绝重新初始化")
+            return False
+        if self.backup_service.stop() is False:
+            logger.warning("【STRM备份】旧任务尚未退出，拒绝重新初始化")
+            return False
         try:
             # 115 网盘客户端初始化
             self.client = create_client(
@@ -106,16 +128,20 @@ class ServiceHelper:
             )
 
             # 阿里云盘登入
-            aligo_config = configer.get_config("plugin_aligo_path")
+            aligo_config = Path(configer.get_config("plugin_aligo_path")).resolve()
             try:
                 if configer.get_config("aliyundrive_token"):
-                    set_config_folder(aligo_config)
+                    aligo_config.mkdir(parents=True, exist_ok=True)
+                    aligo_name = str(aligo_config / "aligo")
                     if Path(aligo_config / "aligo.json").exists():
                         logger.debug("Config login aliyunpan")
-                        self.aligo = BAligo(level=ERROR, re_login=False)
+                        self.aligo = BAligo(
+                            name=aligo_name, level=ERROR, re_login=False
+                        )
                     else:
                         logger.debug("Refresh token login aliyunpan")
                         self.aligo = BAligo(
+                            name=aligo_name,
                             refresh_token=configer.get_config("aliyundrive_token"),
                             level=ERROR,
                             re_login=False,
@@ -170,10 +196,10 @@ class ServiceHelper:
             # FUSE 初始化
             self.fuse_manager = FuseManager(client=self.client)
             if configer.fuse_enabled and configer.fuse_mountpoint:
-                self.fuse_manager._start_fuse_internal()
+                self.fuse_manager.start_fuse()
 
             # STRM 备份服务绑定客户端
-            self.backup_service.client = self.client
+            self.backup_service = BackupService(client=self.client)
 
             # 初始化整理任务管理器和 TransferChain 补丁
             self._init_transfer_enhancement()
@@ -183,10 +209,13 @@ class ServiceHelper:
 
             # 启动 Emby 媒体信息提取全局队列 worker
             emby_mediainfo_queue.start()
+            sync_del_webhook_queue.start()
 
             if configer.share_audit_queue_enabled:
                 share_audit_download_queue.start()
 
+            with self._sync_condition:
+                self._sync_stopping = False
             return True
         except Exception as e:
             logger.error(f"服务项初始化失败: {e}")
@@ -250,11 +279,13 @@ class ServiceHelper:
         with self._sync_state_lock:
             if self._full_sync_running or self._increment_sync_running:
                 return True
-        scheduler = Scheduler()
-        with scheduler._lock:
-            jobs = list((getattr(scheduler, "_jobs", None) or {}).values())
+        prefixes = (
+            f"{configer.plugin_id}_P115StrmHelper_",
+            f"{configer.plugin_id}_once_",
+        )
         return any(
-            job.get("running") and job.get("pid") == "P115StrmHelper" for job in jobs
+            job.status == "正在运行" and (job.id or "").startswith(prefixes)
+            for job in list_scheduler_jobs()
         )
 
     def check_monitor_life_guard(self):
@@ -789,65 +820,157 @@ class ServiceHelper:
         if self.fuse_manager:
             self.fuse_manager.stop_fuse()
 
-    def stop(self):
+    @contextmanager
+    def sync_operation(self) -> Iterator[None]:
         """
-        停止所有服务
+        在同步调用访问实例配置和资源前登记关停归属
+
+        :yields None: 当前调用持有的在途执行范围
         """
+        worker = current_thread()
+        with self._sync_condition:
+            if self._sync_stopping and worker not in self._sync_operations:
+                raise RuntimeError("同步服务已停止，暂不接收新任务")
+            self._sync_operations[worker] = self._sync_operations.get(worker, 0) + 1
         try:
-            if self.service_observer:
-                for ob in self.service_observer:
-                    try:
-                        ob.stop_event.set()
-                        if ob.thread.is_alive():
-                            ob.thread.join(timeout=5)
-                            logger.debug(f"【目录上传】{ob.mon_path} 监控线程已关闭")
-                    except Exception as e:
-                        logger.error(f"【目录上传】关闭失败: {e}")
-                logger.info("【目录上传】目录监控已关闭")
-            self.service_observer = []
+            yield
+        finally:
+            with self._sync_condition:
+                self._sync_operations[worker] -= 1
+                if not self._sync_operations[worker]:
+                    del self._sync_operations[worker]
+                self._sync_condition.notify_all()
+
+    def start_background_sync(self, func: Callable[[], None], name: str) -> None:
+        """
+        在线程启动前登记后台工作，使已受理请求能够在关停期间交接任务
+
+        :param func (Callable): 原后台任务
+        :param name (str): 原线程名称
+        """
+
+        def run() -> None:
             try:
-                directory_upload_stability_tracker.stop()
-            except Exception as e:
-                logger.debug(f"【目录上传】停止稳定性跟踪异常: {e}")
+                func()
+            finally:
+                with self._sync_condition:
+                    del self._sync_operations[current_thread()]
+                    self._sync_condition.notify_all()
+
+        worker = Thread(target=run, daemon=True, name=name)
+        with self._sync_condition:
+            if self._sync_stopping and current_thread() not in self._sync_operations:
+                raise RuntimeError("同步服务已停止，暂不接收新任务")
+            self._sync_operations[worker] = 1
             try:
-                directory_upload_queue.stop()
-            except Exception as e:
-                logger.debug(f"【目录上传】停止 worker 异常: {e}")
+                worker.start()
+            except Exception:
+                del self._sync_operations[worker]
+                self._sync_condition.notify_all()
+                raise
+
+    def _stop_sync_operations(self, timeout: float = 25.0) -> bool:
+        """
+        关闭同步准入并等待已开始的调用，超时保留实例资源供宿主重试
+        """
+        deadline = monotonic() + max(timeout, 0)
+        with self._sync_condition:
+            self._sync_stopping = True
+            if current_thread() in self._sync_operations:
+                return False
+            while self._sync_operations:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    return False
+                self._sync_condition.wait(remaining)
+            return True
+
+    def stop(self) -> bool:
+        """
+        停止服务并报告已知的关停失败
+
+        :return bool: 已检查的停止步骤成功返回 True，显式失败或异常时返回 False
+        """
+        all_stopped = True
+        try:
+            if not self._stop_sync_operations():
+                logger.warning("【同步服务】全量、增量、数据库或分享任务尚未退出")
+                return False
+            if self.backup_service.stop() is False:
+                logger.warning("【STRM备份】备份或恢复任务尚未结束")
+                return False
+            remaining_observers = []
+            for observer in self.service_observer:
+                try:
+                    observer.stop_event.set()
+                    if observer.thread.is_alive():
+                        observer.thread.join(timeout=5)
+                    if observer.thread.is_alive():
+                        remaining_observers.append(observer)
+                        logger.warning(
+                            f"【目录上传】{observer.mon_path} 监控线程尚未退出"
+                        )
+                    else:
+                        logger.debug(f"【目录上传】{observer.mon_path} 监控线程已关闭")
+                except Exception as e:
+                    remaining_observers.append(observer)
+                    logger.error(f"【目录上传】关闭失败: {e}", exc_info=True)
+            self.service_observer = remaining_observers
+            if remaining_observers:
+                all_stopped = False
+            for name, component in (
+                ("目录上传稳定性跟踪", directory_upload_stability_tracker),
+                ("目录上传", directory_upload_queue),
+            ):
+                try:
+                    if component.stop() is False:
+                        all_stopped = False
+                except Exception as e:
+                    all_stopped = False
+                    logger.error(f"【{name}】停止失败: {e}", exc_info=True)
             with self.monitor_life_lock:
                 if self.monitor_life_thread:
-                    self._stop_monitor_life_internal()
+                    if self._stop_monitor_life_internal() is False:
+                        return False
                 elif self.monitor_stop_event:
                     self.monitor_stop_event.set()
                     self.monitor_stop_event = None
-            if self.fuse_manager:
-                self.fuse_manager.stop_fuse()
-            if self.redirect:
-                self.redirect.close_http_client_sync()
-            try:
-                emby_mediainfo_queue.stop()
-            except Exception as e:
-                logger.debug(f"【Emby 媒体信息队列】停止 worker 异常: {e}")
-            try:
-                sync_del_webhook_queue.stop()
-            except Exception as e:
-                logger.debug(f"【同步删除 Webhook 队列】停止 worker 异常: {e}")
-            try:
-                share_audit_download_queue.stop()
-            except Exception as e:
-                logger.debug(f"【分享审核下载】停止 worker 异常: {e}")
-            try:
-                TransferChainPatcher.disable()
-            except Exception as e:
-                logger.error(f"【整理接管】禁用补丁失败: {e}")
-            if self.transfer_task_manager:
+            if self.monitorlife and self.monitorlife.stop() is False:
+                logger.warning("【监控生活事件】手动整理或延迟通知尚未退出")
+                return False
+            if self.share_interactive_gen_strm_queue.stop() is False:
+                logger.warning("【分享交互生成STRM】任务尚未退出")
+                return False
+            if self.sharetransferhelper and self.sharetransferhelper.stop() is False:
+                logger.warning("【分享转存】后台队列或直接转存调用尚未退出")
+                return False
+            if self.fuse_manager and self.fuse_manager.stop_fuse() is False:
+                all_stopped = False
+            if self.redirect and self.redirect.close_http_client_sync() is False:
+                all_stopped = False
+            for name, component in (
+                ("Emby 媒体信息队列", emby_mediainfo_queue),
+                ("同步删除 Webhook 队列", sync_del_webhook_queue),
+                ("分享审核下载", share_audit_download_queue),
+            ):
                 try:
-                    self.transfer_task_manager.shutdown()
+                    if component.stop() is False:
+                        all_stopped = False
                 except Exception as e:
-                    logger.error(f"【整理接管】关闭任务管理器失败: {e}")
+                    all_stopped = False
+                    logger.error(f"【{name}】停止失败: {e}", exc_info=True)
+            if not all_stopped:
+                return False
+            TransferChainPatcher.disable()
+            if self.transfer_task_manager:
+                if self.transfer_task_manager.shutdown() is False:
+                    return False
                 self.transfer_task_manager = None
             self.transfer_handler = None
+            return True
         except Exception as e:
-            logger.error(f"发生错误: {e}")
+            logger.error(f"停止服务失败: {e}", exc_info=True)
+            return False
 
 
 servicer = ServiceHelper()

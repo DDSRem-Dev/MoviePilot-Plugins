@@ -1,4 +1,4 @@
-from app.chain import ChainBase
+from app.sdk.chain import ChainBase
 
 
 class PluginChian(ChainBase):

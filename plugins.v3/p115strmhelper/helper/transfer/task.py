@@ -2,7 +2,7 @@ import uuid
 from threading import Lock, Timer
 from typing import List, Optional, Callable
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ...schemas.transfer import TransferTask
 

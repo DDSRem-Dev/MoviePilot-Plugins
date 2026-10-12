@@ -5,7 +5,7 @@ from typing import List, Optional
 import httpx
 from bs4 import BeautifulSoup
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ....helper.share.share_links import (
     build_share_page_client,

@@ -6,12 +6,12 @@ from p115client import check_response
 from p115client.tool.edit import update_name
 
 from app.chain.transfer import TransferChain, task_lock
-from app.core.config import settings
-from app.core.event import eventmanager
-from app.log import logger
+from app.sdk.config import settings
+from app.sdk.events import eventmanager
+from app.sdk.logging import logger
 from app.schemas import FileItem, TransferInfo
 from app.schemas.types import EventType, MediaType
-from app.utils.string import StringUtils
+from app.sdk.utilities import StringUtils
 
 from ...core.config import configer
 from ...schemas.transfer import RelatedFile, TransferTask
@@ -281,7 +281,7 @@ class TransferHandlerLinkedBatch:
                             # 触发 TransferOverwriteCheck 事件，允许插件介入覆盖判断
                             if overwrite_mode != "never":
                                 try:
-                                    from app.core.event import eventmanager
+                                    from app.sdk.events import eventmanager
                                     from app.schemas import (
                                         TransferOverwriteCheckEventData,
                                     )

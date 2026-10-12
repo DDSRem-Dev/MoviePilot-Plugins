@@ -2,7 +2,7 @@ from typing import Optional
 
 import p115client.client as _p115_client_mod
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ..utils.user_agent import UserAgentUtils
 

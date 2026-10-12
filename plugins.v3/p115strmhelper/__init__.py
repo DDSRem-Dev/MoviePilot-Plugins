@@ -5,18 +5,19 @@ from functools import wraps
 from pathlib import Path
 from re import search as re_search
 from typing import Any, List, Dict, Tuple, Optional, Union
+from asyncio import to_thread
 
-from app.core.config import settings
-from app.core.event import eventmanager, Event
-from app.log import logger
-from app.plugins import _PluginBase
+from app.sdk.config import settings
+from app.sdk.events import eventmanager, Event
+from app.sdk.logging import logger
+from app.sdk.plugin import _PluginBase
 from app.schemas import (
     FileItem,
-    NotificationType,
+    MessageType,
 )
-from app.core.meta import MetaVideo
-from app.schemas.types import EventType, MessageChannel, ChainEventType, MediaType
-from app.helper.directory import DirectoryHelper
+from app.sdk.media import MetaVideo
+from app.schemas.types import EventType, NotificationChannel, ChainEventType, MediaType
+from app.application.directory import DirectoryHelper
 from app.chain.storage import StorageChain
 
 try:
@@ -57,7 +58,7 @@ from .mcp import MCPManager
 from .patch.u115_open import U115Patcher
 from .patch.p115disk_upload import P115DiskPatcher
 from .patch.app_ver import AppVerPatcher
-from .core.message import UploadNotifyAggregator
+from .core.message import upload_notifier
 from .interactive.framework.callbacks import decode_action, Action
 from .interactive.framework.manager import BaseSessionManager
 from .interactive.framework.schemas import TSession
@@ -167,15 +168,15 @@ class P115StrmHelper(_PluginBase):
         初始化
         """
         super().__init__()
+        configer.bind_plugin(self)
 
         # 初始化配置项
-        configer.load_from_dict(config or {})
+        initial_config = config if config is not None else self.get_config()
+        if not configer.load_from_dict(initial_config or {}):
+            raise RuntimeError("插件配置初始化失败，后台服务未启动")
 
         if not Path(configer.PLUGIN_TEMP_PATH).exists():
             Path(configer.PLUGIN_TEMP_PATH).mkdir(parents=True, exist_ok=True)
-
-        # 初始化数据库
-        self.init_database()
 
         # 实例化处理器和渲染器
         self.action_handler = ActionHandler()
@@ -188,20 +189,23 @@ class P115StrmHelper(_PluginBase):
         """
         初始化插件
         """
+        if self.stop_service() is False:
+            raise RuntimeError("旧插件任务尚未退出，暂不应用新配置，请稍后重试")
+        if config and not configer.update_config(config):
+            raise RuntimeError("插件配置加载失败，后台服务未启动")
+        if configer.update_plugin_config() is False:
+            raise RuntimeError("插件实例目录配置保存失败，后台服务未启动")
+        Path(configer.PLUGIN_TEMP_PATH).mkdir(parents=True, exist_ok=True)
         self.api = Api(client=None)
-
         if config:
-            configer.update_config(config)
-            configer.update_plugin_config()
             i18n.load_translations()
             sentry_manager.reload_config()
 
-        # 停止现有任务
-        self.stop_service()
+        if not self.init_database():
+            raise RuntimeError("插件数据库初始化失败，后台服务未启动")
 
         if configer.enabled:
-            self.init_database()
-
+            upload_notifier.start(self)
             if servicer.init_service():
                 self.api = Api(client=servicer.client)
 
@@ -228,6 +232,7 @@ class P115StrmHelper(_PluginBase):
         if not Path(configer.PLUGIN_CONFIG_PATH).exists():
             Path(configer.PLUGIN_CONFIG_PATH).mkdir(parents=True, exist_ok=True)
         return ensure_database()
+
 
     def get_state(self) -> bool:
         """
@@ -2208,17 +2213,23 @@ class P115StrmHelper(_PluginBase):
                 exc_info=True,
             )
 
-    def stop_service(self):
+    def stop_service(self) -> bool:
         """
-        退出插件
+        退出插件并向宿主报告已知的关停失败
+
+        :return bool: 后台服务停止步骤返回且资源已释放时为 True
         """
-        type(self)._rename_media_fields_cache.clear()
-        servicer.stop()
-        ct_db_manager.close_database()
-        U115Patcher().disable()
-        P115DiskPatcher().disable()
-        AppVerPatcher().disable()
-        UploadNotifyAggregator.shutdown()
+        if servicer.stop() is False:
+            return False
+        try:
+            type(self)._rename_media_fields_cache.clear()
+            ct_db_manager.close_database()
+            U115Patcher().disable()
+            P115DiskPatcher().disable()
+            AppVerPatcher().disable()
+            return True
+        finally:
+            upload_notifier.shutdown(self)
 
     async def _save_config_api(self, request: Request) -> Dict:
         """
@@ -2226,11 +2237,16 @@ class P115StrmHelper(_PluginBase):
         """
         try:
             data = await request.json()
+            if not configer.validate_updates(data):
+                return {"code": 1, "msg": "配置无效，请查看详细日志"}
+            if await to_thread(self.stop_service) is False:
+                return {"code": 1, "msg": "旧插件任务尚未退出，请稍后重试"}
             if not configer.update_config(data):
                 return {"code": 1, "msg": "保存失败，请查看详细日志"}
 
             # 持久化存储配置
-            configer.update_plugin_config()
+            if configer.update_plugin_config() is False:
+                return {"code": 1, "msg": "配置保存失败，请检查宿主日志后重试"}
 
             i18n.load_translations()
 

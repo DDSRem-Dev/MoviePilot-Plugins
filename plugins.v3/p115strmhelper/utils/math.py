@@ -5,7 +5,7 @@ from typing import List
 
 from numpy import mean as np_mean, std as np_std, isclose as np_isclose
 
-from app.log import logger
+from app.sdk.logging import logger
 
 
 class MathUtils:

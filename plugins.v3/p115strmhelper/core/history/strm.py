@@ -2,7 +2,7 @@ from time import localtime, strftime
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from app.log import logger
+from app.sdk.logging import logger
 
 from ..config import configer
 

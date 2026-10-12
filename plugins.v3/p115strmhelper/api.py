@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 from pathlib import Path
 from threading import Thread
 from urllib.parse import quote, unquote
+from uuid import uuid4
+from weakref import finalize
 
 from p115center import P115Center
 from qrcode import make as qr_make
@@ -46,9 +48,7 @@ from .schemas.u115 import (
     CheckQRCodeData,
     CheckQRCodeParams,
     GetQRCodeParams,
-    UserInfo,
     UserStorageStatusResponse,
-    StorageInfo,
 )
 from .schemas.plugin import (
     CheckLifeEventStatusPayload,
@@ -89,9 +89,9 @@ from .schemas.fuse import FuseMountPayload, FuseStatusData
 from .utils.sentry import sentry_manager
 from .utils.url import UrlUtils
 
-from app.log import logger
-from app.core.cache import cached, TTLCache
-from app.helper.mediaserver import MediaServerHelper
+from app.sdk.logging import logger
+from app.sdk.cache import cached, TTLCache
+from app.sdk.services import MediaServerHelper
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -102,10 +102,14 @@ class Api:
 
     def __init__(self, client: Optional[P115Client]):
         self._client = client
+        self._cache_owner = uuid4().hex
 
         self.browse_dir_pan_api_cache = TTLCache(
-            maxsize=1024, ttl=120, region="p115strmhelper_api_browse_dir_api"
+            maxsize=1024,
+            ttl=120,
+            region=f"{__package__}:p115strmhelper_api_browse_dir_api:{self._cache_owner}",
         )
+        finalize(self, self.browse_dir_pan_api_cache.clear)
         self.browse_dir_pan_api_last = 0
 
     @staticmethod
@@ -302,11 +306,17 @@ class Api:
         return ApiResponse(code=0, msg="已清空")
 
     @cached(
-        region="p115strmhelper_api_get_user_storage_status", ttl=60 * 60, skip_none=True
+        region=f"{__package__}:p115strmhelper_api_get_user_storage_status",
+        ttl=60 * 60,
+        skip_none=True,
     )
-    def _get_user_storage_status_data(self) -> Optional[Dict[str, Any]]:
+    def _get_user_storage_status_data(
+        self, cache_owner: str
+    ) -> Optional[Dict[str, Any]]:
         """
         获取 115 用户基本信息和空间使用情况（返回可缓存字典）
+
+        :param cache_owner (str): 当前 API 对象的缓存标识，宿主缓存键不包含 self
 
         :return Dict: 可缓存的用户存储状态字典
         """
@@ -430,7 +440,7 @@ class Api:
 
         :return UserStorageStatusResponse: 用户存储状态响应
         """
-        data = self._get_user_storage_status_data()
+        data = self._get_user_storage_status_data(self._cache_owner)
         if data is None:
             return UserStorageStatusResponse(
                 success=False,

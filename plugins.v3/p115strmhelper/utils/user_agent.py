@@ -2,7 +2,7 @@ from random import randint, choice
 
 from p115client import P115Client, check_response
 
-from app.core.cache import cached
+from app.sdk.cache import cached
 
 
 class UserAgentUtils:

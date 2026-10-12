@@ -58,7 +58,7 @@ class ShareStrmCleanupConfig(BaseModel):
         status, msg = CronUtils.validate_cron_expression(v)
         if status:
             return v
-        from app.log import logger
+        from app.sdk.logging import logger
 
         logger.warning(msg)
         fixed = CronUtils.fix_cron_expression(v)

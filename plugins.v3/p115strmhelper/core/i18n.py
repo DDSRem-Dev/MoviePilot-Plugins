@@ -3,7 +3,7 @@ from string import Formatter
 
 from orjson import loads, JSONDecodeError
 
-from app.core.config import settings
+from app.sdk.config import settings
 
 from ..core.config import configer
 

@@ -12,6 +12,7 @@ __all__ = [
 
 from abc import ABC, abstractmethod
 from base64 import b64encode, b64decode
+from hashlib import sha256
 from pathlib import Path
 from typing import List, Dict, MutableMapping, Optional, Union, Set, Any
 from time import time
@@ -20,9 +21,9 @@ from cachetools import TTLCache as MemoryTTLCache
 from diskcache import Cache as DiskCache
 from orjson import dumps
 
-from app.core.cache import LRUCache, TTLCache, AsyncCache
-from app.core.config import settings
-from app.helper.redis import RedisHelper
+from app.sdk.cache import LRUCache, TTLCache, AsyncCache
+from app.sdk.config import settings
+from app.adapters.cache.redis import RedisHelper
 
 
 class IdPathCache:
@@ -37,11 +38,11 @@ class IdPathCache:
         :param maxsize: 缓存最大条目数
         """
         self.id_to_dir = LRUCache(
-            region="p115strmhelper_id_path_cache_id_to_dir",
+            region=f"{__package__}:p115strmhelper_id_path_cache_id_to_dir",
             maxsize=maxsize,
         )
         self.dir_to_id = LRUCache(
-            region="p115strmhelper_id_path_cache_dir_to_id",
+            region=f"{__package__}:p115strmhelper_id_path_cache_dir_to_id",
             maxsize=maxsize,
         )
 
@@ -163,7 +164,7 @@ class R302Cache:
         :param maxsize: 缓存可以容纳的最大条目数
         """
         self._cache = AsyncCache(maxsize=maxsize)
-        self.region = "p115strmhelper_r302_cache"
+        self.region = f"{__package__}:p115strmhelper_r302_cache"
 
     @classmethod
     def _make_key(cls, pick_code: str, ua_code: str) -> str:
@@ -356,10 +357,14 @@ class RedisCacheDirectory(BaseCacheDirectory):
     使用 Redis 的目录缓存器
     """
 
-    def __init__(self):
+    def __init__(self, cache_directory: Optional[Path] = None) -> None:
         """
-        初始化基于 Redis 的目录缓存，建立 Redis 连接
+        按实例模块和目录隔离 Redis 缓存，建立 Redis 连接
+
+        :param cache_directory (Path): 对应磁盘后端的缓存目录
         """
+        identity = str(cache_directory.resolve()) if cache_directory else "default"
+        self._namespace = sha256(f"{__package__}:{identity}".encode()).hexdigest()
         self.redis_helper = RedisHelper()
         self.redis_helper._connect()
         self.client = self.redis_helper.client
@@ -370,7 +375,7 @@ class RedisCacheDirectory(BaseCacheDirectory):
         """
         为我们的 Set 创建一个独立的、带前缀的键名，避免与 RedisHelper 中的其他键冲突
         """
-        return f"dir_cache_set:{group_name}"
+        return f"dir_cache_set:{self._namespace}:{group_name}"
 
     def add_to_group(self, group_name: str, paths: Union[str, List[str]]):
         """
@@ -434,7 +439,7 @@ class DirectoryCache:
         初始化目录缓存
         """
         if settings.CACHE_BACKEND_TYPE == "redis":
-            self._storage: BaseCacheDirectory = RedisCacheDirectory()
+            self._storage: BaseCacheDirectory = RedisCacheDirectory(cache_directory)
         else:
             self._storage: BaseCacheDirectory = DiskCacheDirectory(cache_directory)
 
@@ -593,5 +598,5 @@ pantransfercacher = PanTransferCache()
 sharestrmcacher = ShareStrmCache()
 r302cacher = R302Cache(maxsize=8096)
 rename_media_fields_cacher = TTLCache(
-    region="p115strmhelper_rename_media_fields", maxsize=2048, ttl=36000
+    region=f"{__package__}:p115strmhelper_rename_media_fields", maxsize=2048, ttl=36000
 )
