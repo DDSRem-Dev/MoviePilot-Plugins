@@ -523,7 +523,7 @@ class BatchTransferContracts(TestCase):
         with self.factory() as session:
             histories = list(session.scalars(select(TransferHistory)))
             self.assertEqual(len(histories), 3)
-            self.assertEqual(len(list(session.scalars(select(OutboxMessage)))), 3)
+            self.assertEqual(len(list(session.scalars(select(OutboxMessage)))), 4)
 
     def test_expired_lease_cannot_write_cloud(self) -> None:
         """

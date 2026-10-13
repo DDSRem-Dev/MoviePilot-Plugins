@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from hashlib import sha256
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from app.application.outbox import (
     AUDIO_TRANSFER_FAILED_TOPIC,
     SUBTITLE_TRANSFER_COMPLETED_TOPIC,
     SUBTITLE_TRANSFER_FAILED_TOPIC,
+    TRANSFER_COMPLETED_TOPIC,
     OutboxIntent,
 )
 from app.application.transfer.models import TransferPlanCheckpoint
@@ -47,6 +49,8 @@ def _restore_failed_files(session: Any, settlement: Any, result: TransferInfo) -
             .order_by(TransferExecutionStep.ordinal)
         )
     )
+    if not steps:
+        return
     materialized = {}
     renamed = {}
     for step in steps:
@@ -77,6 +81,11 @@ def _restore_failed_files(session: Any, settlement: Any, result: TransferInfo) -
     result.fileitem = result.fileitem.model_copy(update={"children": sources})
     if result.target_item is not None:
         result.target_item = result.target_item.model_copy(update={"children": targets})
+        result.target_diritem = FileItem(
+            storage=plan.target_storage,
+            type="dir",
+            path=Path(result.target_item.path).parent.as_posix() + "/",
+        )
     result.fail_list = failed or result.fail_list
 
 
@@ -105,11 +114,45 @@ def stage_linked_results(
             if prior is not None and getattr(prior, "dest", None):
                 return prior
         history = stage_history(staging)
-        if not linked:
-            return history
         repository = staging._repository
         child_staging = _StagingTransferHistoryRepository(repository)
         outbox = SqlAlchemyOutboxStager(repository._db)
+        if (
+            not result.success
+            and result.target_item is not None
+            and source.path not in (result.fail_list or [])
+        ):
+            main_result = result.model_copy(
+                update={
+                    "success": True,
+                    "fileitem": source.model_copy(update={"children": []}),
+                    "target_item": result.target_item.model_copy(
+                        update={"children": []}
+                    ),
+                    "file_list": [source.path],
+                    "file_list_new": [result.target_item.path],
+                    "fail_list": [],
+                    "message": None,
+                }
+            )
+            event_key = f"{TRANSFER_COMPLETED_TOPIC}:{settlement.task_id}:{settlement.execution_fingerprint}:main"
+            outbox.stage(
+                OutboxIntent(
+                    event_key=event_key,
+                    topic=TRANSFER_COMPLETED_TOPIC,
+                    payload=snapshot_transfer_result(
+                        {
+                            **payload,
+                            "transferinfo": main_result,
+                            "transfer_history_id": history.id,
+                            "idempotency_key": event_key,
+                        }
+                    ),
+                ),
+                datetime.now(timezone.utc),
+            )
+        if not linked:
+            return history
         targets = {
             item.path: item
             for item in (result.target_item.children if result.target_item else [])
