@@ -259,13 +259,24 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         """
         同批某个源文件已消失时只拒绝该文件，其他文件继续合并复制
         """
+        from app.chain.transfer.execution import _TransferManualReviewRequired
+
         sources = [self.seed(f"missing-{index}") for index in range(3)]
         del self.storage.items[sources[0].fileid]
         barrier = Barrier(3, timeout=10)
         original = self.handler.coordinator.submit
+        captured = set()
+        lock = RLock()
 
         def submit(key: Any, payload: Dict[str, Any], validate: Any) -> Any:
-            if payload["kind"] == "capture":
+            with lock:
+                first_capture = (
+                    payload["kind"] == "capture"
+                    and payload["source"].fileid not in captured
+                )
+                if first_capture:
+                    captured.add(payload["source"].fileid)
+            if first_capture:
                 barrier.wait()
             return original(key, payload, validate)
 
@@ -275,7 +286,9 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                     pool.submit(self.run_transfer, f"missing-{index}")
                     for index in range(3)
                 ]
-                with self.assertRaisesRegex(OSError, "源文件身份已经改变"):
+                with self.assertRaisesRegex(
+                    _TransferManualReviewRequired, "源文件身份已经改变"
+                ):
                     futures[0].result(timeout=10)
                 for future in futures[1:]:
                     self.assertIsNotNone(future.result(timeout=10))
