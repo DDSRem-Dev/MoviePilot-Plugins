@@ -72,6 +72,8 @@ class TransferChainPatcher:
             original_step = TransHandler._TransHandler__execute_transfer_with_steps
             original_settle = TransactionalChainDurableEventWriter.transfer_result
             original_enqueue = TransferChain._enqueue_transfer_task
+            original_message = TransferChain.send_transfer_message
+            message_signature = signature(original_message)
             original_terminal = TransferTask.mark_terminal_settled
             original_cleanup = TransferChain._cleanup_successful_transfer
             original_complete = (
@@ -124,6 +126,34 @@ class TransferChainPatcher:
                         and checkpoint.items[0].action == MAIN_ACTION
                     )
                 )
+
+            @wraps(original_message)
+            def message(chain: Any, *args: Any, **kwargs: Any) -> Any:
+                bound = message_signature.bind(chain, *args, **kwargs)
+                result = bound.arguments.get("transferinfo")
+                media = bound.arguments.get("mediainfo")
+                buttons = bound.arguments.get("buttons")
+                if (
+                    bound.arguments.get("batch")
+                    and buttons
+                    and result.fileitem
+                    and result.target_item
+                    and result.transfer_type in {"move", "copy"}
+                    and media.type in {MediaType.MOVIE, MediaType.TV}
+                    and cls._should_intercept(
+                        result.fileitem.storage, result.target_item.storage
+                    )
+                ):
+                    rows = [
+                        [
+                            button
+                            for button in row
+                            if "url" not in button or button.get("url")
+                        ]
+                        for row in buttons
+                    ]
+                    bound.arguments["buttons"] = [row for row in rows if row] or None
+                return original_message(*bound.args, **bound.kwargs)
 
             @wraps(original_terminal)
             def terminal_settled(task: Any) -> None:
@@ -260,6 +290,7 @@ class TransferChainPatcher:
             cls._install(TransferChain, "_enqueue_transfer_task", enqueue)
             cls._install(TransferChain, "_cleanup_successful_transfer", cleanup)
             cls._install(TransferTask, "mark_terminal_settled", terminal_settled)
+            cls._install(TransferChain, "send_transfer_message", message)
             cls._install(
                 TransferChain,
                 "_TransferChain__mark_torrent_completed_if_done",

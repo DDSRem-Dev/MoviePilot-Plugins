@@ -217,6 +217,92 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         )
         chain.jobview.is_success.assert_called_once_with(task)
 
+    def test_tv_batch_notification_omits_unconfigured_history_button(self) -> None:
+        """
+        真实宿主剧集汇总在未配置域名时仍生成有效图文通知，有链接时保留按钮
+        """
+        from app.chain.transfer import TransferChain
+        from app.application.transfer.notifications import TransferSuccessNotification
+        from app.schemas import FileItem, TransferInfo
+        from app.schemas.types import MediaType
+        from app.sdk.media import MediaInfo, MetaInfoPath
+
+        notices = []
+        media = MediaInfo(title="小林家的龙女仆", year="2017", type=MediaType.TV)
+        for episode in (1, 2):
+            source = self.storage.add(f"/source/Dragon.Maid.S01E{episode:02d}.mkv")
+            target = self.storage.add(f"/target/Dragon.Maid.S01E{episode:02d}.mkv")
+            notices.append(
+                TransferSuccessNotification(
+                    meta=MetaInfoPath(Path(source.path)),
+                    mediainfo=media,
+                    transferinfo=TransferInfo(
+                        success=True,
+                        fileitem=source,
+                        target_item=target,
+                        target_diritem=FileItem(
+                            storage=source.storage, type="dir", path="/target/"
+                        ),
+                        transfer_type="move",
+                        file_list_new=[target.path],
+                        file_count=1,
+                        total_size=100,
+                        need_notify=True,
+                    ),
+                    episodes_info=None,
+                    username=None,
+                )
+            )
+        chain = SimpleNamespace(
+            runtime_config=SimpleNamespace(history_url=None), post_message=Mock()
+        )
+        chain.send_transfer_message = lambda **kwargs: (
+            TransferChain.send_transfer_message(chain, **kwargs)
+        )
+        for url in (None, "https://moviepilot.example/history"):
+            chain.runtime_config.history_url = url
+            chain.post_message.reset_mock()
+            TransferChain._send_transfer_success_notifications(chain, notices)
+            chain.post_message.assert_called_once()
+            message = chain.post_message.call_args.args[0]
+            self.assertIn("S01", message.title)
+            self.assertIn("E01-E02", message.title)
+            self.assertIn("2 个文件", message.text)
+            self.assertEqual(message.image, media.get_message_image())
+            self.assertEqual(
+                message.buttons,
+                [[{"text": "查看整理记录", "url": url}]] if url else None,
+            )
+        chain.post_message.reset_mock()
+        buttons = [
+            [
+                {"text": "详情", "url": "https://moviepilot.example/history"},
+                {"text": "操作", "callback_data": "action"},
+            ],
+            [{"text": "无地址", "url": None}],
+        ]
+        TransferChain.send_transfer_message(
+            chain,
+            notices[0].meta,
+            media,
+            notices[0].transferinfo,
+            buttons=buttons,
+            batch=True,
+        )
+        self.assertEqual(chain.post_message.call_args.args[0].buttons, [buttons[0]])
+        self.assertEqual(len(buttons), 2)
+        foreign_result = notices[0].transferinfo.model_copy(
+            update={
+                "fileitem": notices[0].transferinfo.fileitem.model_copy(
+                    update={"storage": "local"}
+                )
+            }
+        )
+        TransferChain.send_transfer_message(
+            chain, notices[0].meta, media, foreign_result, buttons=buttons, batch=True
+        )
+        self.assertEqual(chain.post_message.call_args.args[0].buttons, buttons)
+
     def test_terminal_marker_releases_only_settled_batch_lease(self) -> None:
         """
         仅批量任务已提交终态后停止本地续租，其他任务仍遵循宿主生命周期
