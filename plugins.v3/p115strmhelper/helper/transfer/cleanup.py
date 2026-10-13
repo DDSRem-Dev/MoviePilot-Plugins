@@ -144,6 +144,12 @@ def _cleanup_paths(paths: List[str], source_oper: Any) -> bool:
         if not confirmed:
             return True
         logger.info(f"【整理接管】开始批量删除空目录：{len(confirmed)} 个目录")
+        for folder in confirmed:
+            logger.info(
+                "【整理接管】待清理目录：路径=%r，目录ID=%s",
+                folder.path,
+                folder.fileid,
+            )
         response = source_oper.client.fs_delete(
             [folder.fileid for folder in confirmed],
             **configer.get_ios_ua_app(app=False),

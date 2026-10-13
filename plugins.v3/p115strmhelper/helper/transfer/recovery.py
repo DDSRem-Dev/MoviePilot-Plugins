@@ -25,6 +25,7 @@ def claim_batch_recovery(chain: Any, workers: Any, claimed: List[Any]) -> List[A
         return claimed
     after = None
     scanned = 0
+    original_count = len(claimed)
     try:
         while capacity > 0 and scanned < repository._MAX_RECOVERY_SCAN_TASKS:
             if workers._stopping.is_set():
@@ -88,4 +89,19 @@ def claim_batch_recovery(chain: Any, workers: Any, claimed: List[Any]) -> List[A
         logger.warning(
             "【整理接管】批量恢复扫描未完成，已领取任务继续交回宿主", exc_info=True
         )
+    added = len(claimed) - original_count
+    if added:
+        logger.info(
+            "【整理接管】批量恢复领取：宿主原领取=%s，追加批量计划=%s，当前持有租约=%s，本轮总数=%s",
+            original_count,
+            added,
+            owned,
+            len(claimed),
+        )
+        for admission in claimed[original_count:]:
+            logger.info(
+                "【整理接管】恢复任务入队候选：任务=%s，源=%r",
+                admission.task_id,
+                admission.src_path,
+            )
     return claimed

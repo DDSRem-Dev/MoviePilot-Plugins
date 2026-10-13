@@ -18,6 +18,7 @@ from ...core.config import configer
 from .batch import BatchCoordinator, BatchOperation
 from .cache_updater import CacheUpdater
 from .cleanup import SourceDirectoryCleaner
+from .diagnostics import log_batch
 from .workers import BatchWorkers
 
 
@@ -176,6 +177,12 @@ class DurableBatchTransfer:
         operations = valid
         if not operations:
             return
+        with log_batch(operations) as batch_id:
+            self._execute_operations(operations, batch_id)
+
+    def _execute_operations(
+        self, operations: List[BatchOperation], batch_id: str
+    ) -> None:
         first = operations[0].payload
         client = first["target_oper"].client
         kind = first["kind"]
@@ -196,6 +203,11 @@ class DurableBatchTransfer:
                         try:
                             folder = oper.get_item_strict(parent)
                             if folder is None:
+                                logger.warning(
+                                    "【整理接管】批次=%s，源目录不存在：%r",
+                                    batch_id,
+                                    str(parent),
+                                )
                                 raise OSError(f"源目录不存在：{parent}")
                             sources[key] = {
                                 (str(Path(item.path)), item.fileid)
@@ -205,6 +217,12 @@ class DurableBatchTransfer:
                             errors[key] = error
                             raise
                     if (str(Path(source.path)), source.fileid) not in sources[key]:
+                        logger.warning(
+                            "【整理接管】批次=%s，源文件身份不匹配：路径=%r，文件ID=%s",
+                            batch_id,
+                            source.path,
+                            source.fileid,
+                        )
                         raise OSError(f"源文件身份已经改变：{source.path}")
                 except Exception as error:
                     operation.future.set_exception(error)
@@ -233,7 +251,6 @@ class DurableBatchTransfer:
                         )
                     )
             return
-        logger.info(f"【整理接管】批量 {kind}：{len(operations)} 个文件")
         error = None
         try:
             if kind == "rename":
@@ -257,6 +274,12 @@ class DurableBatchTransfer:
             check_response(response)
         except Exception as failure:
             error = failure
+            logger.warning(
+                "【整理接管】批次=%s，网盘 %s 请求异常，错误类型=%s；继续核验实际结果，暂不判定失败",
+                batch_id,
+                kind,
+                type(failure).__name__,
+            )
         items = self._list(first["target_oper"], first["folder"])
         digests = None
         if kind == "copy":
@@ -275,6 +298,16 @@ class DurableBatchTransfer:
                     else self._observe_materialize(operation.payload, items, digests)
                 )
                 if result.state is not TransferOperationObservationState.APPLIED:
+                    logger.warning(
+                        "【整理接管】批次=%s，任务=%s，%s 结果未确认：源=%r，状态=%s，原因=%s",
+                        batch_id,
+                        operation.payload.get("task_id") or "未知",
+                        kind,
+                        operation.payload["source"].path,
+                        result.state.value,
+                        result.evidence.payload.get("reason")
+                        or "未发现可确认的目标文件",
+                    )
                     raise OSError(
                         f"批量 {kind} 尚未确认成功：{result.state.value}"
                     ) from error
@@ -315,18 +348,48 @@ class DurableBatchTransfer:
         使用同一宿主任务的快照、落地、重命名步骤执行单文件批量整理
         """
         source = FileItem(**source_fileitem)
+        task_id = getattr(task, "admission_task_id", None) or "未知"
+        logger.info(
+            "【整理接管】执行文件步骤：任务=%s，方式=%s，源=%r，目标=%r",
+            task_id,
+            transfer_type,
+            source.path,
+            str(target_file),
+        )
         folder = target_oper.get_item_strict(target_file.parent)
         if not folder or folder.type != "dir" or not folder.fileid:
+            logger.error(
+                "【整理接管】目标目录不可用：任务=%s，路径=%r，无法开始 %s",
+                task_id,
+                str(target_file.parent),
+                transfer_type,
+            )
             raise OSError(f"目标目录尚未创建：{target_file.parent}")
+        logger.debug(
+            "【整理接管】目标目录已就绪：任务=%s，路径=%r，目录ID=%s",
+            task_id,
+            folder.path,
+            folder.fileid,
+        )
 
         def validate() -> None:
-            chain._TransferChain__assert_owned_lease(task)
+            try:
+                chain._TransferChain__assert_owned_lease(task)
+            except Exception as error:
+                logger.warning(
+                    "【整理接管】操作被租约校验阻止：任务=%s，源=%r，错误类型=%s",
+                    task_id,
+                    source.path,
+                    type(error).__name__,
+                )
+                raise
 
         def snapshot() -> TransferStepResult:
             return self.coordinator.submit(
                 (id(source_oper), id(target_oper), "capture", folder.fileid),
                 {
                     "kind": "capture",
+                    "task_id": task_id,
                     "source": source,
                     "source_oper": source_oper,
                     "target_oper": target_oper,
@@ -346,6 +409,7 @@ class DurableBatchTransfer:
             ),
         )
         operation = {
+            "task_id": task_id,
             "source": source,
             "source_oper": source_oper,
             "target_oper": target_oper,
@@ -373,10 +437,16 @@ class DurableBatchTransfer:
                 "baseline": baseline.payload,
             },
             execute=submit,
-            observe=lambda: self._observe_materialize(operation),
+            observe=lambda: self._observe_recovery(operation, task_id),
         )
         materialized_item = FileItem(**materialized.payload["item"])
         operation.update(source=materialized_item, kind="rename")
+        if materialized_item.name == target_file.name:
+            logger.debug(
+                "【整理接管】文件名已符合目标，无需重命名：任务=%s，路径=%r",
+                task_id,
+                str(target_file),
+            )
         renamed = step_runner.run(
             phase="p115_batch",
             kind="rename",
@@ -391,12 +461,44 @@ class DurableBatchTransfer:
                     else submit()
                 )
             ),
-            observe=lambda: self._observe_rename(operation),
+            observe=lambda: self._observe_recovery(operation, task_id),
         )
         target = FileItem(**renamed.payload["item"])
         CacheUpdater(target_oper).update_file_cache(target)
-        logger.info(f"【整理接管】整理完成：{source.path} -> {target.path}")
+        logger.info(
+            "【整理接管】整理完成：%r -> %r，任务=%s，方式=%s，源ID=%s，目标ID=%s",
+            source.path,
+            target.path,
+            task_id,
+            transfer_type,
+            source.fileid,
+            target.fileid,
+        )
         return target, ""
+
+    def _observe_recovery(
+        self, operation: Dict[str, Any], task_id: str
+    ) -> TransferOperationObservation:
+        kind = operation["kind"]
+        logger.info(
+            "【整理接管】恢复核验：任务=%s，步骤=%s，源=%r，目标=%r",
+            task_id,
+            kind,
+            operation["source"].path,
+            str(operation["target"]),
+        )
+        result = (
+            self._observe_rename(operation)
+            if kind == "rename"
+            else self._observe_materialize(operation)
+        )
+        logger.info(
+            "【整理接管】恢复核验结果：任务=%s，步骤=%s，状态=%s，后续由宿主判定重试或复核",
+            task_id,
+            kind,
+            result.state.value,
+        )
+        return result
 
     def shutdown(self, timeout: float = 25.0) -> bool:
         """
