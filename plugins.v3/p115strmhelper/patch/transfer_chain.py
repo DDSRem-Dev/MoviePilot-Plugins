@@ -44,7 +44,7 @@ class TransferChainPatcher:
             TransactionalTransferExecutionRepository,
         )
         from app.modules.filemanager.transhandler import TransHandler
-        from app.schemas import TransferTask
+        from app.application.transfer.workflow import TransferTask
         from app.schemas.types import MediaType
 
         from ..helper.transfer.linked_candidates import plan_linked_candidates

@@ -3,6 +3,7 @@ from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from shutil import copyfile
 from tempfile import TemporaryDirectory
 from threading import Barrier, Event, RLock
 from time import monotonic
@@ -23,13 +24,29 @@ class BatchTransferContracts(
     使用真实 V3 SQLite 步骤账本验证批量整理和恢复，网盘边界使用内存替身
     """
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        创建只含空表的宿主数据库模板，避免每个场景重复建表
+        """
+        from sqlalchemy import create_engine
+        from app.db.base import Base
+
+        temporary = TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.database_template = Path(temporary.name) / "template.db"
+        engine = create_engine(f"sqlite:///{cls.database_template}")
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+
     def setUp(self) -> None:
         """
         每个场景建立独立数据库和云端文件集合
         """
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
-        from app.db.base import Base
         from app.db.adapters.transfer.execution import (
             TransactionalTransferExecutionRepository,
         )
@@ -40,9 +57,10 @@ class BatchTransferContracts(
 
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.engine = create_engine(f"sqlite:///{self.temporary.name}/batch.db")
+        database = Path(self.temporary.name) / "batch.db"
+        copyfile(self.database_template, database)
+        self.engine = create_engine(f"sqlite:///{database}")
         self.addCleanup(self.engine.dispose)
-        Base.metadata.create_all(self.engine)
         self.factory = sessionmaker(bind=self.engine, expire_on_commit=False)
         self.repository = TransactionalTransferExecutionRepository(self.factory)
         self.storage = MemoryDrive()
@@ -369,7 +387,10 @@ class BatchTransferContracts(
                 barrier.wait()
             return original(key, payload, validate)
 
-        with patch.object(self.handler.coordinator, "submit", submit):
+        with (
+            patch.object(self.handler.coordinator, "submit", submit),
+            self._synchronize_copies(2),
+        ):
             with ThreadPoolExecutor(max_workers=3) as pool:
                 futures = [
                     pool.submit(self.run_transfer, f"missing-{index}")
@@ -1166,10 +1187,12 @@ class BatchTransferContracts(
         chain._TransferChain__select_storage_oper = lambda storage: self.storage
         chain.send_transfer_message = Mock()
         chain._send_metadata_scrape_event = Mock()
+        settled_leases = []
 
         def after_settlement(task: Any, result: Any) -> None:
-            self.assertTrue(task.terminal_settled)
-            self.assertNotIn(task.admission_task_id, chain._owned_leases)
+            settled_leases.append(
+                (task.terminal_settled, task.admission_task_id in chain._owned_leases)
+            )
             chain._TransferChain__heartbeat_owned_leases()
 
         chain.notify_successful_transfer = Mock(side_effect=after_settlement)
@@ -1262,6 +1285,7 @@ class BatchTransferContracts(
                     self.assertTrue(all(row.outcome == "succeeded" for row in receipts))
                 self.assertEqual(chain._owned_leases, {})
                 self.assertEqual(chain.notify_successful_transfer.call_count, 4)
+                self.assertEqual(settled_leases, [(True, False)] * 4)
             finally:
                 self.assertTrue(chain.close_workers())
 
