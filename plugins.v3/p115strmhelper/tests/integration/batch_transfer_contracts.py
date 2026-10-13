@@ -1,11 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, RLock
 from time import monotonic
 from types import SimpleNamespace
+from typing import Any, Dict, List, Optional
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -49,7 +51,7 @@ class BatchTransferContracts(TestCase):
         self.plans = {}
         self.leases = {}
 
-    def seed(self, name: str, mode: str = "copy"):
+    def seed(self, name: str, mode: str = "copy") -> Any:
         """
         创建源文件并保存匹配的宿主准入、冻结计划和有效租约
         """
@@ -114,7 +116,7 @@ class BatchTransferContracts(TestCase):
             session.commit()
         return source
 
-    def run_transfer(self, name: str):
+    def run_transfer(self, name: str) -> Any:
         """
         重建 runner 模拟任务恢复，并执行原计划对应的批量文件步骤
         """
@@ -256,6 +258,338 @@ class BatchTransferContracts(TestCase):
                 observe=lambda: self.fail("不应探测"),
             )
 
+    def _execute_plan(self, name: str, **changes: Any) -> Any:
+        from sqlalchemy import select
+        from app.chain.transfer.execution import _DurableTransferStepRunner
+        from app.db.models.transferpending import TransferPending
+        from app.modules.filemanager.transhandler import TransHandler
+        from app.plugins.p115strmhelper.patch.transfer_chain import _context
+        from app.schemas.types import MediaType
+        from app.sdk.media import MediaInfo, MetaInfoPath
+
+        plan = replace(self.plans[name], **changes)
+        with self.factory() as session:
+            pending = session.scalar(
+                select(TransferPending).where(TransferPending.task_id == name)
+            )
+            pending.checkpoint_payload = plan.to_payload()
+            pending.planning_input = plan.planning_input.to_payload()
+            pending.input_fingerprint = plan.planning_input.fingerprint
+            session.commit()
+        runner = _DurableTransferStepRunner(
+            task_id=name,
+            lease_token=self.leases[name],
+            checkpoint_fingerprint=plan.fingerprint,
+            repository=self.repository,
+        )
+        token = _context.set((self.chain, SimpleNamespace(plan_checkpoint=plan)))
+        try:
+            with patch.object(self.handler, "supports", return_value=True):
+                return TransHandler().execute_transfer_plan(
+                    plan,
+                    meta=MetaInfoPath(
+                        Path(plan.planning_input.source_fileitem["path"])
+                    ),
+                    mediainfo=MediaInfo(title="星际穿越", type=MediaType.MOVIE),
+                    source_oper=self.storage,
+                    target_oper=self.storage,
+                    step_runner=None if plan.preview else runner,
+                )
+        finally:
+            _context.reset(token)
+
+    def test_started_copy_recovers_without_duplicate(self) -> None:
+        """
+        云端复制成功但完成证据入库前崩溃，重建 runner 后只确认副本并续跑
+        """
+        from app.application.transfer.execution import TransferExecutionCommand
+
+        self.seed("crash-copy")
+        complete = TransferExecutionCommand.complete
+
+        def crash(command: Any, **kwargs: Any) -> Any:
+            if kwargs["step"].intent.kind == "materialize":
+                raise SystemExit("injected process death")
+            return complete(command, **kwargs)
+
+        with patch.object(TransferExecutionCommand, "complete", crash):
+            with self.assertRaises(SystemExit):
+                self.run_transfer("crash-copy")
+        self.assertEqual(
+            self.repository.get_snapshot(task_id="crash-copy").steps[-1].state.value,
+            "started",
+        )
+        result = self.run_transfer("crash-copy")
+        self.assertEqual(result.path, "/target/crash-copy-renamed.mkv")
+        self.assertEqual(sum(kind == "copy" for kind, _ in self.storage.calls), 1)
+
+    def test_partial_batch_only_retries_failed_file(self) -> None:
+        """
+        一次批量请求部分落地时，成功文件完成，失败文件进入原宿主重试
+        """
+        from app.chain.transfer.execution import _TransferRetryDeferred
+
+        sources = [self.seed(f"partial-{index}") for index in range(3)]
+        self.storage.reject_copy_ids.add(sources[1].fileid)
+        with ThreadPoolExecutor(max_workers=3) as workers:
+            futures = [
+                workers.submit(self.run_transfer, f"partial-{index}")
+                for index in range(3)
+            ]
+            self.assertIsNotNone(futures[0].result())
+            with self.assertRaises(_TransferRetryDeferred):
+                futures[1].result()
+            self.assertIsNotNone(futures[2].result())
+        self.assertEqual(
+            self.repository.get_snapshot(task_id="partial-1").state.value, "retry_wait"
+        )
+        self.assertEqual(
+            len(
+                [
+                    item
+                    for item in self.storage.items.values()
+                    if item.path.startswith("/target/")
+                ]
+            ),
+            2,
+        )
+
+    def test_native_overwrite_modes_and_preview(self) -> None:
+        """
+        原生覆盖策略保持生效，预览不查询关联目录、不创建云端文件或步骤
+        """
+        for mode, size, expected in [
+            ("never", 1, False),
+            ("size", 2048, False),
+            ("size", 1, True),
+            ("always", 2048, True),
+            ("latest", 2048, True),
+        ]:
+            name = f"overwrite-{mode}-{size}"
+            with self.subTest(mode=mode, size=size):
+                self.seed(name)
+                old = self.storage.add(f"/target/{name}-renamed.mkv")
+                self.storage.items[old.fileid].size = size
+                result = self._execute_plan(name, overwrite_mode=mode)
+                self.assertEqual(result.success, expected)
+                self.assertEqual(old.fileid in self.storage.items, not expected)
+        self.seed("preview")
+        calls = list(self.storage.calls)
+        self.storage.query_failed = True
+        result = self._execute_plan("preview", preview=True)
+        self.assertTrue(result.success)
+        self.assertEqual(calls, self.storage.calls)
+        self.assertEqual(self.repository.get_snapshot(task_id="preview").steps, ())
+
+    def test_interception_rejects_before_cloud_write(self) -> None:
+        """
+        宿主整理拦截事件拒绝后，不执行复制、移动或删除
+        """
+        from app.modules.filemanager.transhandler import TransHandler
+
+        self.seed("rejected")
+        with patch.object(
+            TransHandler,
+            "_TransHandler__intercept_transfer",
+            return_value=(False, "规则拒绝"),
+        ):
+            result = self._execute_plan("rejected")
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "规则拒绝")
+        self.assertEqual(self.storage.calls, [])
+
+    def test_cleanup_protects_roots_and_remaining_media(self) -> None:
+        """
+        仅清理允许的源目录，保护配置根目录、其他媒体和读取异常的目录
+        """
+        from app.plugins.p115strmhelper.helper.transfer.cleanup import (
+            cleanup_source_directories,
+        )
+        from app.application.directory import DirectoryHelper
+
+        self.storage.add("/downloads", "dir")
+        self.storage.add("/downloads/done", "dir")
+        self.storage.add("/downloads/done/poster.jpg")
+        self.storage.add("/downloads/pending", "dir")
+        self.storage.add("/downloads/pending/remaining.mkv")
+        self.storage.add("/unconfigured", "dir")
+        self.storage.add("/unconfigured/metadata", "dir")
+        self.storage.add("/unconfigured/metadata/poster.jpg")
+        tasks = [
+            SimpleNamespace(fileitem=SimpleNamespace(storage="115网盘Plus", path=path))
+            for path in [
+                "/downloads/done/movie.mkv",
+                "/downloads/pending/movie.mkv",
+                "/unconfigured/metadata/movie.mkv",
+            ]
+        ]
+        task = SimpleNamespace(
+            fileitem=tasks[0].fileitem,
+            mediainfo=None,
+            meta=SimpleNamespace(begin_season=None),
+        )
+        chain = SimpleNamespace(
+            jobview=SimpleNamespace(
+                is_success=lambda task: True, success_tasks=lambda *args: tasks
+            )
+        )
+        with patch.object(
+            DirectoryHelper,
+            "get_dirs",
+            return_value=[
+                SimpleNamespace(download_path="/downloads", library_path="/target")
+            ],
+        ):
+            cleanup_source_directories(chain, task, self.storage)
+            self.assertIsNone(self.storage.get_item_strict(Path("/downloads/done")))
+            for path in ["/downloads", "/downloads/pending", "/unconfigured/metadata"]:
+                self.assertIsNotNone(self.storage.get_item_strict(Path(path)))
+            calls = list(self.storage.calls)
+            self.storage.query_failed = True
+            cleanup_source_directories(chain, task, self.storage)
+            self.assertEqual(calls, self.storage.calls)
+
+    def test_linked_exhaustion_retains_successful_file_evidence(self) -> None:
+        """
+        关联文件重试耗尽后从持久步骤恢复逐文件结果，失败结算仍保留实际目标身份
+        """
+        from sqlalchemy import select
+        from app.application.chain.events import TransferResultSettlement
+        from app.application.history import add_transfer_fail
+        from app.application.outbox import TRANSFER_FAILED_TOPIC
+        from app.chain.transfer.execution import _TransferRetryExhausted
+        from app.db.adapters.chain import TransactionalChainDurableEventWriter
+        from app.db.models.transferhistory import TransferHistory
+        from app.db.models.outbox import OutboxMessage
+        from app.plugins.p115strmhelper.helper.transfer.planning import extend_plan
+        from app.schemas import TransferInfo
+        from app.schemas.types import MediaType
+        from app.sdk.media import MediaInfo, MetaInfoPath
+
+        name = "Interstellar.2014.failed"
+        source = self.seed(name, "move")
+        self.storage.add(f"/source/{name}.zh-cn.srt")
+        audio = self.storage.add(f"/source/{name}.flac")
+        self.plans[name] = extend_plan(self.plans[name], self.storage, linked=True)
+        move = self.storage.fs_move
+
+        def reject_audio(ids: List[str], pid: int, **kwargs: Any) -> Any:
+            if audio.fileid in ids:
+                raise OSError("injected audio failure")
+            return move(ids, pid, **kwargs)
+
+        with (
+            patch.object(self.storage, "fs_move", reject_audio),
+            patch("app.chain.transfer.execution.max_failed_retries", return_value=0),
+        ):
+            with self.assertRaises(_TransferRetryExhausted) as failure:
+                self._execute_plan(name)
+        execution = failure.exception.snapshot.checkpoint
+        self.assertIsNotNone(execution)
+        result = TransferInfo(
+            success=False,
+            fileitem=source,
+            transfer_type="move",
+            fail_list=[source.path],
+        )
+        media = MediaInfo(title="星际穿越", type=MediaType.MOVIE)
+        meta = MetaInfoPath(Path(source.path))
+        writer = TransactionalChainDurableEventWriter(self.factory)
+        writer.transfer_result(
+            topic=TRANSFER_FAILED_TOPIC,
+            stage_history=lambda staging: add_transfer_fail(
+                fileitem=source,
+                mode="move",
+                meta=meta,
+                mediainfo=media,
+                transferinfo=result,
+                transfer_history_oper=staging,
+            ),
+            event_payload=dict(
+                fileitem=source, transferinfo=result, meta=meta, mediainfo=media
+            ),
+            publish=None,
+            settlement=TransferResultSettlement(
+                task_id=name,
+                lease_token="lease",
+                execution_fingerprint=execution.fingerprint,
+                outcome="failed",
+                error="injected audio failure",
+            ),
+        )
+        self.assertEqual(result.target_item.fileid, source.fileid)
+        self.assertEqual(result.fail_list, [audio.path])
+        self.assertEqual(len(result.fileitem.children), 2)
+        with self.factory() as session:
+            histories = list(session.scalars(select(TransferHistory)))
+            self.assertEqual(len(histories), 3)
+            self.assertEqual(len(list(session.scalars(select(OutboxMessage)))), 3)
+
+    def test_expired_lease_cannot_write_cloud(self) -> None:
+        """
+        数据库租约失效后，旧任务无法开始任何云端副作用
+        """
+        from sqlalchemy import select
+        from app.application.transfer.execution import TransferExecutionLeaseLostError
+        from app.db.models.transferpending import TransferPending
+
+        self.seed("expired")
+        with self.factory() as session:
+            pending = session.scalar(
+                select(TransferPending).where(TransferPending.task_id == "expired")
+            )
+            pending.lease_token = "new-owner"
+            session.commit()
+        with self.assertRaises(TransferExecutionLeaseLostError):
+            self.run_transfer("expired")
+        self.assertEqual(self.storage.calls, [])
+
+    def test_linked_files_skip_separate_task_and_support_independent_mode(self) -> None:
+        """
+        关联模式字幕任务零副作用跳过，关闭关联模式后仍可作为独立原任务整理
+        """
+        from app.plugins.p115strmhelper.helper.transfer.planning import (
+            extend_plan,
+            LINKED_SKIP,
+        )
+
+        self.seed("subtitle")
+        source = self.storage.add("/source/Interstellar.zh-cn.srt")
+        plan = self.plans["subtitle"]
+        data = source.model_dump(mode="json")
+        plan = replace(
+            plan,
+            planning_input=replace(plan.planning_input, source_fileitem=data),
+            final_target_path="/target/Interstellar.zh-cn.srt",
+            items=(
+                replace(
+                    plan.items[0],
+                    source_fileitem=data,
+                    target_path="/target/Interstellar.zh-cn.srt",
+                ),
+            ),
+        )
+        self.plans["subtitle"] = extend_plan(plan, self.storage, linked=True)
+        result = self._execute_plan("subtitle")
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, LINKED_SKIP)
+        self.assertEqual(self.storage.calls, [])
+        self.plans["subtitle"] = extend_plan(plan, self.storage, linked=False)
+        result = self._execute_plan("subtitle")
+        self.assertTrue(result.success)
+        self.assertNotEqual(result.target_item.fileid, source.fileid)
+
+    def test_shutdown_waits_for_native_task_between_batches(self) -> None:
+        """
+        批次间隙仍有原宿主任务时停止返回未完成，结束后可再次停止并恢复队列
+        """
+        with self.handler.operation():
+            self.assertFalse(self.handler.shutdown(timeout=0))
+        self.assertTrue(self.handler.shutdown(timeout=1))
+        with self.assertRaises(RuntimeError):
+            with self.handler.operation():
+                self.fail("关闭后不应接收新任务")
+
     def test_linked_plan_atomic_history_and_outbox(self) -> None:
         """
         关联文件计划可恢复，主文件与字幕音轨历史、事件在同一事务提交且不重复
@@ -351,6 +685,19 @@ class BatchTransferContracts(TestCase):
                 settlement=settlement,
             )
 
+        from app.db.adapters.outbox import SqlAlchemyOutboxStager
+
+        with patch.object(
+            SqlAlchemyOutboxStager,
+            "stage",
+            side_effect=RuntimeError("injected transaction failure"),
+        ):
+            with self.assertRaises(RuntimeError):
+                write()
+        with self.factory() as session:
+            self.assertEqual(list(session.scalars(select(TransferHistory))), [])
+            self.assertEqual(list(session.scalars(select(OutboxMessage))), [])
+            self.assertIsNotNone(session.scalar(select(TransferPending)))
         receipt = write()
         self.assertFalse(receipt.already_settled)
         self.assertTrue(write().already_settled)
@@ -483,10 +830,11 @@ class MemoryDrive:
         self.timeout_after_copy = False
         self.fail_observation_after_copy = False
         self.query_failed = False
+        self.reject_copy_ids = set()
         self.add("/source", "dir")
         self.add("/target", "dir")
 
-    def add(self, path: str, kind: str = "file"):
+    def add(self, path: str, kind: str = "file") -> Any:
         """
         创建测试文件或目录
         """
@@ -507,7 +855,7 @@ class MemoryDrive:
             self.items[item.fileid] = item
             return item.model_copy(deep=True)
 
-    def get_item_strict(self, path: Path):
+    def get_item_strict(self, path: Path) -> Optional[Any]:
         """
         严格查询测试文件
         """
@@ -518,12 +866,12 @@ class MemoryDrive:
                 (
                     item.model_copy(deep=True)
                     for item in self.items.values()
-                    if item.path == str(path)
+                    if item.path == path.as_posix()
                 ),
                 None,
             )
 
-    def list(self, folder):
+    def list(self, folder: Any) -> List[Any]:
         """
         返回目录的云端实时内容
         """
@@ -533,16 +881,16 @@ class MemoryDrive:
             return [
                 item.model_copy(deep=True)
                 for item in self.items.values()
-                if str(Path(item.path).parent) == folder.path
+                if Path(item.path).parent.as_posix() == folder.path
             ]
 
-    def get_folder(self, path: Path):
+    def get_folder(self, path: Path) -> Any:
         """
         获取或创建测试目录
         """
-        return self.get_item_strict(path) or self.add(str(path), "dir")
+        return self.get_item_strict(path) or self.add(path.as_posix(), "dir")
 
-    def delete(self, item) -> bool:
+    def delete(self, item: Any) -> bool:
         """
         删除测试目标文件
         """
@@ -550,7 +898,7 @@ class MemoryDrive:
             self.items.pop(item.fileid, None)
         return True
 
-    def fs_file_skim(self, file_id, **kwargs):
+    def fs_file_skim(self, file_id: Any, **kwargs: Any) -> Dict[str, Any]:
         """
         返回稳定内容摘要
         """
@@ -560,7 +908,7 @@ class MemoryDrive:
             "data": [{"file_id": value, "sha1": "A" * 40} for value in ids],
         }
 
-    def fs_copy(self, ids, pid, **kwargs):
+    def fs_copy(self, ids: List[str], pid: int, **kwargs: Any) -> Dict[str, Any]:
         """
         复制后分配新的 ID 和 pickcode
         """
@@ -568,15 +916,28 @@ class MemoryDrive:
             self.calls.append(("copy", list(ids)))
             folder = self.items[str(pid)]
             for file_id in ids:
+                if file_id in self.reject_copy_ids:
+                    continue
                 source = self.items[file_id]
-                self.add(str(Path(folder.path) / source.name))
+                self.add((Path(folder.path) / source.name).as_posix())
             if self.fail_observation_after_copy:
                 self.query_failed = True
             if self.timeout_after_copy:
                 raise TimeoutError("injected response loss")
             return {"state": True}
 
-    def fs_move(self, ids, pid, **kwargs):
+    def fs_delete(self, ids: List[str], **kwargs: Any) -> Dict[str, Any]:
+        """
+        删除指定目录及其子文件
+        """
+        self.calls.append(("delete", list(ids)))
+        roots = [Path(self.items[file_id].path) for file_id in ids]
+        for file_id, item in list(self.items.items()):
+            if any(Path(item.path).is_relative_to(root) for root in roots):
+                del self.items[file_id]
+        return {"state": True}
+
+    def fs_move(self, ids: List[str], pid: int, **kwargs: Any) -> Dict[str, Any]:
         """
         批量移动时保留文件身份
         """
@@ -585,10 +946,10 @@ class MemoryDrive:
             folder = self.items[str(pid)]
             for file_id in ids:
                 item = self.items[file_id]
-                item.path = str(Path(folder.path) / item.name)
+                item.path = (Path(folder.path) / item.name).as_posix()
             return {"state": True}
 
-    def fs_rename(self, pairs, **kwargs):
+    def fs_rename(self, pairs: Any, **kwargs: Any) -> Dict[str, Any]:
         """
         批量重命名，可在修改前注入失败
         """
@@ -598,12 +959,12 @@ class MemoryDrive:
                 raise ConnectionError("injected rename failure")
             for file_id, name in pairs:
                 item = self.items[file_id]
-                item.path = str(Path(item.path).parent / name)
+                item.path = (Path(item.path).parent / name).as_posix()
                 item.name = name
             return {"state": True}
 
 
-def run_contracts():
+def run_contracts() -> int:
     """
     在已初始化的隔离宿主内运行批量执行契约
     """

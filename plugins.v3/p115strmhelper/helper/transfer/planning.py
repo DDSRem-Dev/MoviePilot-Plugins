@@ -60,7 +60,7 @@ def extend_plan(checkpoint: Any, source_oper: Any, linked: bool) -> Any:
                     sequence=len(items),
                     source_fileitem=related.fileitem.model_dump(mode="json"),
                     target_storage=checkpoint.target_storage,
-                    target_path=str(related.target_path),
+                    target_path=related.target_path.as_posix(),
                     action=LINKED_ACTION,
                 )
             )

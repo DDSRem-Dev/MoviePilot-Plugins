@@ -135,8 +135,12 @@ class DurableBatchTransfer:
             return self._observation(states.APPLIED, matches[0])
         if matches:
             return self._observation(states.CONFLICT, reason="存在多个匹配副本")
-        old = operation["source_oper"].get_item_strict(Path(source.path))
-        if old and old.fileid == source.fileid:
+        source_oper = operation["source_oper"]
+        source_folder = source_oper.get_item_strict(Path(source.path).parent)
+        if source_folder and any(
+            item.fileid == source.fileid and item.path == source.path
+            for item in self._list(source_oper, source_folder)
+        ):
             return self._observation(states.NOT_APPLIED)
         return self._observation(states.UNKNOWN, reason="源与目标身份无法确认")
 
@@ -319,7 +323,7 @@ class DurableBatchTransfer:
         baseline = step_runner.run(
             phase="p115_batch",
             kind="capture_destination",
-            payload={"source": source_fileitem, "target": str(target_file)},
+            payload={"source": source_fileitem, "target": target_file.as_posix()},
             execute=snapshot,
             observe=lambda: TransferOperationObservation(
                 state=TransferOperationObservationState.APPLIED, evidence=snapshot()
@@ -348,7 +352,7 @@ class DurableBatchTransfer:
             payload={
                 "source": source_fileitem,
                 "target_storage": target_storage,
-                "parent": str(target_file.parent),
+                "parent": target_file.parent.as_posix(),
                 "mode": transfer_type,
                 "baseline": baseline.payload,
             },
@@ -360,7 +364,10 @@ class DurableBatchTransfer:
         renamed = step_runner.run(
             phase="p115_batch",
             kind="rename",
-            payload={"item": materialized.payload["item"], "target": str(target_file)},
+            payload={
+                "item": materialized.payload["item"],
+                "target": target_file.as_posix(),
+            },
             execute=(
                 lambda: (
                     materialized

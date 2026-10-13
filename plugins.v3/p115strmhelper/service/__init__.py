@@ -221,21 +221,15 @@ class ServiceHelper:
             logger.error(f"服务项初始化失败: {e}")
             return False
 
-    def _init_transfer_enhancement(self):
+    def _init_transfer_enhancement(self) -> None:
         """
         初始化或更新接管网盘整理功能
         """
-        try:
-            TransferChainPatcher.disable()
-        except Exception:
-            pass
-
         if self.transfer_task_manager:
-            try:
-                self.transfer_task_manager.shutdown()
-            except Exception:
-                pass
+            if self.transfer_task_manager.shutdown() is False:
+                raise RuntimeError("批量整理仍在运行，待原任务结束后再更新配置")
             self.transfer_task_manager = None
+        TransferChainPatcher.disable()
         self.transfer_handler = None
 
         if configer.pan_transfer_takeover:
@@ -256,6 +250,9 @@ class ServiceHelper:
                     logger.info("【整理接管】已启用")
                 except Exception as e:
                     logger.error(f"【整理接管】初始化失败: {e}", exc_info=True)
+                    TransferChainPatcher.disable()
+                    if self.transfer_task_manager:
+                        self.transfer_task_manager.shutdown()
                     self.transfer_task_manager = None
                     self.transfer_handler = None
 

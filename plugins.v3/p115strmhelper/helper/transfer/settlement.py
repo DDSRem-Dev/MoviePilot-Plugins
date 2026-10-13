@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Callable
 
+from sqlalchemy import select
+
 from app.application.chain.events import snapshot_transfer_result
 from app.application.history import add_transfer_fail, add_transfer_success
 from app.application.outbox import (
@@ -11,12 +13,71 @@ from app.application.outbox import (
     SUBTITLE_TRANSFER_FAILED_TOPIC,
     OutboxIntent,
 )
+from app.application.transfer.models import TransferPlanCheckpoint
 from app.db.adapters.chain import _StagingTransferHistoryRepository
 from app.db.adapters.outbox import SqlAlchemyOutboxStager
-from app.schemas import TransferInfo
+from app.db.models.transferexecutionstep import TransferExecutionStep
+from app.db.models.transferpending import TransferPending
+from app.schemas import FileItem, TransferInfo
 
 from .file_types import TransferFileTypes
-from .planning import LINKED_SKIP
+from .planning import LINKED_SKIP, MAIN_ACTION
+
+
+def _restore_failed_files(session: Any, settlement: Any, result: TransferInfo) -> None:
+    if result.success or result.fileitem is None or result.fileitem.children:
+        return
+    pending = session.scalar(
+        select(TransferPending).where(TransferPending.task_id == settlement.task_id)
+    )
+    if pending is None or not pending.checkpoint_payload:
+        return
+    plan = TransferPlanCheckpoint.from_payload(pending.checkpoint_payload)
+    if not plan.items or plan.items[0].action != MAIN_ACTION:
+        return
+    steps = list(
+        session.scalars(
+            select(TransferExecutionStep)
+            .where(
+                TransferExecutionStep.task_id == settlement.task_id,
+                TransferExecutionStep.checkpoint_fingerprint == plan.fingerprint,
+                TransferExecutionStep.phase == "p115_batch",
+                TransferExecutionStep.state == "succeeded",
+            )
+            .order_by(TransferExecutionStep.ordinal)
+        )
+    )
+    materialized = {}
+    renamed = {}
+    for step in steps:
+        item = (step.result_payload or {}).get("item")
+        if not item:
+            continue
+        if step.kind == "materialize":
+            materialized[step.intent_payload["source"]["path"]] = FileItem(**item)
+        elif step.kind == "rename":
+            renamed[step.intent_payload["target"]] = FileItem(**item)
+    sources, targets, failed = [], [], []
+    result.file_list, result.file_list_new = [], []
+    for index, item in enumerate(plan.items):
+        source = FileItem(**item.source_fileitem)
+        target = renamed.get(item.target_path)
+        if target is None:
+            failed.append(source.path)
+            target = materialized.get(source.path)
+        if target is not None:
+            result.file_list.append(source.path)
+            result.file_list_new.append(target.path)
+        if index == 0:
+            result.target_item = target
+        else:
+            sources.append(source)
+            if target is not None:
+                targets.append(target)
+    result.fileitem = result.fileitem.model_copy(update={"children": sources})
+    if result.target_item is not None:
+        result.target_item = result.target_item.model_copy(update={"children": targets})
+    result.fail_list = failed or result.fail_list
 
 
 def stage_linked_results(
@@ -31,9 +92,14 @@ def stage_linked_results(
     if not isinstance(result, TransferInfo) or settlement is None:
         return original(writer, stage_history=stage_history, **kwargs)
     source = result.fileitem
-    linked = source.children if source and source.type == "file" else []
 
     def stage(staging: Any) -> Any:
+        _restore_failed_files(staging._repository._db, settlement, result)
+        linked = (
+            result.fileitem.children
+            if result.fileitem and result.fileitem.type == "file"
+            else []
+        )
         if result.message == LINKED_SKIP:
             prior = staging.get_success_by_src(source.path, source.storage)
             if prior is not None and getattr(prior, "dest", None):

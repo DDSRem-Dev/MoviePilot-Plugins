@@ -57,7 +57,7 @@ def validate_batch_intent(
                     == {
                         "source": item.source_fileitem,
                         "target_storage": item.target_storage,
-                        "parent": str(Path(item.target_path).parent),
+                        "parent": Path(item.target_path).parent.as_posix(),
                         "mode": checkpoint.resolved_transfer_type,
                         "baseline": step.result_payload,
                     }
@@ -71,7 +71,7 @@ def validate_batch_intent(
                     and step.state == "succeeded"
                     and step.intent_payload.get("source") == item.source_fileitem
                     and step.intent_payload.get("parent")
-                    == str(Path(item.target_path).parent)
+                    == Path(item.target_path).parent.as_posix()
                     and isinstance(step.result_payload, dict)
                     and isinstance(step.result_payload.get("item"), dict)
                     and payload
