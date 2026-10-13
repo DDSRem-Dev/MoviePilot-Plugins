@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event, RLock
+from threading import Barrier, Event, RLock
 from time import monotonic
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -141,12 +141,23 @@ class BatchTransferContracts(TestCase):
             transfer_type=plan.resolved_transfer_type,
         )[0]
 
+    def _synchronize_copies(self, count: int) -> Any:
+        barrier = Barrier(count, timeout=30)
+        submit = self.handler.coordinator.submit
+
+        def synchronized(key: Any, payload: Dict[str, Any], validate: Any) -> Any:
+            if payload["kind"] == "copy":
+                barrier.wait()
+            return submit(key, payload, validate)
+
+        return patch.object(self.handler.coordinator, "submit", synchronized)
+
     def test_copy_batch_and_replay(self) -> None:
         """
         多文件复制合并 API，副本身份正确且重放不重复复制或重命名
         """
         sources = [self.seed(f"copy-{index}") for index in range(4)]
-        with ThreadPoolExecutor(max_workers=4) as workers:
+        with self._synchronize_copies(4), ThreadPoolExecutor(max_workers=4) as workers:
             results = list(
                 workers.map(self.run_transfer, [f"copy-{index}" for index in range(4)])
             )
@@ -331,7 +342,7 @@ class BatchTransferContracts(TestCase):
 
         sources = [self.seed(f"partial-{index}") for index in range(3)]
         self.storage.reject_copy_ids.add(sources[1].fileid)
-        with ThreadPoolExecutor(max_workers=3) as workers:
+        with self._synchronize_copies(3), ThreadPoolExecutor(max_workers=3) as workers:
             futures = [
                 workers.submit(self.run_transfer, f"partial-{index}")
                 for index in range(3)
@@ -766,6 +777,7 @@ class BatchTransferContracts(TestCase):
         )
         tasks = []
         with ExitStack() as stack:
+            stack.enter_context(self._synchronize_copies(4))
             stack.enter_context(
                 patch.object(configer, "pan_transfer_linked_subtitle_audio", False)
             )
@@ -791,7 +803,7 @@ class BatchTransferContracts(TestCase):
                     )
                     tasks.append(task)
                     self.assertTrue(chain.put_to_queue(task))
-                deadline = monotonic() + 10
+                deadline = monotonic() + 60
                 while monotonic() < deadline and chain._queue.unfinished_tasks:
                     Event().wait(0.05)
                 self.assertEqual(chain._queue.unfinished_tasks, 0)
