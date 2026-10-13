@@ -248,8 +248,15 @@ class EmbyOperate:
             "UserId": emby_user,
         }
         try:
-            with RequestUtils().post_res(url=req_url, params=params) as res:
-                if res and res.status_code == 200:
+            response = RequestUtils(timeout=120).post_res(url=req_url, params=params)
+            if response is None:
+                logger.warning(
+                    f"{self.func_name}触发提取媒体信息失败，请求超时或连接失败 "
+                    f"name={name!r} item_id={item_id!r}"
+                )
+                return False
+            with response as res:
+                if res.status_code == 200:
                     return True
                 else:
                     logger.warning(
