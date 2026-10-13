@@ -96,7 +96,7 @@ def check_transfer_postprocess_contracts(instance: Any, check: Any) -> None:
                     size=100,
                     modify_time=1,
                 )
-                remote[target.path] = target
+                remote[target.path] = target.model_copy(update={"modify_time": 2})
                 return {
                     "idempotency_key": f"postprocess:{type(instance).__name__}:{file_id}",
                     "transferinfo": TransferInfo(

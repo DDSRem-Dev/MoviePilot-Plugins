@@ -55,6 +55,9 @@ def current_file(identity: Dict[str, Any]) -> Any:
 def is_current(identity: Dict[str, Any]) -> bool:
     """
     校验当前云端目标仍是该事件的文件，缺少可比身份则拒绝确认
+
+    移动和重命名会改变云端修改时间，完成事件仍可能携带操作前的时间
+    因此使用文件 ID 或 pickcode 及大小核对身份，不以修改时间判断事件过期
     """
     current = current_file(identity)
     if current is None:
@@ -66,14 +69,13 @@ def is_current(identity: Dict[str, Any]) -> bool:
         raise RuntimeError("整理后处理无法确认云端文件身份，等待重试")
     if str(expected) != str(actual):
         return False
-    for name in ("size", "modify_time"):
-        actual = getattr(current, name, None)
-        if (
-            identity.get(name) is not None
-            and actual is not None
-            and identity[name] != actual
-        ):
-            return False
+    actual_size = getattr(current, "size", None)
+    if (
+        identity.get("size") is not None
+        and actual_size is not None
+        and identity["size"] != actual_size
+    ):
+        return False
     return True
 
 

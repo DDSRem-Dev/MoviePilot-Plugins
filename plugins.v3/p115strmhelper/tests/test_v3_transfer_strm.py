@@ -486,6 +486,59 @@ class TestV3TransferStrm(TestCase):
         self._run(item)
         self.assertTrue((self.library / "Example.S01E01.strm").exists())
 
+    def test_transfer_timestamp_change_preserves_file_identity(self) -> None:
+        """
+        移动或复制后的云端时间不同于完成事件快照时仍生成文件，重放不重复执行
+        """
+        for mode, name in (("move", "moved.mkv"), ("copy", "copied.mkv")):
+            with self.subTest(mode=mode):
+                item = self._item(name)
+                transfer = item["transferinfo"]
+                transfer.transfer_type = mode
+                target = transfer.target_item
+                target.size = 73053519159
+                target.modify_time = 1791622064
+                self.remote_files[(target.storage, target.path)] = target.model_copy(
+                    update={"modify_time": 1791877143}
+                )
+                message = SimpleNamespace(
+                    payload=self.durable.snapshot_transfer_result(item)
+                )
+                handler = self.outbox[self.types.EventType.TransferComplete.value]
+                handler(message)
+                path = self.library / Path(name).with_suffix(".strm")
+                self.assertEqual(path.read_text(), "https://example.invalid/video")
+                stamp = self.files.fingerprint(path)
+                key = self.processor.event_key(item, self.types.EventType.TransferComplete)
+                record = self.processor.TransferPostprocessStore().load(key)
+                self.assertEqual(record["state"], "done")
+                self.assertTrue(all(record["plan"]["effects"].values()))
+                self.scrape.assert_called_once()
+                self.helper = self.module.TransferStrmHelper()
+                handler(message)
+                self.assertEqual(self.files.fingerprint(path), stamp)
+                self.scrape.assert_called_once()
+                self.scrape.reset_mock()
+
+    def test_same_identity_with_changed_size_is_superseded(self) -> None:
+        """
+        忽略整理时间差异后，文件大小变化仍阻止旧事件写入
+        """
+        item = self._item()
+        target = item["transferinfo"].target_item
+        target.size = 100
+        target.modify_time = 1
+        self.remote_files[(target.storage, target.path)] = target.model_copy(
+            update={"size": 200, "modify_time": 2}
+        )
+        self._run(item)
+        self.assertFalse(self.library.exists())
+        self.scrape.assert_not_called()
+        key = self.processor.event_key(item, self.types.EventType.TransferComplete)
+        self.assertEqual(
+            self.processor.TransferPostprocessStore().load(key)["state"], "superseded"
+        )
+
     def test_live_old_cloud_file_is_not_deleted_by_latest(self) -> None:
         """
         latest 候选在云端仍有效时保留，不以到达顺序判定过期
