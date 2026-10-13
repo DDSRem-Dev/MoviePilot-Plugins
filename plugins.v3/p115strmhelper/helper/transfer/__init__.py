@@ -1,5 +1,3 @@
-from .task import TransferTaskManager
-from .handler import TransferHandler
-
-
-__all__ = ["TransferTaskManager", "TransferHandler"]
+"""
+115 网盘批量整理的 V3 持久执行适配
+"""

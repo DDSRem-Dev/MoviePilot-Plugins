@@ -20,6 +20,7 @@ from backup_api_contracts import (
     check_disabled_backup_listing,
     check_disabled_backup_submission,
 )
+from batch_transfer_contracts import run_contracts as run_batch_transfer_contracts
 from browse_contracts import check_browse_contracts, check_disabled_account_contract
 from cleanup_store_contracts import check_cleanup_store_contracts
 from life_diagnostic_contracts import check_life_diagnostic_contracts
@@ -376,7 +377,9 @@ def _check_stopped_offline_listing(instance: Any, check: unittest.TestCase) -> N
     helper = service.offlinehelper
     check.assertIsNotNone(helper)
     original_cache = helper.offline_list_cache
-    route = next(route for route in instance.get_api() if route["path"] == "/offline_tasks")
+    route = next(
+        route for route in instance.get_api() if route["path"] == "/offline_tasks"
+    )
     app = FastAPI()
     app.add_api_route(route["path"], route["endpoint"], methods=route["methods"])
 
@@ -384,13 +387,29 @@ def _check_stopped_offline_listing(instance: Any, check: unittest.TestCase) -> N
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="https://isolated.invalid"
         ) as client:
-            response = await client.post(route["path"], json={"page": page, "limit": limit})
+            response = await client.post(
+                route["path"], json={"page": page, "limit": limit}
+            )
             check.assertEqual(response.status_code, 200)
             return response.json()
 
     tasks = [
-        {"info_hash": "first", "name": "one.mkv", "size": 1024, "status": 0, "percentDone": 25, "add_time": 1},
-        {"info_hash": "second", "name": "two.mkv", "size": 2048, "status": 2, "percentDone": 100, "add_time": 2},
+        {
+            "info_hash": "first",
+            "name": "one.mkv",
+            "size": 1024,
+            "status": 0,
+            "percentDone": 25,
+            "add_time": 1,
+        },
+        {
+            "info_hash": "second",
+            "name": "two.mkv",
+            "size": 2048,
+            "status": 2,
+            "percentDone": 100,
+            "add_time": 2,
+        },
     ]
     try:
         with patch.object(helper, "get_tasks", return_value=tasks) as query:
@@ -405,7 +424,10 @@ def _check_stopped_offline_listing(instance: Any, check: unittest.TestCase) -> N
                     check.assertEqual(response["code"], 0)
                     check.assertEqual(response["data"]["total"], 2)
                     items = response["data"]["tasks"]
-                    check.assertEqual([item["info_hash"] for item in items], ["first", "second"] if limit == -1 else ["second"])
+                    check.assertEqual(
+                        [item["info_hash"] for item in items],
+                        ["first", "second"] if limit == -1 else ["second"],
+                    )
                     check.assertEqual(query.call_count, int(expired))
                     check.assertEqual(items[-1]["status_text"], "已完成")
                     check.assertTrue(service._sync_stopping)
@@ -423,7 +445,11 @@ def _check_stopped_cleanup_execution(instance: Any, check: unittest.TestCase) ->
     queue = api.share_strm_pending_queue
     workers = []
     app = FastAPI()
-    route = next(route for route in instance.get_api() if route["path"] == "/share_strm_cleanup_execute")
+    route = next(
+        route
+        for route in instance.get_api()
+        if route["path"] == "/share_strm_cleanup_execute"
+    )
     app.add_api_route(route["path"], route["endpoint"], methods=route["methods"])
 
     def thread(**kwargs: Any) -> Thread:
@@ -435,7 +461,9 @@ def _check_stopped_cleanup_execution(instance: Any, check: unittest.TestCase) ->
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="https://isolated.invalid"
         ) as client:
-            response = await client.post(route["path"], json={"request_id": "disabled-batch"})
+            response = await client.post(
+                route["path"], json={"request_id": "disabled-batch"}
+            )
             check.assertEqual(response.status_code, 200)
             return response.json()
 
@@ -443,7 +471,10 @@ def _check_stopped_cleanup_execution(instance: Any, check: unittest.TestCase) ->
         sample = Path(directory) / "sample.strm"
         sample.write_text("https://isolated.invalid/media")
         queue.replace_single_batch("disabled-batch", [str(sample)], False, False, False)
-        with patch.object(api.configer, "notify", False), patch.object(api, "Thread", side_effect=thread):
+        with (
+            patch.object(api.configer, "notify", False),
+            patch.object(api, "Thread", side_effect=thread),
+        ):
             try:
                 response = asyncio.run(request())
                 check.assertEqual(response["code"], 0, response)
@@ -451,7 +482,9 @@ def _check_stopped_cleanup_execution(instance: Any, check: unittest.TestCase) ->
                 workers[0].join(timeout=2)
                 check.assertFalse(workers[0].is_alive())
                 check.assertFalse(sample.exists())
-                check.assertFalse(queue.pending_batch_paths_page("disabled-batch", 1, 50)[0])
+                check.assertFalse(
+                    queue.pending_batch_paths_page("disabled-batch", 1, 50)[0]
+                )
                 missing = asyncio.run(request())
                 check.assertEqual(missing["code"], 1)
                 check.assertEqual(missing["msg"], "未找到该批次或已处理")
@@ -475,25 +508,40 @@ def _check_stopped_offline_submission(instance: Any, check: unittest.TestCase) -
     check.assertTrue(api.servicer._sync_stopping)
     check.assertIsNotNone(helper)
     app = FastAPI()
-    route = next(route for route in instance.get_api() if route["path"] == "/add_offline_task")
+    route = next(
+        route for route in instance.get_api() if route["path"] == "/add_offline_task"
+    )
     app.add_api_route(route["path"], route["endpoint"], methods=route["methods"])
 
     async def request(path: Any) -> Any:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="https://isolated.invalid"
         ) as client:
-            response = await client.post(route["path"], json={"links": ["magnet:isolated"], "path": path})
+            response = await client.post(
+                route["path"], json={"links": ["magnet:isolated"], "path": path}
+            )
             check.assertEqual(response.status_code, 200)
             return response.json()
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(api.configer, "upload_offline_info", False))
-        stack.enter_context(patch.object(api.configer, "offline_download_paths", ["/isolated-default"]))
+        stack.enter_context(
+            patch.object(api.configer, "offline_download_paths", ["/isolated-default"])
+        )
         stack.enter_context(patch.object(api.configer, "pan_transfer_paths", ""))
-        resolve = stack.enter_context(patch.object(helper_module, "get_pid_by_path", return_value=42))
-        add = stack.enter_context(patch.object(
-            helper, "add_urls", return_value={"state": True, "data": {"result": [{"info_hash": "isolated"}]}},
-        ))
+        resolve = stack.enter_context(
+            patch.object(helper_module, "get_pid_by_path", return_value=42)
+        )
+        add = stack.enter_context(
+            patch.object(
+                helper,
+                "add_urls",
+                return_value={
+                    "state": True,
+                    "data": {"result": [{"info_hash": "isolated"}]},
+                },
+            )
+        )
         for path in (None, "/isolated-explicit"):
             resolve.reset_mock()
             add.reset_mock()
@@ -501,7 +549,9 @@ def _check_stopped_offline_submission(instance: Any, check: unittest.TestCase) -
             check.assertEqual(response["code"], 0, response)
             check.assertIn("1 个新任务已成功添加", response["msg"])
             add.assert_called_once_with(url_list=["magnet:isolated"], cid=42)
-            check.assertEqual(resolve.call_args.kwargs["path"], path or "/isolated-default")
+            check.assertEqual(
+                resolve.call_args.kwargs["path"], path or "/isolated-default"
+            )
             check.assertTrue(api.servicer._sync_stopping)
 
 
@@ -678,9 +728,11 @@ def _probe(host: Path) -> Dict[str, Any]:
             _check_stopped_offline_submission(instance, check)
             check_disabled_backup_submission(instance, check)
             check_life_diagnostic_contracts(instance, check)
+        batch_transfer_cases = run_batch_transfer_contracts()
         check.assertEqual(network_attempts, [])
         return {
             "runtime_modules": len(imported),
+            "batch_transfer_cases": batch_transfer_cases,
             "instances": len(instances),
             "routes": routes,
             "enabled_cycles": sum(result[0] for result in cycle_results),
@@ -698,7 +750,9 @@ class TestV3HostLoading(unittest.TestCase):
         Windows 唤醒通道可用，普通连接和域名解析仍被阻止
         """
         with ExitStack() as stack:
-            stack.enter_context(patch.object(socket, "socketpair", socket._fallback_socketpair))
+            stack.enter_context(
+                patch.object(socket, "socketpair", socket._fallback_socketpair)
+            )
             attempts = _block_network(stack)
             reader, writer = socket.socketpair()
             with reader, writer:

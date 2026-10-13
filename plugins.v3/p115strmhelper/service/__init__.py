@@ -32,7 +32,7 @@ from ..helper.strm import (
     ShareStrmHelper,
 )
 from ..helper.strm.share import share_audit_download_queue, share_strm_cleaner
-from ..helper.transfer import TransferTaskManager, TransferHandler
+from ..helper.transfer.durable import DurableBatchTransfer
 from ..helper.webdav import WebdavCore
 from ..helper.mediaserver import emby_mediainfo_queue
 from ..helper.mediasyncdel.webhook_queue import sync_del_webhook_queue
@@ -94,8 +94,8 @@ class ServiceHelper:
         self.fuse_manager: Optional[FuseManager] = None
         self.backup_service = BackupService()
 
-        self.transfer_task_manager: Optional[TransferTaskManager] = None
-        self.transfer_handler: Optional[TransferHandler] = None
+        self.transfer_task_manager: Optional[DurableBatchTransfer] = None
+        self.transfer_handler: Optional[DurableBatchTransfer] = None
 
         self.webdav_core: Optional[WebdavCore] = None
 
@@ -246,15 +246,8 @@ class ServiceHelper:
                 )
             else:
                 try:
-                    self.transfer_handler = TransferHandler(
-                        client=self.client,
-                        storage_name="115网盘Plus",
-                    )
-                    self.transfer_task_manager = TransferTaskManager(
-                        batch_delay=10.0,
-                        batch_max_size=500,
-                        batch_callback=self.transfer_handler.process_batch,
-                    )
+                    self.transfer_handler = DurableBatchTransfer()
+                    self.transfer_task_manager = self.transfer_handler
                     TransferChainPatcher.enable(
                         task_manager=self.transfer_task_manager,
                         handler=self.transfer_handler,
@@ -927,11 +920,11 @@ class ServiceHelper:
                     logger.error(f"【{name}】停止失败: {e}", exc_info=True)
             if not all_stopped:
                 return False
-            TransferChainPatcher.disable()
             if self.transfer_task_manager:
                 if self.transfer_task_manager.shutdown() is False:
                     return False
                 self.transfer_task_manager = None
+            TransferChainPatcher.disable()
             self.transfer_handler = None
             return True
         except Exception as e:

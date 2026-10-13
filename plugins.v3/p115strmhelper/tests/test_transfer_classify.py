@@ -213,7 +213,10 @@ def _setup_mock_env() -> None:
         eventmanager=SimpleNamespace(send_event=lambda *a, **k: None),
     )
     _make_module(
-        "app.sdk.media", MediaInfo=object, MetaBase=object, MetaInfoPath=FakeMetaInfoPath
+        "app.sdk.media",
+        MediaInfo=object,
+        MetaBase=object,
+        MetaInfoPath=FakeMetaInfoPath,
     )
     _make_module("app.chain.storage", StorageChain=FakeStorageChain)
     _make_module(
@@ -322,14 +325,13 @@ class TestExtNormalization(TestCase):
         _setup_mock_env()
         cls.cache_updater = _load_module("helper.transfer.cache_updater")
         cls.linked = _load_module("helper.transfer.linked_subtitle_audio")
-        cls.linked_batch = _load_module("helper.transfer.handler_linked_batch")
-        cls.handler = _load_module("helper.transfer.handler")
+        cls.handler = _load_module("helper.transfer.file_types")
 
     def test_normalize_ext(self) -> None:
         """
         归一化兼容带点/不带点/大小写/空格
         """
-        normalize = self.handler.TransferHandler._normalize_ext
+        normalize = self.handler.TransferFileTypes._normalize_ext
         self.assertEqual(normalize("ass"), ".ass")
         self.assertEqual(normalize(".ass"), ".ass")
         self.assertEqual(normalize("ASS"), ".ass")
@@ -341,7 +343,7 @@ class TestExtNormalization(TestCase):
         """
         默认配置下字幕判定
         """
-        is_sub = self.handler.TransferHandler._is_subtitle_file
+        is_sub = self.handler.TransferFileTypes._is_subtitle_file
         self.assertTrue(is_sub(FakeFileItem(extension="ass")))
         self.assertTrue(is_sub(FakeFileItem(extension="srt")))
         self.assertFalse(is_sub(FakeFileItem(extension="mkv")))
@@ -351,7 +353,7 @@ class TestExtNormalization(TestCase):
         """
         extension 缺失时回退路径后缀（u115 存储 ico 缺失场景）
         """
-        is_sub = self.handler.TransferHandler._is_subtitle_file
+        is_sub = self.handler.TransferFileTypes._is_subtitle_file
         self.assertTrue(
             is_sub(FakeFileItem(extension=None, path="/115/媒体库/x/xx.ass"))
         )
@@ -363,7 +365,7 @@ class TestExtNormalization(TestCase):
         """
         配置不带点时仍能判定（用户配置 srt,ass）
         """
-        is_sub = self.handler.TransferHandler._is_subtitle_file
+        is_sub = self.handler.TransferFileTypes._is_subtitle_file
         with patch.object(FakeSettings, "RMT_SUBEXT", ["srt", "ass"]):
             self.assertTrue(is_sub(FakeFileItem(extension="ass")))
             self.assertFalse(is_sub(FakeFileItem(extension="ssa")))
@@ -372,7 +374,7 @@ class TestExtNormalization(TestCase):
         """
         媒体文件判定
         """
-        is_media = self.handler.TransferHandler._is_media_file
+        is_media = self.handler.TransferFileTypes._is_media_file
         self.assertTrue(is_media(FakeFileItem(extension="mkv")))
         self.assertTrue(is_media(FakeFileItem(extension="mp4")))
         self.assertFalse(is_media(FakeFileItem(extension="ass")))
@@ -387,7 +389,7 @@ class TestExtNormalization(TestCase):
         """
         音轨文件判定
         """
-        is_audio = self.handler.TransferHandler._is_audio_file
+        is_audio = self.handler.TransferFileTypes._is_audio_file
         self.assertTrue(is_audio(FakeFileItem(extension="flac")))
         self.assertFalse(is_audio(FakeFileItem(extension="ass")))
         self.assertTrue(

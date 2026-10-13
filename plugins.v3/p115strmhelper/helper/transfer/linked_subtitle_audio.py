@@ -1,18 +1,14 @@
 import re
-from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from app.sdk.config import settings
 from app.sdk.media import MetaBase
 from app.sdk.media import MetaInfoPath
 from app.sdk.logging import logger
-from app.schemas import FileItem, TransferInfo
+from app.schemas import FileItem
 
 from ...schemas.transfer import RelatedFile, TransferTask
-
-if TYPE_CHECKING:
-    from .handler import TransferHandler
 
 
 def _normalize_ext(ext: Optional[str]) -> Optional[str]:
@@ -60,52 +56,6 @@ def is_subtitle_or_audio_file(fileitem: FileItem) -> bool:
     except Exception as e:
         logger.debug(f"【整理接管】判断字幕/音频文件失败: {e}")
         return False
-
-
-def discover_related_files(
-    handler: "TransferHandler", tasks: List[TransferTask]
-) -> None:
-    """
-    发现关联文件（字幕、音轨）
-
-    :param handler (TransferHandler): 整理执行器
-    :param tasks (List): 任务列表（就地写入 related_files）
-    """
-    logger.info("【整理接管】开始发现关联文件")
-
-    tasks_by_dir: Dict[Path, List[TransferTask]] = defaultdict(list)
-    for task in tasks:
-        source_dir = Path(task.fileitem.path).parent
-        tasks_by_dir[source_dir].append(task)
-
-    for source_dir, dir_tasks in tasks_by_dir.items():
-        try:
-            source_fileitem = FileItem(
-                storage=handler.storage_name,
-                path=str(source_dir) + "/",
-                type="dir",
-            )
-            files = handler.cache_updater._p115_api.list(source_fileitem)
-
-            if not files:
-                logger.debug(f"【整理接管】源目录 {source_dir} 为空，跳过关联文件发现")
-                continue
-
-            for task in dir_tasks:
-                main_video_path = Path(task.fileitem.path)
-                main_video_metainfo = MetaInfoPath(main_video_path)
-
-                match_subtitle_files(task, main_video_path, main_video_metainfo, files)
-                match_audio_track_files(task, main_video_path, files)
-
-        except Exception as e:
-            logger.error(
-                f"【整理接管】发现关联文件失败 (目录: {source_dir}): {e}",
-                exc_info=True,
-            )
-
-    total_related = sum(len(task.related_files) for task in tasks)
-    logger.info(f"【整理接管】关联文件发现完成，共发现 {total_related} 个关联文件")
 
 
 def match_subtitle_files(
@@ -298,87 +248,3 @@ def match_audio_track_files(
         logger.debug(
             f"【整理接管】发现音轨文件: {track_file.name} -> {target_path.name}"
         )
-
-
-def record_related_files_success_history(
-    handler: "TransferHandler", task: TransferTask
-) -> Tuple[int, Dict[str, Any]]:
-    """
-    为关联文件（字幕、音轨）补充独立的成功历史记录
-
-    :param handler (TransferHandler): 整理执行器
-    :param task (TransferTask): 整理任务
-    :return: (写入数量, 历史记录字典 {源路径: history 对象})
-    """
-    if not task.related_files:
-        return 0, {}
-
-    recorded = 0
-    related_file_histories: Dict[str, Any] = {}
-    for related_file in task.related_files:
-        try:
-            if (
-                not related_file
-                or not related_file.fileitem
-                or not related_file.fileitem.path
-                or not related_file.target_path
-            ):
-                continue
-
-            target_path = related_file.target_path
-
-            target_fileitem = FileItem(
-                storage=handler.storage_name,
-                path=str(target_path),
-                name=target_path.name,
-                fileid=related_file.fileitem.fileid,
-                type="file",
-                size=related_file.fileitem.size,
-                modify_time=related_file.fileitem.modify_time,
-                pickcode=related_file.fileitem.pickcode,
-            )
-
-            target_diritem = FileItem(
-                storage=handler.storage_name,
-                path=str(target_path.parent) + "/",
-                name=target_path.parent.name,
-                type="dir",
-            )
-
-            transferinfo = TransferInfo(
-                success=True,
-                fileitem=related_file.fileitem,
-                target_item=target_fileitem,
-                target_diritem=target_diritem,
-                transfer_type=task.transfer_type,
-                file_list=[related_file.fileitem.path],
-                file_list_new=[target_fileitem.path],
-                need_scrape=False,
-                need_notify=False,
-            )
-
-            related_history = handler.history_oper.add_success(
-                fileitem=related_file.fileitem,
-                mode=task.transfer_type,
-                meta=task.meta,
-                mediainfo=task.mediainfo,
-                transferinfo=transferinfo,
-                downloader=task.downloader,
-                download_hash=task.download_hash,
-            )
-            if related_history:
-                related_file_histories[related_file.fileitem.path] = related_history
-            recorded += 1
-        except Exception as e:
-            name = "unknown"
-            try:
-                if related_file and related_file.fileitem:
-                    name = related_file.fileitem.name
-            except Exception:
-                pass
-            logger.error(
-                f"【整理接管】写入关联文件历史失败 (file: {name}): {e}",
-                exc_info=True,
-            )
-
-    return recorded, related_file_histories
