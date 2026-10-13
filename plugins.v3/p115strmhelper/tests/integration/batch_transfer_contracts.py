@@ -152,6 +152,58 @@ class BatchTransferContracts(TestCase):
 
         return patch.object(self.handler.coordinator, "submit", synchronized)
 
+    def test_workers_only_claim_resolved_batch_tasks(self) -> None:
+        """
+        非影视、其他模式和未确认目标的任务保持宿主并发边界
+        """
+        from app.schemas.types import MediaType
+
+        source = self.seed("worker-scope")
+        task = SimpleNamespace(
+            fileitem=source,
+            target_storage=source.storage,
+            transfer_type="copy",
+            mediainfo=SimpleNamespace(type=MediaType.MOVIE),
+            plan_checkpoint=None,
+            preview=False,
+        )
+        eligible = lambda: self.handler.workers._eligible(SimpleNamespace(task=task))
+        self.assertTrue(eligible())
+        for change in (
+            {"mediainfo": SimpleNamespace(type=MediaType.MUSIC)},
+            {"transfer_type": "link"},
+            {"target_storage": "local"},
+            {"target_storage": None},
+            {"preview": True},
+        ):
+            with patch.multiple(task, **change):
+                self.assertFalse(eligible(), change)
+
+    def test_settlement_recovery_resolves_cleanup_storage(self) -> None:
+        """
+        仅重放结算时重新取得源存储，仍执行成功移动后的清理
+        """
+        from app.chain.transfer import TransferChain
+        from app.plugins.p115strmhelper.patch.transfer_chain import _selected
+
+        source = self.seed("cleanup-recovery", "move")
+        task = SimpleNamespace(
+            fileitem=source, plan_checkpoint=self.plans["cleanup-recovery"]
+        )
+        chain = SimpleNamespace(
+            _TransferChain__select_storage_oper=Mock(return_value=self.storage),
+            jobview=SimpleNamespace(is_success=Mock(return_value=False)),
+        )
+        token = _selected.set({})
+        try:
+            TransferChain._cleanup_successful_transfer(chain, task, None, None)
+        finally:
+            _selected.reset(token)
+        chain._TransferChain__select_storage_oper.assert_called_once_with(
+            source.storage
+        )
+        chain.jobview.is_success.assert_called_once_with(task)
+
     def test_copy_batch_and_replay(self) -> None:
         """
         多文件复制合并 API，副本身份正确且重放不重复复制或重命名

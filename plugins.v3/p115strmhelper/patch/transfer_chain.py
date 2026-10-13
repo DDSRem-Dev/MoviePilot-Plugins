@@ -91,7 +91,12 @@ class TransferChainPatcher:
                 if not is_batch_task(task):
                     return original_cleanup(chain, task, transferhis, history)
                 selected = _selected.get() or {}
-                cleanup_source_directories(chain, task, selected.get("source"))
+                source_oper = selected.get("source")
+                if source_oper is None:
+                    source_oper = chain._TransferChain__select_storage_oper(
+                        task.fileitem.storage
+                    )
+                cleanup_source_directories(chain, task, source_oper)
 
             @wraps(original_complete)
             def completed(chain: Any, *args: Any, **kwargs: Any) -> Any:

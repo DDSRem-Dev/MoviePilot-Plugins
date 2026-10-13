@@ -28,17 +28,36 @@ class BatchWorkers:
         self._stopping = Event()
 
     def _eligible(self, item: Any) -> bool:
+        from app.schemas.types import MediaType
+
         task = getattr(item, "task", None)
         if task is None:
             return False
         source = task.fileitem
-        target = task.target_storage
-        if task.plan_checkpoint is not None:
-            target = task.plan_checkpoint.target_storage
+        directory = getattr(task, "target_directory", None)
+        target = task.target_storage or getattr(directory, "library_storage", None)
+        mode = getattr(task, "transfer_type", None) or getattr(
+            directory, "transfer_type", None
+        )
+        media = getattr(task, "mediainfo", None)
+        media_type = getattr(media, "type", None) or getattr(task, "mtype", None)
+        checkpoint = task.plan_checkpoint
+        if checkpoint is not None:
+            target = checkpoint.target_storage
+            mode = checkpoint.resolved_transfer_type
+            media_type = (checkpoint.resolved_mediainfo or {}).get("type") or media_type
         return bool(
             source.type == "file"
             and source.storage == self.storage
-            and target in (None, self.storage)
+            and target == self.storage
+            and mode in {"move", "copy"}
+            and media_type
+            in {
+                MediaType.MOVIE,
+                MediaType.TV,
+                MediaType.MOVIE.value,
+                MediaType.TV.value,
+            }
             and not task.preview
         )
 
