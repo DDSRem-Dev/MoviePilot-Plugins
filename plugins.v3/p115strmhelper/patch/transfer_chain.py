@@ -46,7 +46,6 @@ class TransferChainPatcher:
         from app.modules.filemanager.transhandler import TransHandler
         from app.schemas.types import MediaType
 
-        from ..helper.transfer.cleanup import cleanup_source_directories
         from ..helper.transfer.linked_candidates import plan_linked_candidates
         from ..helper.transfer.planning import (
             LINKED_SKIP,
@@ -134,7 +133,7 @@ class TransferChainPatcher:
                     source_oper = chain._TransferChain__select_storage_oper(
                         task.fileitem.storage
                     )
-                cleanup_source_directories(chain, task, source_oper)
+                handler.cleaner.cleanup(chain, task, source_oper)
 
             @wraps(original_complete)
             def completed(chain: Any, *args: Any, **kwargs: Any) -> Any:

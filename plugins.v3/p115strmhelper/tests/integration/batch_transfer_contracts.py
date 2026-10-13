@@ -478,9 +478,6 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         """
         仅清理允许的源目录，保护配置根目录、其他媒体和读取异常的目录
         """
-        from app.plugins.p115strmhelper.helper.transfer.cleanup import (
-            cleanup_source_directories,
-        )
         from app.application.directory import DirectoryHelper
 
         self.storage.add("/downloads", "dir")
@@ -516,14 +513,141 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                 SimpleNamespace(download_path="/downloads", library_path="/target")
             ],
         ):
-            cleanup_source_directories(chain, task, self.storage)
+            self.handler.cleaner.cleanup(chain, task, self.storage)
             self.assertIsNone(self.storage.get_item_strict(Path("/downloads/done")))
             for path in ["/downloads", "/downloads/pending", "/unconfigured/metadata"]:
                 self.assertIsNotNone(self.storage.get_item_strict(Path(path)))
             calls = list(self.storage.calls)
             self.storage.query_failed = True
-            cleanup_source_directories(chain, task, self.storage)
+            self.handler.cleaner.cleanup(chain, task, self.storage)
             self.assertEqual(calls, self.storage.calls)
+
+    def _cleanup_context(self, paths: List[str], batch: str = "cleanup") -> Any:
+        tasks = [
+            SimpleNamespace(fileitem=SimpleNamespace(storage="115网盘Plus", path=path))
+            for path in paths
+        ]
+        task = SimpleNamespace(
+            fileitem=tasks[0].fileitem,
+            mediainfo=None,
+            meta=SimpleNamespace(begin_season=None),
+            transfer_batch_id=batch,
+        )
+        chain = SimpleNamespace(
+            jobview=SimpleNamespace(
+                is_success=lambda task: True,
+                success_tasks=lambda *args: tasks,
+            )
+        )
+        return chain, task
+
+    def test_cleanup_deduplicates_episodes_and_concurrent_seasons(self) -> None:
+        """
+        百集及跨季并发收尾只扫描各目录两次，重复回调不再读盘
+        """
+        from collections import Counter
+        from app.application.directory import DirectoryHelper
+
+        self.storage.add("/downloads", "dir")
+        self.storage.add("/downloads/show", "dir")
+        for season in (1, 2):
+            self.storage.add(f"/downloads/show/Season {season}", "dir")
+        contexts = [
+            self._cleanup_context(
+                [
+                    f"/downloads/show/Season {season}/{episode}.mkv"
+                    for episode in range(100)
+                ]
+            )
+            for season in (1, 2)
+        ]
+        with (
+            patch.object(
+                DirectoryHelper,
+                "get_dirs",
+                return_value=[
+                    SimpleNamespace(download_path="/downloads", library_path="/target")
+                ],
+            ),
+            patch.object(self.storage, "list", wraps=self.storage.list) as listing,
+        ):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [
+                    pool.submit(self.handler.cleaner.cleanup, *context, self.storage)
+                    for context in contexts * 2
+                ]
+                for future in futures:
+                    future.result(timeout=10)
+            counts = Counter(call.args[0].path for call in listing.call_args_list)
+            self.assertEqual(sorted(counts.values()), [2, 2, 2])
+            self.assertEqual(
+                len([call for call in self.storage.calls if call[0] == "delete"]), 1
+            )
+            self.assertIsNone(self.storage.get_item_strict(Path("/downloads/show")))
+            self.assertIsNotNone(self.storage.get_item_strict(Path("/downloads")))
+
+    def test_cleanup_revalidates_new_media_before_delete(self) -> None:
+        """
+        初次扫描后新出现的媒体必须阻止目录删除
+        """
+        from app.application.directory import DirectoryHelper
+
+        self.storage.add("/downloads", "dir")
+        self.storage.add("/downloads/show", "dir")
+        context = self._cleanup_context(["/downloads/show/old.mkv"])
+        original = self.storage.list
+        reads = 0
+
+        def listing(folder: Any) -> Any:
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                self.storage.add("/downloads/show/new.mkv")
+            return original(folder)
+
+        with (
+            patch.object(
+                DirectoryHelper,
+                "get_dirs",
+                return_value=[
+                    SimpleNamespace(download_path="/downloads", library_path="/target")
+                ],
+            ),
+            patch.object(self.storage, "list", side_effect=listing),
+        ):
+            self.handler.cleaner.cleanup(*context, self.storage)
+        self.assertEqual(self.storage.calls, [])
+        self.assertIsNotNone(
+            self.storage.get_item_strict(Path("/downloads/show/new.mkv"))
+        )
+
+    def test_cleanup_failure_retries_and_new_batch_is_not_cached(self) -> None:
+        """
+        读取失败不记为已清理，同路径的新整理批次仍重新检查
+        """
+        from app.application.directory import DirectoryHelper
+
+        self.storage.add("/downloads", "dir")
+        self.storage.add("/downloads/show", "dir")
+        context = self._cleanup_context(["/downloads/show/old.mkv"])
+        with patch.object(
+            DirectoryHelper,
+            "get_dirs",
+            return_value=[
+                SimpleNamespace(download_path="/downloads", library_path="/target")
+            ],
+        ):
+            self.storage.query_failed = True
+            self.handler.cleaner.cleanup(*context, self.storage)
+            self.assertEqual(self.storage.calls, [])
+            self.storage.query_failed = False
+            self.handler.cleaner.cleanup(*context, self.storage)
+            self.assertIsNone(self.storage.get_item_strict(Path("/downloads/show")))
+            self.storage.add("/downloads/show", "dir")
+            context[1].transfer_batch_id = "new-batch"
+            self.handler.cleaner.cleanup(*context, self.storage)
+            self.assertIsNone(self.storage.get_item_strict(Path("/downloads/show")))
+            self.assertEqual(len(self.storage.calls), 2)
 
     def test_linked_exhaustion_retains_successful_file_evidence(self) -> None:
         """

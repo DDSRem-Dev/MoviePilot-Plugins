@@ -17,6 +17,7 @@ from app.sdk.logging import logger
 from ...core.config import configer
 from .batch import BatchCoordinator, BatchOperation
 from .cache_updater import CacheUpdater
+from .cleanup import SourceDirectoryCleaner
 from .workers import BatchWorkers
 
 
@@ -28,6 +29,7 @@ class DurableBatchTransfer:
     def __init__(self, delay: float = 0.25, max_size: int = 500) -> None:
         self.coordinator = BatchCoordinator(self._execute_batch, delay, max_size)
         self.workers = BatchWorkers("115网盘Plus", max_size)
+        self.cleaner = SourceDirectoryCleaner()
         self._condition = Condition()
         self._active = 0
         self._closing = False
