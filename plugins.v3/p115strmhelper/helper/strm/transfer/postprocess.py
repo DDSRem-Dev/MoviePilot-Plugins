@@ -100,57 +100,129 @@ class TransferPostprocessor:
         """
         existing = self.store.load(key)
         if existing and existing["state"] in {"done", "superseded"}:
+            logger.debug(
+                "【监控整理STRM生成】事件已处理，跳过重复执行: %s，状态: %s",
+                key,
+                existing["state"],
+            )
             return
         with lock_libraries(existing["plan"]["roots"] if existing else roots):
             record = self.store.load(key)
             if record and record["state"] in {"done", "superseded"}:
+                logger.debug(
+                    "【监控整理STRM生成】事件已处理，跳过重复执行: %s，状态: %s",
+                    key,
+                    record["state"],
+                )
                 return
             plan = record["plan"] if record else build()
             if not record:
                 self.store.save(key, plan)
+            else:
+                logger.info("【监控整理STRM生成】恢复未完成的后处理: %s", key)
             if not is_current(plan["identity"]):
-                self.store.save(key, plan, "superseded")
+                self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
                 return
             for operation in plan["operations"]:
                 if operation.get("done"):
                     continue
                 if not is_current(plan["identity"]):
-                    self.store.save(key, plan, "superseded")
+                    self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
                     return
                 path = Path(operation["path"])
                 validate_path(path, plan["roots"])
                 if operation["kind"] == "write":
-                    if not self._write(key, plan, operation, prepare):
-                        self.store.save(key, plan, "superseded")
+                    try:
+                        written = self._write(key, plan, operation, prepare)
+                    except Exception as error:
+                        if operation.get("done"):
+                            logger.error(
+                                "【监控整理STRM生成】文件已发布但检查点保存失败: %s, %s",
+                                str(path),
+                                error,
+                                exc_info=True,
+                            )
+                        elif plan["kind"] == "strm":
+                            logger.error(
+                                "【监控整理STRM生成】生成 %s 文件失败: %s",
+                                str(path),
+                                error,
+                                exc_info=True,
+                            )
+                        else:
+                            logger.error(
+                                "【监控整理STRM生成】媒体信息文件下载出现未知错误: %s，目标: %s",
+                                error,
+                                str(path),
+                                exc_info=True,
+                            )
+                        raise
+                    if not written:
+                        self._supersede(key, plan, "文件发布期间云端目标或本地文件已变化")
                         return
                 else:
                     output = plan["operations"][0]
                     if fingerprint(Path(output["path"])) != output.get("after"):
-                        self.store.save(key, plan, "superseded")
+                        self._supersede(key, plan, "已生成的本地文件被其他工作修改")
                         return
                     self._delete(key, plan, operation)
             for directory in plan["directories"]:
                 if not is_current(plan["identity"]):
-                    self.store.save(key, plan, "superseded")
+                    self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
                     return
                 path = Path(directory)
                 validate_path(path, plan["roots"])
                 if path.is_dir() and not any(path.iterdir()):
-                    path.rmdir()
+                    try:
+                        path.rmdir()
+                    except Exception as error:
+                        logger.error(
+                            "【监控整理STRM生成】删除本地空目录失败: %s, %s",
+                            path,
+                            error,
+                            exc_info=True,
+                        )
+                        raise
+                    logger.warning("【监控整理STRM生成】本地空目录 %s 已删除", path)
             for name in plan["effects"]:
                 if plan["effects"][name]:
                     continue
                 if not is_current(plan["identity"]):
-                    self.store.save(key, plan, "superseded")
+                    self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
                     return
                 output = plan["operations"][0]
                 if fingerprint(Path(output["path"])) != output.get("after"):
-                    self.store.save(key, plan, "superseded")
+                    self._supersede(key, plan, "已生成的本地文件被其他工作修改")
                     return
-                effect(name, plan)
+                try:
+                    effect(name, plan)
+                except Exception as error:
+                    if name == "mediainfo":
+                        logger.error(
+                            "【监控整理STRM生成】入队媒体信息提取失败: %s",
+                            error,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.error(
+                            "【监控整理STRM生成】后处理步骤 %s 失败: %s",
+                            name,
+                            error,
+                            exc_info=True,
+                        )
+                    raise
                 plan["effects"][name] = True
                 self.store.save(key, plan)
             self.store.save(key, plan, "done")
+
+    def _supersede(self, key: str, plan: Dict[str, Any], reason: str) -> None:
+        self.store.save(key, plan, "superseded")
+        logger.warning(
+            "【监控整理STRM生成】%s，停止该事件后处理: %s，目标: %s",
+            reason,
+            key,
+            plan["operations"][0]["path"],
+        )
 
     def _write(
         self,
@@ -168,6 +240,7 @@ class TransferPostprocessor:
         ):
             operation.update(done=True, after=actual)
             self.store.complete_file(key, plan, operation)
+            logger.info("【监控整理STRM生成】恢复确认文件已发布，补记检查点: %s", path)
             return True
         if (
             actual != operation["before"]
@@ -202,6 +275,10 @@ class TransferPostprocessor:
             return False
         operation.update(done=True, after=after)
         self.store.complete_file(key, plan, operation)
+        if plan["kind"] == "strm":
+            logger.info("【监控整理STRM生成】生成 STRM 文件成功: %s", str(path))
+        else:
+            logger.info("【监控整理STRM生成】媒体信息文件下载成功: %s", str(path))
         return True
 
     def _delete(
@@ -221,21 +298,58 @@ class TransferPostprocessor:
             or fingerprint(anchor) not in (None, operation["anchor_before"])
             or siblings - set(operation["siblings"])
         ):
+            logger.debug(
+                "【监控整理STRM生成】旧文件、归属或同目录内容已变化，跳过清理: %s", path
+            )
             operation["done"] = True
             self.store.save(key, plan)
             return
         for identity in operation["cloud_paths"]:
             if current_file(identity) is not None:
+                logger.debug(
+                    "【监控整理STRM生成】对应云端文件仍存在，保留本地文件: %s", path
+                )
                 operation["done"] = True
                 self.store.save(key, plan)
                 return
         if not is_current(plan["identity"]):
             raise RuntimeError("整理后处理云端目标在清理期间已变化，等待重新确认")
         if fingerprint(path) != actual or self.store.owner(path) != operation["owner"]:
+            logger.debug("【监控整理STRM生成】删除前文件或归属已变化，跳过清理: %s", path)
             operation["done"] = True
             self.store.save(key, plan)
             return
         if actual is not None:
-            path.unlink()
+            if path == anchor:
+                if operation.get("cleanup_reason") == "latest":
+                    label = "旧版本 STRM 文件"
+                    logger.info(
+                        "【监控整理STRM生成】latest 模式：删除旧版本 STRM 文件: %s", path
+                    )
+                else:
+                    label = "旧 STRM 文件"
+                    if operation.get("cleanup_reason") == "move":
+                        logger.info(
+                            "【监控整理STRM生成】检测到重新整理，清理旧 STRM 文件: %s", path
+                        )
+                    else:
+                        logger.info("【监控整理STRM生成】清理旧 STRM 文件: %s", path)
+            else:
+                label = "关联文件" if anchor.stem in path.stem else "刮削文件"
+            try:
+                path.unlink()
+            except Exception as error:
+                logger.error(
+                    "【监控整理STRM生成】删除%s失败: %s, %s",
+                    label,
+                    path,
+                    error,
+                    exc_info=True,
+                )
+                raise
+            if path == anchor:
+                logger.info("【监控整理STRM生成】已删除%s: %s", label, path)
+            else:
+                logger.warning("【监控整理STRM生成】已删除%s: %s", label, path)
         operation.update(done=True, after=None)
         self.store.complete_file(key, plan, operation)

@@ -66,11 +66,20 @@ class TransferPlanBuilder:
         cloud_paths: List[Dict[str, Any]],
         related: bool,
         directories: bool,
+        reason: str = "move",
     ) -> None:
         """
         固定旧 STRM、关联文件和共享刮削文件，保留新文件及未知内容
+
+        :param reason (str): 清理来源，move 表示移动源清理，latest 表示旧版本清理，仅用于日志
         """
-        if old == output or not old.is_file() or old.is_symlink():
+        if old == output:
+            logger.debug(
+                "【监控整理STRM生成】重新整理清理：旧 STRM 与新生成路径相同，跳过: %s",
+                old,
+            )
+            return
+        if not old.is_file() or old.is_symlink():
             return
         candidates = [old]
         entries = list(old.parent.iterdir())
@@ -112,6 +121,7 @@ class TransferPlanBuilder:
                 path, "delete", owner["identity"] if owner else cloud_paths[0], probes
             )
             self.operations[str(path)].update(
+                cleanup_reason=reason,
                 anchor=str(old),
                 anchor_before=fingerprint(old),
                 siblings=[entry.name for entry in entries]
@@ -166,7 +176,7 @@ class TransferPlanBuilder:
                             "path": str(cloud_parent / names[0]),
                         }
                     ]
-                self.cleanup(candidate, output, probes, True, True)
+                self.cleanup(candidate, output, probes, True, True, reason="latest")
         source = getattr(transfer, "fileitem", None)
         if transfer.transfer_type != "move" or not source or not source.path:
             return

@@ -84,6 +84,9 @@ class TransferStrmHelper:
             or transfer.target_item is None
             or transfer.target_diritem is None
         ):
+            logger.debug(
+                "【监控整理STRM生成】整理结果缺少目标文件或目录信息，跳过 STRM 生成"
+            )
             return
         target = transfer.target_item
         processor = TransferPostprocessor()
@@ -109,7 +112,11 @@ class TransferStrmHelper:
             configer.get_config("transfer_monitor_paths"), transfer.target_diritem.path
         )
         if not matched:
+            logger.debug(
+                "【监控整理STRM生成】%s 路径匹配不符合，跳过整理", target.name
+            )
             return
+        logger.debug("【监控整理STRM生成】匹配到网盘文件夹路径: %s", str(cloud))
         suffix = Path(target.name).suffix.lower().lstrip(".")
         media_exts = [str(ext).lower().lstrip(".") for ext in settings.RMT_MEDIAEXT]
         download_exts = {
@@ -121,6 +128,11 @@ class TransferStrmHelper:
             EventType.SubtitleTransferComplete,
         }
         if not download and StorageChain().is_bluray_folder(target):
+            logger.warning(
+                "【监控整理STRM生成】%s 为蓝光原盘，不支持生成 STRM 文件: %s",
+                target.name,
+                target.path,
+            )
             return
         if (
             not download
@@ -129,7 +141,15 @@ class TransferStrmHelper:
             and suffix not in media_exts
         ):
             if suffix not in download_exts:
+                logger.warning(
+                    "【监控整理STRM生成】%s 非媒体文件（.%s），跳过 STRM 生成",
+                    target.name,
+                    suffix,
+                )
                 return
+            logger.warning(
+                "【监控整理STRM生成】%s 为字幕/音频文件，自动走下载流程", target.name
+            )
             download = True
         pickcode = target.pickcode
         if not pickcode and target.storage == "CloudDrive储存":
@@ -137,14 +157,22 @@ class TransferStrmHelper:
                 pickcode = client.to_pickcode(int(target.fileid))
             except Exception as error:
                 logger.error(
-                    f"【监控整理STRM生成】{target.name} 无法转换 pickcode: {error}"
+                    "【监控整理STRM生成】CloudDrive2 储存 %s 无法转换获取 PickCode 值: %s",
+                    target.name,
+                    error,
+                    exc_info=True,
                 )
                 return
-        if not pickcode or (
-            not download and (len(pickcode) != 17 or not pickcode.isalnum())
-        ):
+        if not pickcode:
+            action = "下载该文件" if download else "生成 STRM 文件"
             logger.error(
-                f"【监控整理STRM生成】{target.name} 缺少有效 pickcode，跳过处理"
+                "【监控整理STRM生成】%s 不存在 pickcode 值，无法%s", target.name, action
+            )
+            return
+        if not download and (len(pickcode) != 17 or not pickcode.isalnum()):
+            logger.error(
+                "【监控整理STRM生成】错误的 pickcode 值 %s，无法生成 STRM 文件",
+                target.name,
             )
             return
         roots = sorted(
@@ -156,10 +184,19 @@ class TransferStrmHelper:
         )
 
         def build() -> Dict[str, Any]:
-            output = local_path(local, cloud, target.path, not download)
             builder = TransferPlanBuilder(processor.store, roots)
             identity = file_identity(target)
-            operation = builder.operation(output, "write", identity, [])
+            try:
+                output = local_path(local, cloud, target.path, not download)
+                operation = builder.operation(output, "write", identity, [])
+            except Exception as error:
+                logger.error(
+                    "【监控整理STRM生成】规划本地文件失败: %s, %s",
+                    target.path,
+                    error,
+                    exc_info=True,
+                )
+                raise
             options = {
                 name: deepcopy(configer.get_config(name))
                 for name in (
@@ -177,22 +214,36 @@ class TransferStrmHelper:
             if target.storage != "CloudDrive储存":
                 effects["index"] = False
             if not download:
-                builder.build_cleanup(
-                    transfer,
-                    output,
-                    self._get_overwrite_mode(
-                        target.storage, transfer.target_diritem.path
+                try:
+                    builder.build_cleanup(
+                        transfer,
+                        output,
+                        self._get_overwrite_mode(
+                            target.storage, transfer.target_diritem.path
+                        )
+                        == "latest",
                     )
-                    == "latest",
-                )
-                if options["transfer_monitor_scrape_metadata_enabled"] and not (
-                    options["transfer_monitor_scrape_metadata_exclude_paths"]
-                    and PathUtils.get_scrape_metadata_exclude_path(
-                        options["transfer_monitor_scrape_metadata_exclude_paths"],
-                        str(output),
+                except Exception as error:
+                    logger.error(
+                        "【监控整理STRM生成】扫描旧版本 STRM 或重新整理清理文件失败: %s",
+                        error,
+                        exc_info=True,
                     )
-                ):
-                    effects["scrape"] = False
+                    raise
+                if options["transfer_monitor_scrape_metadata_enabled"]:
+                    if (
+                        options["transfer_monitor_scrape_metadata_exclude_paths"]
+                        and PathUtils.get_scrape_metadata_exclude_path(
+                            options["transfer_monitor_scrape_metadata_exclude_paths"],
+                            str(output),
+                        )
+                    ):
+                        logger.debug(
+                            "【监控整理STRM生成】匹配到刮削排除目录，不进行刮削: %s",
+                            str(output),
+                        )
+                    else:
+                        effects["scrape"] = False
                 if options["transfer_monitor_media_server_refresh_enabled"]:
                     effects["refresh"] = False
                 if options["transfer_monitor_emby_mediainfo_enabled"]:
@@ -237,6 +288,9 @@ class TransferStrmHelper:
             return
         url = downloader.get_download_url(pickcode=plan["pickcode"])
         if not url:
+            logger.error(
+                "【监控整理STRM生成】%s 下载链接获取失败，无法下载该文件", plan["name"]
+            )
             raise RuntimeError(f"{plan['name']} 下载链接获取失败")
         if not downloader.save_mediainfo_file(
             file_path=staged, file_name=plan["name"], download_url=url
