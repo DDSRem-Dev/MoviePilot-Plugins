@@ -498,6 +498,17 @@ class TestV3TransferStrm(TestCase):
                 target = transfer.target_item
                 target.size = 73053519159
                 target.modify_time = 1791622064
+                source = target.model_copy(
+                    update={
+                        "path": f"/incoming/{name}",
+                        "fileid": "100" if mode == "copy" else target.fileid,
+                        "pickcode": "b" * 17 if mode == "copy" else target.pickcode,
+                    }
+                )
+                transfer.fileitem = source
+                item["fileitem"] = source
+                if mode == "copy":
+                    self.remote_files[(source.storage, source.path)] = source
                 self.remote_files[(target.storage, target.path)] = target.model_copy(
                     update={"modify_time": 1791877143}
                 )
@@ -512,6 +523,17 @@ class TestV3TransferStrm(TestCase):
                 key = self.processor.event_key(item, self.types.EventType.TransferComplete)
                 record = self.processor.TransferPostprocessStore().load(key)
                 self.assertEqual(record["state"], "done")
+                self.assertEqual(record["plan"]["identity"]["fileid"], target.fileid)
+                self.assertEqual(record["plan"]["pickcode"], target.pickcode)
+                self.url.get_strm_url.assert_called_with(
+                    target.pickcode, target.name, target.path
+                )
+                if mode == "copy":
+                    self.assertNotEqual(source.fileid, target.fileid)
+                    self.assertNotEqual(source.pickcode, target.pickcode)
+                    self.assertIs(
+                        self.remote_files[(source.storage, source.path)], source
+                    )
                 self.assertTrue(all(record["plan"]["effects"].values()))
                 self.scrape.assert_called_once()
                 self.helper = self.module.TransferStrmHelper()
@@ -519,6 +541,28 @@ class TestV3TransferStrm(TestCase):
                 self.assertEqual(self.files.fingerprint(path), stamp)
                 self.scrape.assert_called_once()
                 self.scrape.reset_mock()
+
+    def test_copy_uses_target_pickcode_when_file_id_is_unavailable(self) -> None:
+        """
+        复制目标缺少文件 ID 时使用目标 pickcode，源文件身份不参与目标校验
+        """
+        item = self._item()
+        target = item["transferinfo"].target_item
+        source = target.model_copy(
+            update={"path": "/incoming/source.mkv", "pickcode": "b" * 17}
+        )
+        item["fileitem"] = source
+        item["transferinfo"].fileitem = source
+        target.fileid = None
+        target.modify_time = 1
+        self.remote_files[(target.storage, target.path)] = target.model_copy(
+            update={"modify_time": 2}
+        )
+        self._run(item)
+        self.assertTrue((self.library / "Example.S01E01.strm").exists())
+        self.url.get_strm_url.assert_called_once_with(
+            target.pickcode, target.name, target.path
+        )
 
     def test_same_identity_with_changed_size_is_superseded(self) -> None:
         """
