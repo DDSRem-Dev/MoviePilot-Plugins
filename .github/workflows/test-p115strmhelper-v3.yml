@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
@@ -47,7 +47,26 @@ jobs:
       - name: Record tested MoviePilot revision
         run: git -C MoviePilot rev-parse HEAD
 
-      - name: Set up PostgreSQL
+      - name: Start preinstalled PostgreSQL on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PGPASSWORD: p115_test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $pgBin = Join-Path $env:ProgramFiles 'PostgreSQL/17/bin'
+          $testData = Join-Path $env:RUNNER_TEMP 'p115-postgres'
+          $passwordFile = Join-Path $env:RUNNER_TEMP 'p115-postgres-password.txt'
+          Set-Content -Path $passwordFile -Value $env:PGPASSWORD -Encoding utf8
+          & "$pgBin/initdb.exe" -D $testData -U p115_test --pwfile=$passwordFile --auth=scram-sha-256 --encoding=UTF8 --locale=C
+          Remove-Item $passwordFile
+          & "$pgBin/pg_ctl.exe" -D $testData -l "$env:RUNNER_TEMP/p115-postgres.log" -o '-h 127.0.0.1 -p 5432' -w start
+          & "$pgBin/createdb.exe" -h 127.0.0.1 -p 5432 -U p115_test -O p115_test p115_test
+          & "$pgBin/psql.exe" -h 127.0.0.1 -p 5432 -U p115_test -d p115_test -c 'SELECT version();'
+
+      - name: Set up PostgreSQL on Linux and macOS
+        if: runner.os != 'Windows'
         uses: ikalnytskyi/action-setup-postgres@v8
         with:
           username: p115_test
