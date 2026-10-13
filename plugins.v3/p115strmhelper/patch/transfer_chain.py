@@ -1,6 +1,7 @@
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from functools import wraps
+from inspect import signature
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any, Dict, Iterator, Optional, Set, Tuple
@@ -16,6 +17,7 @@ _context: ContextVar[Optional[Tuple[Any, Any]]] = ContextVar(
 _selected: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "p115_batch_storage_selection", default=None
 )
+_linked_request: ContextVar[bool] = ContextVar("p115_linked_request", default=False)
 
 
 class TransferChainPatcher:
@@ -36,6 +38,7 @@ class TransferChainPatcher:
         安装与当前 V3 计划、步骤执行和原子结算契约对应的补丁
         """
         from app.chain.transfer import TransferChain
+        from app.chain.transfer.request import _TransferCandidatePlanner
         from app.db.adapters.chain import TransactionalChainDurableEventWriter
         from app.db.adapters.transfer.execution import (
             TransactionalTransferExecutionRepository,
@@ -44,11 +47,13 @@ class TransferChainPatcher:
         from app.schemas.types import MediaType
 
         from ..helper.transfer.cleanup import cleanup_source_directories
+        from ..helper.transfer.linked_candidates import plan_linked_candidates
         from ..helper.transfer.planning import (
             LINKED_SKIP,
             MAIN_ACTION,
             execute_plan,
             extend_plan,
+            restore_skipped_plan,
         )
         from ..helper.transfer.settlement import stage_linked_results
         from ..helper.transfer.validation import validate_batch_intent
@@ -59,6 +64,9 @@ class TransferChainPatcher:
             cls._handler = handler
             cls._storage_module = storage_module
             original_handle = TransferChain._TransferChain__handle_transfer
+            original_workflow = TransferChain._run_transfer_workflow
+            workflow_signature = signature(original_workflow)
+            original_candidates = _TransferCandidatePlanner._plan_file_items
             original_plan = TransHandler.plan_transfer
             original_execute = TransHandler.execute_transfer_plan
             original_step = TransHandler._TransHandler__execute_transfer_with_steps
@@ -74,6 +82,36 @@ class TransferChainPatcher:
 
             def validate(checkpoint: Any, **kwargs: Any) -> bool:
                 return validate_batch_intent(original_validate, checkpoint, **kwargs)
+
+            @wraps(original_workflow)
+            def workflow(chain: Any, *args: Any, **kwargs: Any) -> Any:
+                arguments = workflow_signature.bind(chain, *args, **kwargs).arguments
+                source = arguments.get("fileitem")
+                directory = arguments.get("target_directory")
+                target = arguments.get("target_storage") or getattr(
+                    directory, "library_storage", None
+                )
+                mode = arguments.get("transfer_type") or getattr(
+                    directory, "transfer_type", None
+                )
+                enabled = bool(
+                    configer.pan_transfer_linked_subtitle_audio
+                    and source
+                    and source.storage == storage_module
+                    and target in (None, storage_module)
+                    and mode in (None, "move", "copy")
+                )
+                token = _linked_request.set(enabled)
+                try:
+                    return original_workflow(chain, *args, **kwargs)
+                finally:
+                    _linked_request.reset(token)
+
+            @wraps(original_candidates)
+            def candidates(planner: Any, items: Any) -> Any:
+                if not _linked_request.get():
+                    return original_candidates(planner, items)
+                return plan_linked_candidates(original_candidates, planner, items)
 
             def is_batch_task(task: Any) -> bool:
                 checkpoint = task.plan_checkpoint
@@ -141,14 +179,11 @@ class TransferChainPatcher:
                     or kwargs["mediainfo"].type == MediaType.MUSIC
                 ):
                     return checkpoint
-                return extend_plan(
-                    checkpoint,
-                    kwargs["source_oper"],
-                    configer.pan_transfer_linked_subtitle_audio,
-                )
+                return extend_plan(checkpoint)
 
             @wraps(original_execute)
             def execute(owner: Any, checkpoint: Any, **kwargs: Any) -> Any:
+                checkpoint = restore_skipped_plan(checkpoint)
                 if not checkpoint.items or checkpoint.items[0].action != MAIN_ACTION:
                     return original_execute(owner, checkpoint, **kwargs)
                 context = _context.get()
@@ -208,6 +243,8 @@ class TransferChainPatcher:
                 return stage_linked_results(original_settle, writer, **kwargs)
 
             cls._install(TransferChain, "_TransferChain__handle_transfer", handle)
+            cls._install(TransferChain, "_run_transfer_workflow", workflow)
+            cls._install(_TransferCandidatePlanner, "_plan_file_items", candidates)
             cls._install(TransferChain, "_enqueue_transfer_task", enqueue)
             cls._install(TransferChain, "_cleanup_successful_transfer", cleanup)
             cls._install(

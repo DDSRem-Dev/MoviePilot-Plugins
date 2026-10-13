@@ -838,7 +838,7 @@ class ConfigManager(BaseModel):
     )
     pan_transfer_linked_subtitle_audio: bool = Field(
         default=True,
-        description="字幕与音轨关联整理，默认开启（开启：同目录发现字幕/音轨并随主视频批量处理，队列中忽略独立字幕/音轨任务；关闭：与 MoviePilot 一致，字幕/音轨为独立任务并按批次排序以配合刮削）",
+        description="字幕与音轨关联整理，默认开启（开启：按 MoviePilot 筛选及媒体归属规则发现同目录附件，与主视频同批整理，每个文件独立记录结果并支持重试；关闭：仅使用 MoviePilot 原生附件选择规则）",
     )
     storage_module: Literal["u115", "115网盘Plus"] = Field(
         default="u115", description="存储模块选择"

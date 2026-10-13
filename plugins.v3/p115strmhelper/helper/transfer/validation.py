@@ -2,7 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-from .planning import LINKED_ACTION, MAIN_ACTION
+from .planning import LINKED_ACTION, MAIN_ACTION, restore_skipped_plan
 
 
 def validate_batch_intent(
@@ -20,6 +20,9 @@ def validate_batch_intent(
     arguments = dict(
         phase=phase, kind=kind, payload=payload, previous_steps=previous_steps
     )
+    if original(checkpoint, **arguments):
+        return True
+    checkpoint = restore_skipped_plan(checkpoint)
     if original(checkpoint, **arguments):
         return True
     if not checkpoint.items or checkpoint.items[0].action != MAIN_ACTION:

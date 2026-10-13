@@ -1,18 +1,8 @@
 from dataclasses import replace
-from pathlib import Path
 from typing import Any, Callable
 
 from app.application.transfer.models import TransferPlanItem
 from app.schemas import FileItem, TransferInfo
-from app.sdk.media import MetaInfoPath
-
-from ...schemas.transfer import TransferTask
-from .file_types import TransferFileTypes
-from .linked_subtitle_audio import (
-    is_subtitle_or_audio_file,
-    match_audio_track_files,
-    match_subtitle_files,
-)
 
 
 MAIN_ACTION = "p115_batch_v1"
@@ -20,51 +10,37 @@ LINKED_ACTION = "p115_linked_v1"
 LINKED_SKIP = "关联字幕/音轨由主视频的持久计划处理"
 
 
-def extend_plan(checkpoint: Any, source_oper: Any, linked: bool) -> Any:
+def restore_skipped_plan(checkpoint: Any) -> Any:
     """
-    冻结批量执行标识及与 V2 相同的字幕、音轨匹配结果
+    将旧版无副作用附件计划派生为原目标单文件操作，保留持久计划指纹
+    """
+    if checkpoint.skip_reason != LINKED_SKIP:
+        return checkpoint
+    return replace(
+        checkpoint,
+        skip_reason=None,
+        items=(
+            TransferPlanItem(
+                sequence=0,
+                source_fileitem=checkpoint.planning_input.source_fileitem,
+                target_storage=checkpoint.target_storage,
+                target_path=checkpoint.final_target_path,
+                action=MAIN_ACTION,
+            ),
+        ),
+    )
+
+
+def extend_plan(checkpoint: Any) -> Any:
+    """
+    仅标记单文件批量执行，关联附件在请求阶段创建独立宿主持久任务
     """
     if checkpoint.skip_reason or checkpoint.rejection_error or not checkpoint.items:
         return checkpoint
-    source = FileItem(**checkpoint.planning_input.source_fileitem)
-    if source.type != "file":
-        return checkpoint
-    if linked and is_subtitle_or_audio_file(source):
-        return replace(checkpoint, items=(), skip_reason=LINKED_SKIP, need_notify=False)
-    items = [replace(checkpoint.items[0], action=MAIN_ACTION)]
-    if linked and TransferFileTypes._is_media_file(source) and not checkpoint.preview:
-        folder = source_oper.get_item_strict(Path(source.path).parent)
-        if not folder:
-            raise OSError(f"无法确认关联文件目录：{source.path}")
-        files = source_oper.list(folder)
-        if files is None:
-            raise OSError(f"关联文件目录读取失败：{folder.path}")
-        task = TransferTask(
-            fileitem=source,
-            target_path=Path(checkpoint.final_target_path),
-            mediainfo=None,
-            meta=None,
-            transfer_type=checkpoint.resolved_transfer_type,
-        )
-        match_subtitle_files(
-            task, Path(source.path), MetaInfoPath(Path(source.path)), files
-        )
-        match_audio_track_files(task, Path(source.path), files)
-        seen = set()
-        for related in task.related_files:
-            if related.fileitem.path in seen:
-                continue
-            seen.add(related.fileitem.path)
-            items.append(
-                TransferPlanItem(
-                    sequence=len(items),
-                    source_fileitem=related.fileitem.model_dump(mode="json"),
-                    target_storage=checkpoint.target_storage,
-                    target_path=related.target_path.as_posix(),
-                    action=LINKED_ACTION,
-                )
-            )
-    return replace(checkpoint, items=tuple(items))
+    return replace(
+        checkpoint,
+        items=(replace(checkpoint.items[0], action=MAIN_ACTION),),
+    )
 
 
 def execute_plan(

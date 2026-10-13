@@ -12,7 +12,10 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 
-class BatchTransferContracts(TestCase):
+from linked_candidate_contracts import LinkedCandidateContracts
+
+
+class BatchTransferContracts(LinkedCandidateContracts, TestCase):
     """
     使用真实 V3 SQLite 步骤账本验证批量整理和恢复，网盘边界使用内存替身
     """
@@ -524,7 +527,7 @@ class BatchTransferContracts(TestCase):
         from app.db.adapters.chain import TransactionalChainDurableEventWriter
         from app.db.models.transferhistory import TransferHistory
         from app.db.models.outbox import OutboxMessage
-        from app.plugins.p115strmhelper.helper.transfer.planning import extend_plan
+        from legacy_batch_plan import legacy_plan as extend_plan
         from app.schemas import TransferInfo
         from app.schemas.types import MediaType
         from app.sdk.media import MediaInfo, MetaInfoPath
@@ -607,9 +610,9 @@ class BatchTransferContracts(TestCase):
             self.run_transfer("expired")
         self.assertEqual(self.storage.calls, [])
 
-    def test_linked_files_skip_separate_task_and_support_independent_mode(self) -> None:
+    def test_standalone_subtitles_execute_in_both_modes(self) -> None:
         """
-        关联模式字幕任务零副作用跳过，关闭关联模式后仍可作为独立原任务整理
+        独立字幕在关联模式和普通模式均有真实执行结果，不再无条件短路
         """
         from app.plugins.p115strmhelper.helper.transfer.planning import (
             extend_plan,
@@ -632,15 +635,37 @@ class BatchTransferContracts(TestCase):
                 ),
             ),
         )
-        self.plans["subtitle"] = extend_plan(plan, self.storage, linked=True)
+        self.plans["subtitle"] = extend_plan(plan)
         result = self._execute_plan("subtitle")
         self.assertTrue(result.success)
-        self.assertEqual(result.message, LINKED_SKIP)
-        self.assertEqual(self.storage.calls, [])
-        self.plans["subtitle"] = extend_plan(plan, self.storage, linked=False)
+        self.assertNotEqual(result.message, LINKED_SKIP)
+        self.assertIsNotNone(result.target_item)
+        self.plans["subtitle"] = extend_plan(plan)
         result = self._execute_plan("subtitle")
         self.assertTrue(result.success)
         self.assertNotEqual(result.target_item.fileid, source.fileid)
+
+    def test_legacy_skipped_attachment_executes_without_false_success(self) -> None:
+        """
+        升级前尚未执行的附件跳过计划恢复为真实操作，不再写无目标成功
+        """
+        from legacy_batch_plan import legacy_plan
+
+        self.seed("legacy-subtitle")
+        source = self.storage.add("/source/Interstellar.2014.srt")
+        plan = self.plans["legacy-subtitle"]
+        data = source.model_dump(mode="json")
+        plan = replace(
+            plan,
+            planning_input=replace(plan.planning_input, source_fileitem=data),
+            items=(replace(plan.items[0], source_fileitem=data),),
+            final_target_path="/target/Interstellar.2014.srt",
+        )
+        self.plans["legacy-subtitle"] = legacy_plan(plan, self.storage, True)
+        result = self._execute_plan("legacy-subtitle")
+        self.assertTrue(result.success)
+        self.assertEqual(result.target_item.path, plan.final_target_path)
+        self.assertTrue(self.storage.calls)
 
     def test_shutdown_waits_for_native_task_between_batches(self) -> None:
         """
@@ -667,7 +692,7 @@ class BatchTransferContracts(TestCase):
         from app.db.models.transferhistory import TransferHistory
         from app.db.models.outbox import OutboxMessage
         from app.modules.filemanager.transhandler import TransHandler
-        from app.plugins.p115strmhelper.helper.transfer.planning import extend_plan
+        from legacy_batch_plan import legacy_plan as extend_plan
         from app.plugins.p115strmhelper.patch.transfer_chain import _context
         from app.sdk.media import MediaInfo, MetaInfoPath
         from app.schemas.types import MediaType
