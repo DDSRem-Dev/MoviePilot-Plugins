@@ -328,7 +328,7 @@ class BatchTransferContracts(
         """
         仅批量任务已提交终态后停止本地续租，其他任务仍遵循宿主生命周期
         """
-        from app.schemas import TransferTask
+        from app.application.transfer.workflow import TransferTask
         from app.plugins.p115strmhelper.patch.transfer_chain import _context
 
         source = self.seed("terminal-marker")
@@ -1156,7 +1156,7 @@ class BatchTransferContracts(
         from app.db.models.transfersettlementreceipt import TransferSettlementReceipt
         from app.modules.filemanager.module import FileManagerModule
         from app.plugins.p115strmhelper.core.config import configer
-        from app.schemas import TransferTask
+        from app.application.transfer.workflow import TransferTask
         from app.schemas.system import TransferDirectoryConf
         from app.schemas.types import MediaType
         from app.sdk.media import MediaInfo, MetaInfoPath
