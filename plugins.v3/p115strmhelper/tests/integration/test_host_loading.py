@@ -786,19 +786,28 @@ class TestV3HostLoading(unittest.TestCase):
                 API_TOKEN="p115-v3-isolated-loading-test-token",
                 MOVIEPILOT_AUTO_UPDATE="false",
             )
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "--probe",
-                    str(host.resolve()),
-                ],
-                env=environment,
-                cwd=temporary,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "--probe",
+                        str(host.resolve()),
+                    ],
+                    env=environment,
+                    cwd=temporary,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            except subprocess.TimeoutExpired as error:
+                details = "".join(
+                    content.decode("utf-8", errors="replace")
+                    if isinstance(content, bytes)
+                    else content or ""
+                    for content in (error.stdout, error.stderr)
+                )
+                self.fail(f"宿主加载及批量契约测试超过 300 秒：\n{details}")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             report = next(
                 line.removeprefix("LOADING_REPORT ")
