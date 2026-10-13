@@ -12,10 +12,13 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 
+from batch_recovery_contracts import BatchRecoveryContracts
 from linked_candidate_contracts import LinkedCandidateContracts
 
 
-class BatchTransferContracts(LinkedCandidateContracts, TestCase):
+class BatchTransferContracts(
+    BatchRecoveryContracts, LinkedCandidateContracts, TestCase
+):
     """
     使用真实 V3 SQLite 步骤账本验证批量整理和恢复，网盘边界使用内存替身
     """
@@ -1114,7 +1117,13 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         """
         self._check_native_queue(recognized=False)
 
-    def _check_native_queue(self, recognized: bool) -> None:
+    def test_restarted_queue_recovers_multiple_batch_plans(self) -> None:
+        """
+        原生恢复入口在单个常规 worker 下仍领取并批量执行多个持久计划
+        """
+        self._check_native_queue(recognized=True, recovery=True)
+
+    def _check_native_queue(self, recognized: bool, recovery: bool = False) -> None:
         from sqlalchemy import select
         from app.chain.transfer import TransferChain
         from app.chain.media import MediaChain
@@ -1189,8 +1198,11 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
             )
             try:
                 for index in range(4):
-                    source = self.storage.add(
-                        f"/source/Interstellar.2014.part{index}.mkv"
+                    name = f"Interstellar.2014.part{index}"
+                    source = (
+                        self.seed(name)
+                        if recovery
+                        else self.storage.add(f"/source/{name}.mkv")
                     )
                     task = TransferTask(
                         fileitem=source,
@@ -1202,12 +1214,38 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                         transfer_batch_id="native-batch",
                     )
                     tasks.append(task)
-                    self.assertTrue(chain.put_to_queue(task))
+                    if recovery:
+                        task.bind_admission_task_id(name)
+                        plan = replace(
+                            self.plans[name],
+                            resolved_meta=chain._TransferChain__json_snapshot(
+                                task.meta
+                            ),
+                            resolved_meta_kind=type(task.meta).__name__,
+                            resolved_mediainfo=chain._TransferChain__json_snapshot(
+                                media
+                            ),
+                            resolved_mediainfo_kind=type(media).__name__,
+                        )
+                        with self.factory() as session:
+                            row = session.scalar(
+                                select(TransferPending).where(
+                                    TransferPending.task_id == name
+                                )
+                            )
+                            row.checkpoint_payload = plan.to_payload()
+                            row.lease_expires_at = "2000-01-01 00:00:00.000000"
+                            session.commit()
+                    else:
+                        self.assertTrue(chain.put_to_queue(task))
+                if recovery:
+                    chain._TransferChain__replay_pending()
                 deadline = monotonic() + 60
                 while monotonic() < deadline and chain._queue.unfinished_tasks:
                     Event().wait(0.05)
                 self.assertEqual(chain._queue.unfinished_tasks, 0)
-                self.assertTrue(all(task.terminal_settled for task in tasks))
+                if not recovery:
+                    self.assertTrue(all(task.terminal_settled for task in tasks))
                 self.assertTrue(
                     any(
                         kind == "copy" and len(ids) > 1

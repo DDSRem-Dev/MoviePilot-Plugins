@@ -55,6 +55,7 @@ class TransferChainPatcher:
             extend_plan,
             restore_skipped_plan,
         )
+        from ..helper.transfer.recovery import claim_batch_recovery
         from ..helper.transfer.settlement import stage_linked_results
         from ..helper.transfer.validation import validate_batch_intent
 
@@ -71,6 +72,7 @@ class TransferChainPatcher:
             original_execute = TransHandler.execute_transfer_plan
             original_step = TransHandler._TransHandler__execute_transfer_with_steps
             original_settle = TransactionalChainDurableEventWriter.transfer_result
+            original_recovery = TransferChain._TransferChain__claim_recovery_batch
             original_enqueue = TransferChain._enqueue_transfer_task
             original_message = TransferChain.send_transfer_message
             message_signature = signature(original_message)
@@ -184,6 +186,12 @@ class TransferChainPatcher:
                     return None
                 return original_complete(chain, *args, **kwargs)
 
+            @wraps(original_recovery)
+            def recovery(chain: Any) -> Any:
+                return claim_batch_recovery(
+                    chain, handler.workers, original_recovery(chain)
+                )
+
             @wraps(original_enqueue)
             def enqueue(chain: Any, item: Any) -> None:
                 original_enqueue(chain, item)
@@ -288,6 +296,9 @@ class TransferChainPatcher:
             cls._install(TransferChain, "_run_transfer_workflow", workflow)
             cls._install(_TransferCandidatePlanner, "_plan_file_items", candidates)
             cls._install(TransferChain, "_enqueue_transfer_task", enqueue)
+            cls._install(
+                TransferChain, "_TransferChain__claim_recovery_batch", recovery
+            )
             cls._install(TransferChain, "_cleanup_successful_transfer", cleanup)
             cls._install(TransferTask, "mark_terminal_settled", terminal_settled)
             cls._install(TransferChain, "send_transfer_message", message)

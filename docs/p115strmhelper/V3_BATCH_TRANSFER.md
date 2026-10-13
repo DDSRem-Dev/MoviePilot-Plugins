@@ -17,6 +17,8 @@ V2 的行为参考保留在 [BATCH_TRANSFER_DESIGN.md](BATCH_TRANSFER_DESIGN.md)
 
 新任务入队和已有任务开始执行时都会检查是否需要增加辅助 worker，因此启用或重载接管后，已在宿主队列中的任务也能参与批量执行。合并范围仍受目标目录和就绪时间影响，不保证整个整理请求只发送一次网盘操作
 
+重启恢复时，已冻结的同存储批量移动／复制计划按辅助 worker 容量追加领取，不再受单个常规 worker 每轮只领取一条的限制。每轮总量仍受宿主恢复上限约束；领取、续租、重试到期判断及人工复核过滤继续使用宿主机制，普通计划和未冻结任务不扩大领取范围
+
 ## 保留的功能
 
 | 功能 | V3 行为 |
@@ -59,6 +61,7 @@ V2 的行为参考保留在 [BATCH_TRANSFER_DESIGN.md](BATCH_TRANSFER_DESIGN.md)
 | `patch/transfer_chain.py` | 安装和恢复宿主补丁、传递原任务上下文、锁定冲突路径 |
 | `helper/transfer/batch.py` | 收集和合并操作，逐文件返回真实结果 |
 | `helper/transfer/workers.py` | 临时运行宿主原生 worker |
+| `helper/transfer/recovery.py` | 追加领取可恢复的批量计划，保留宿主租约和人工复核边界 |
 | `helper/transfer/linked_candidates.py` | 请求阶段发现关联附件，交回宿主创建独立任务 |
 | `helper/transfer/planning.py` | 标记批量计划、执行原生前置策略并兼容旧计划恢复 |
 | `helper/transfer/durable.py` | 目标基线、移动／复制、重命名及结果确认 |
