@@ -1,7 +1,7 @@
 from pathlib import Path, PurePosixPath
 from typing import Any, List, Dict, Tuple, Optional
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.schemas import FileItem, Response, StorageOperSelectionEventData, StorageUsage
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import ChainEventType

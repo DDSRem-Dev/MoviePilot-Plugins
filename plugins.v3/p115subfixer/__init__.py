@@ -8,9 +8,9 @@ from app.application.plugin.folders import remove_plugin_from_folders
 from app.application.scheduling import remove_plugin_job
 from app.db import SessionFactory
 from app.db.oper.subscribe import SubscribeOper
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.sdk.logging import logger
-from app.sdk.plugins import PluginManager
+from app.sdk.plugin.manager import PluginManager
 from app.schemas.types import SystemConfigKey
 
 TARGET_PLUGIN_ID = "P115StrgmSub"

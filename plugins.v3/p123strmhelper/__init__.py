@@ -26,7 +26,7 @@ from app.sdk.logging import logger
 from app.sdk.media import MediaInfo, MetaBase, MetaInfoPath
 from app.sdk.services import MediaServerHelper
 from app.sdk.utilities import SystemUtils
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.schemas import FileItem, RefreshMediaItem, ServiceInfo, TransferInfo
 from app.schemas.types import EventType, MediaType
 

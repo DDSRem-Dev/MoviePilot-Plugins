@@ -6,7 +6,7 @@ from subprocess import TimeoutExpired, run
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.sdk.cache import TTLCache
 from app.sdk.config import settings
 from app.sdk.events import Event, eventmanager

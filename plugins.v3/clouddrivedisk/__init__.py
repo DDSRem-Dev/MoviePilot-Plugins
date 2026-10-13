@@ -7,7 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from clouddrive2_client import CloudDriveClient
 from pytz import timezone
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.schemas import (
     FileItem,
     Response,

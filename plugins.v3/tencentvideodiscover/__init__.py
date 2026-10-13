@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.schemas import DiscoverMediaSource, DiscoverSourceEventData, Response
 from app.schemas.types import ChainEventType, MediaSource, MediaType
 from app.sdk.cache import cached

@@ -5,7 +5,7 @@ from .tool import P123AutoClient
 from .p123_api import P123Api
 
 from app import schemas
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.schemas import StorageOperSelectionEventData, FileItem
 from app.schemas.exception import StorageQueryError
 from app.schemas.types import ChainEventType

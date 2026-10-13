@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from uvicorn import Config, Server
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.sdk.logging import logger
 
 from .external_players import EXTERNAL_PLAYERS

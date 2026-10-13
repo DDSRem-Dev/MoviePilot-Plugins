@@ -11,7 +11,7 @@ from app.chain.transfer import TransferChain
 from app.db.models.transferhistory import TransferHistory
 from app.db.oper.downloadhistory import DownloadHistoryOper
 from app.db.oper.transferhistory import TransferHistoryOper
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.sdk.config import settings
 from app.sdk.events import Event, eventmanager
 from app.sdk.logging import logger
@@ -23,7 +23,7 @@ from app.schemas.types import (
     MediaImageType,
     MediaSource,
     MediaType,
-    NotificationType,
+    MessageType,
 )
 
 
@@ -1411,7 +1411,7 @@ class SaMediaSyncDel(_PluginBase):
                 torrent_cnt_msg += f"删种失败{error_cnt}个\n"
             # 发送通知
             self.post_message(
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="媒体库同步删除任务完成",
                 image=backrop_image,
                 text=f"{msg}\n"
