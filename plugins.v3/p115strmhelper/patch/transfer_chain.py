@@ -158,6 +158,7 @@ class TransferChainPatcher:
                         and task.fileitem.type == "file"
                     ):
                         with handler.operation():
+                            handler.workers.ensure(chain)
                             return original_handle(chain, task, callback)
                     return original_handle(chain, task, callback)
                 finally:

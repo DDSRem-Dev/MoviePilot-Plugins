@@ -29,6 +29,7 @@ class BatchWorkers:
 
     def _eligible(self, item: Any) -> bool:
         from app.schemas.types import MediaType
+        from app.sdk.media import MetaAnime, MetaVideo
 
         task = getattr(item, "task", None)
         if task is None:
@@ -40,7 +41,12 @@ class BatchWorkers:
             directory, "transfer_type", None
         )
         media = getattr(task, "mediainfo", None)
-        media_type = getattr(media, "type", None) or getattr(task, "mtype", None)
+        meta = getattr(task, "meta", None)
+        media_type = (
+            getattr(media, "type", None)
+            or getattr(task, "mtype", None)
+            or getattr(meta, "type", None)
+        )
         checkpoint = task.plan_checkpoint
         if checkpoint is not None:
             target = checkpoint.target_storage
@@ -51,13 +57,17 @@ class BatchWorkers:
             and source.storage == self.storage
             and target == self.storage
             and mode in {"move", "copy"}
-            and media_type
-            in {
-                MediaType.MOVIE,
-                MediaType.TV,
-                MediaType.MOVIE.value,
-                MediaType.TV.value,
-            }
+            and (
+                media_type
+                in {
+                    MediaType.MOVIE,
+                    MediaType.TV,
+                    MediaType.MOVIE.value,
+                    MediaType.TV.value,
+                }
+                or media_type in {None, MediaType.UNKNOWN, MediaType.UNKNOWN.value}
+                and isinstance(meta, (MetaVideo, MetaAnime))
+            )
             and not task.preview
         )
 

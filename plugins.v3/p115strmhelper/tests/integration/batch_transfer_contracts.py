@@ -167,11 +167,21 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
             target_storage=source.storage,
             transfer_type="copy",
             mediainfo=SimpleNamespace(type=MediaType.MOVIE),
+            meta=SimpleNamespace(type=MediaType.TV),
+            mtype=None,
             plan_checkpoint=None,
             preview=False,
         )
         eligible = lambda: self.handler.workers._eligible(SimpleNamespace(task=task))
         self.assertTrue(eligible())
+        with patch.object(task, "mediainfo", None):
+            self.assertTrue(eligible())
+            with patch.object(task, "mtype", MediaType.MUSIC):
+                self.assertFalse(eligible())
+            with patch.object(task, "meta", SimpleNamespace(type=MediaType.MUSIC)):
+                self.assertFalse(eligible())
+            with patch.object(task, "meta", None):
+                self.assertFalse(eligible())
         for change in (
             {"mediainfo": SimpleNamespace(type=MediaType.MUSIC)},
             {"transfer_type": "link"},
@@ -807,6 +817,15 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         """
         从真实宿主入队到原子终态，批量 worker 保留原任务身份与完整执行回调
         """
+        self._check_native_queue(recognized=True)
+
+    def test_unrecognized_video_queue_batches_without_explicit_media_type(self) -> None:
+        """
+        仅有文件名解析类型的普通整理请求仍能合并真实宿主任务
+        """
+        self._check_native_queue(recognized=False)
+
+    def _check_native_queue(self, recognized: bool) -> None:
         from sqlalchemy import select
         from app.chain.transfer import TransferChain
         from app.chain.media import MediaChain
@@ -867,6 +886,9 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                 patch.object(MediaChain, "supplement_tmdb_info", return_value=media)
             )
             stack.enter_context(
+                patch.object(MediaChain, "recognize_by_meta", return_value=media)
+            )
+            stack.enter_context(
                 patch.object(self.handler, "supports", return_value=True)
             )
             try:
@@ -877,7 +899,7 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                     task = TransferTask(
                         fileitem=source,
                         meta=MetaInfoPath(Path(source.path)),
-                        mediainfo=media,
+                        mediainfo=media if recognized else None,
                         target_directory=directory,
                         target_storage="115网盘Plus",
                         transfer_type="copy",
