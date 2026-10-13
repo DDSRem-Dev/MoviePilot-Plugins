@@ -112,9 +112,7 @@ class TransferStrmHelper:
             configer.get_config("transfer_monitor_paths"), transfer.target_diritem.path
         )
         if not matched:
-            logger.debug(
-                "【监控整理STRM生成】%s 路径匹配不符合，跳过整理", target.name
-            )
+            logger.debug("【监控整理STRM生成】%s 路径匹配不符合，跳过整理", target.name)
             return
         logger.debug("【监控整理STRM生成】匹配到网盘文件夹路径: %s", str(cloud))
         suffix = Path(target.name).suffix.lower().lstrip(".")
@@ -231,12 +229,11 @@ class TransferStrmHelper:
                     )
                     raise
                 if options["transfer_monitor_scrape_metadata_enabled"]:
-                    if (
-                        options["transfer_monitor_scrape_metadata_exclude_paths"]
-                        and PathUtils.get_scrape_metadata_exclude_path(
-                            options["transfer_monitor_scrape_metadata_exclude_paths"],
-                            str(output),
-                        )
+                    if options[
+                        "transfer_monitor_scrape_metadata_exclude_paths"
+                    ] and PathUtils.get_scrape_metadata_exclude_path(
+                        options["transfer_monitor_scrape_metadata_exclude_paths"],
+                        str(output),
                     ):
                         logger.debug(
                             "【监控整理STRM生成】匹配到刮削排除目录，不进行刮削: %s",
@@ -310,7 +307,7 @@ class TransferStrmHelper:
             media.from_dict(deepcopy(plan["media"]))
         meta = None
         if plan["meta"]:
-            meta = MetaInfoPath(Path(plan["name"]))
+            meta = MetaInfoPath(Path(plan["name"]), force_video=True)
             for key, value in plan["meta"].items():
                 if key == "type" and value:
                     meta.type = MediaType(value)

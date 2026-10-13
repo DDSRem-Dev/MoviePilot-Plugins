@@ -383,6 +383,24 @@ class TestV3TransferStrm(TestCase):
         self.scrape.assert_not_called()
         self.url.get_strm_url.assert_not_called()
 
+    def test_linked_audio_restores_video_metadata_for_indexing(self) -> None:
+        """
+        关联音轨保留影视元数据，不向 V3 音乐解析对象的只读属性写入快照
+        """
+        parser = importlib.import_module("app.domain.metainfo")
+        with patch.object(parser, "get_audio_extensions", return_value={".flac"}):
+            audio = parser.MetaInfoPath(Path("Example.S01E01.flac"))
+            self.assertEqual(type(audio).__name__, "MetaMusic")
+            self._run(
+                self._item("Example.S01E01.flac"),
+                self.types.EventType.AudioTransferComplete,
+            )
+        self.database.upsert_batch.assert_called_once()
+        self.scrape.assert_not_called()
+        self.assertEqual(
+            (self.library / "Example.S01E01.flac").read_bytes(), b"complete subtitle"
+        )
+
     def test_download_failures_propagate_for_durable_retry(self) -> None:
         """
         下载链接缺失或保存失败均反馈给宿主重试，不静默确认事件
@@ -520,7 +538,9 @@ class TestV3TransferStrm(TestCase):
                 path = self.library / Path(name).with_suffix(".strm")
                 self.assertEqual(path.read_text(), "https://example.invalid/video")
                 stamp = self.files.fingerprint(path)
-                key = self.processor.event_key(item, self.types.EventType.TransferComplete)
+                key = self.processor.event_key(
+                    item, self.types.EventType.TransferComplete
+                )
                 record = self.processor.TransferPostprocessStore().load(key)
                 self.assertEqual(record["state"], "done")
                 self.assertEqual(record["plan"]["identity"]["fileid"], target.fileid)
