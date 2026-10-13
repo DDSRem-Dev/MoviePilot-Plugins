@@ -217,6 +217,44 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         )
         chain.jobview.is_success.assert_called_once_with(task)
 
+    def test_terminal_marker_releases_only_settled_batch_lease(self) -> None:
+        """
+        仅批量任务已提交终态后停止本地续租，其他任务仍遵循宿主生命周期
+        """
+        from app.schemas import TransferTask
+        from app.plugins.p115strmhelper.patch.transfer_chain import _context
+
+        source = self.seed("terminal-marker")
+        task = TransferTask(fileitem=source)
+        task.bind_plan_checkpoint(self.plans["terminal-marker"])
+        task.bind_admission_task_id("terminal-marker")
+        task.bind_execution_lease(owner_id="batch-test", lease_token="lease")
+        chain = SimpleNamespace(_TransferChain__forget_owned_lease=Mock())
+        token = _context.set((chain, task))
+        try:
+            self.assertFalse(task.terminal_settled)
+            chain._TransferChain__forget_owned_lease.assert_not_called()
+            task.mark_terminal_settled()
+            self.assertTrue(task.terminal_settled)
+            chain._TransferChain__forget_owned_lease.assert_called_once_with(
+                "terminal-marker", "lease"
+            )
+            chain._TransferChain__forget_owned_lease.reset_mock()
+            task.bind_plan_checkpoint(
+                replace(
+                    self.plans["terminal-marker"],
+                    items=(
+                        replace(
+                            self.plans["terminal-marker"].items[0], action="transfer"
+                        ),
+                    ),
+                )
+            )
+            task.mark_terminal_settled()
+            chain._TransferChain__forget_owned_lease.assert_not_called()
+        finally:
+            _context.reset(token)
+
     def test_copy_batch_and_replay(self) -> None:
         """
         多文件复制合并 API，副本身份正确且重放不重复复制或重命名
@@ -992,6 +1030,13 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         chain._TransferChain__select_storage_oper = lambda storage: self.storage
         chain.send_transfer_message = Mock()
         chain._send_metadata_scrape_event = Mock()
+
+        def after_settlement(task: Any, result: Any) -> None:
+            self.assertTrue(task.terminal_settled)
+            self.assertNotIn(task.admission_task_id, chain._owned_leases)
+            chain._TransferChain__heartbeat_owned_leases()
+
+        chain.notify_successful_transfer = Mock(side_effect=after_settlement)
         directory = TransferDirectoryConf(
             library_path="/target",
             library_storage="115网盘Plus",
@@ -1051,6 +1096,7 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
                     )
                     self.assertTrue(all(row.outcome == "succeeded" for row in receipts))
                 self.assertEqual(chain._owned_leases, {})
+                self.assertEqual(chain.notify_successful_transfer.call_count, 4)
             finally:
                 self.assertTrue(chain.close_workers())
 

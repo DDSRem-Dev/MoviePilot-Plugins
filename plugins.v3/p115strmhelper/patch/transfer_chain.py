@@ -44,6 +44,7 @@ class TransferChainPatcher:
             TransactionalTransferExecutionRepository,
         )
         from app.modules.filemanager.transhandler import TransHandler
+        from app.schemas import TransferTask
         from app.schemas.types import MediaType
 
         from ..helper.transfer.linked_candidates import plan_linked_candidates
@@ -71,6 +72,7 @@ class TransferChainPatcher:
             original_step = TransHandler._TransHandler__execute_transfer_with_steps
             original_settle = TransactionalChainDurableEventWriter.transfer_result
             original_enqueue = TransferChain._enqueue_transfer_task
+            original_terminal = TransferTask.mark_terminal_settled
             original_cleanup = TransferChain._cleanup_successful_transfer
             original_complete = (
                 TransferChain._TransferChain__mark_torrent_completed_if_done
@@ -122,6 +124,16 @@ class TransferChainPatcher:
                         and checkpoint.items[0].action == MAIN_ACTION
                     )
                 )
+
+            @wraps(original_terminal)
+            def terminal_settled(task: Any) -> None:
+                original_terminal(task)
+                context = _context.get()
+                if context and context[1] is task and is_batch_task(task):
+                    if task.admission_task_id and task.lease_token:
+                        context[0]._TransferChain__forget_owned_lease(
+                            task.admission_task_id, task.lease_token
+                        )
 
             @wraps(original_cleanup)
             def cleanup(chain: Any, task: Any, transferhis: Any, history: Any) -> None:
@@ -247,6 +259,7 @@ class TransferChainPatcher:
             cls._install(_TransferCandidatePlanner, "_plan_file_items", candidates)
             cls._install(TransferChain, "_enqueue_transfer_task", enqueue)
             cls._install(TransferChain, "_cleanup_successful_transfer", cleanup)
+            cls._install(TransferTask, "mark_terminal_settled", terminal_settled)
             cls._install(
                 TransferChain,
                 "_TransferChain__mark_torrent_completed_if_done",
