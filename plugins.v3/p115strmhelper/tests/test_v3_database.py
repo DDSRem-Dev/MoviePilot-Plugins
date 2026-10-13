@@ -204,7 +204,7 @@ class TestV3Database(TestCase):
         with self.owner.get_database().engine.connect() as connection:
             self.assertEqual(
                 connection.scalar(text("SELECT version_num FROM alembic_version")),
-                "p115v3_db_01",
+                "p115v3_post_01",
             )
             self.assertEqual(
                 connection.scalar(text("SELECT source FROM p115_legacy_import")),
@@ -763,7 +763,7 @@ class TestV3Database(TestCase):
         self.assertEqual(len(scripts), 1)
         namespace = {}
         exec(compile(scripts[0].read_text(), str(scripts[0]), "exec"), namespace)
-        self.assertEqual(namespace["down_revision"], "p115v3_db_01")
+        self.assertEqual(namespace["down_revision"], "p115v3_post_01")
         namespace["upgrade"]()
         namespace["downgrade"]()
         self.assertEqual(self.registry.database_handles(), ())
@@ -781,6 +781,44 @@ class TestV3Database(TestCase):
             writer.rollback()
         self.db.init_database()
         self.assertEqual(self.count(self.models.File), 1)
+
+    def test_postprocess_migration_preserves_existing_v3_data(self) -> None:
+        """
+        已安装 V3 的数据库升级后保留原数据并创建事件和资源表
+        """
+        self.db.init_database()
+        self.models.File.upsert_batch_by_list(None, [dict(id=1, parent_id=0, name="kept", path="/kept")])
+        with self.owner.get_database().engine.begin() as connection:
+            self.models.TransferPostprocess.__table__.drop(connection)
+            self.models.TransferResource.__table__.drop(connection)
+            connection.execute(text("UPDATE alembic_version SET version_num='p115v3_db_01'"))
+        self.registry.release_all_databases()
+        self.db.init_database()
+        self.assertEqual(self.models.File.get_by_id(None, 1).name, "kept")
+        self.assertEqual(self.count(self.models.TransferPostprocess), 0)
+        self.assertEqual(self.count(self.models.TransferResource), 0)
+
+    def test_postprocess_file_and_checkpoint_commit_atomically(self) -> None:
+        """
+        事件计划与文件归属在同一事务提交，失败不留下单边成功记录
+        """
+        self.db.init_database()
+        module = importlib.import_module(f"{self.prefix}.db_manager.transfer_postprocess")
+        store = module.TransferPostprocessStore()
+        path = self.directory / "library/电影.strm"
+        operation = {"path": str(path), "identity": {"fileid": "123"}, "after": {"sha256": "abc"}}
+        plan = {"operations": [operation]}
+        key = "a" * 64
+        store.save(key, plan)
+        with patch.object(Session, "commit", side_effect=RuntimeError("commit failed")):
+            with self.assertRaises(RuntimeError):
+                store.complete_file(key, plan, operation)
+        self.assertIsNone(store.owner(path))
+        store.complete_file(key, plan, operation)
+        self.assertEqual(store.owner(path)["event_key"], key)
+        self.assertEqual(store.load(key)["plan"], plan)
+        store.save(key, plan, "done")
+        self.assertEqual(module.TransferPostprocessStore().load(key)["state"], "done")
 
 
 @skipUnless(os.environ.get("P115_TEST_POSTGRES_URL"), "需要隔离的 PostgreSQL 测试服务")

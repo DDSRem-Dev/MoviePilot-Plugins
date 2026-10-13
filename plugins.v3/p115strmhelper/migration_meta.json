@@ -1,6 +1,6 @@
 {
     "version": "3.0.0",
-    "revision": "p115v3_db_01",
+    "revision": "p115v3_post_01",
     "models": "db_manager.models",
     "script_location": "database",
     "version_location": "database.versions"

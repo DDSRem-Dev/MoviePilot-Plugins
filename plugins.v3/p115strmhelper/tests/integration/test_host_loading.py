@@ -30,6 +30,7 @@ from qrcode_request_contracts import check_qrcode_request_contracts
 from strm_api_contracts import check_strm_api_contracts
 from strm_event_contracts import check_strm_event_contracts
 from transfer_hook_contracts import check_transfer_hook_contracts
+from transfer_postprocess_contracts import check_transfer_postprocess_contracts
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -245,6 +246,7 @@ def _check_enabled_cycles(instance: Any, check: unittest.TestCase) -> Tuple[int,
             check.assertFalse(service._sync_stopping)
             if cycle == 0:
                 check_strm_api_contracts(instance, check)
+                check_transfer_postprocess_contracts(instance, check)
                 _check_running_cleanup(instance, service_module, check)
             if cycle == 1:
                 _check_running_sync(instance, service, check)
