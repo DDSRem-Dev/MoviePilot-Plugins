@@ -1,14 +1,13 @@
 from pathlib import Path
 from typing import Optional
 
-from app.chain.storage import StorageChain
 from app.sdk.config import settings
 from app.schemas import FileItem
 
 
 class TransferFileTypes:
     """
-    保留 V2 的媒体、字幕与音轨后缀判定
+    旧关联持久任务结算所需的字幕类型判定
     """
 
     @staticmethod
@@ -40,42 +39,4 @@ class TransferFileTypes:
         return ext in {
             TransferFileTypes._normalize_ext(ext_item)
             for ext_item in settings.RMT_SUBEXT
-        }
-
-    @staticmethod
-    def _is_audio_file(fileitem: FileItem) -> bool:
-        """
-        判断是否为音频文件
-
-        :param fileitem (FileItem): 文件项
-        :return bool: 是否为音频文件
-        """
-        ext = TransferFileTypes._normalize_ext(fileitem.extension)
-        if not ext and fileitem.path:
-            ext = TransferFileTypes._normalize_ext(Path(fileitem.path).suffix)
-        if not ext:
-            return False
-        return ext in {
-            TransferFileTypes._normalize_ext(ext_item)
-            for ext_item in settings.RMT_AUDIOEXT
-        }
-
-    @staticmethod
-    def _is_media_file(fileitem: FileItem) -> bool:
-        """
-        与 TransferChain.__is_media_file 一致的主要媒体文件判定（文件项）
-
-        :param fileitem (FileItem): 文件项
-        :return bool: 是否为主要媒体文件
-        """
-        if fileitem.type == "dir":
-            return StorageChain().is_bluray_folder(fileitem)
-        ext = TransferFileTypes._normalize_ext(fileitem.extension)
-        if not ext and fileitem.path:
-            ext = TransferFileTypes._normalize_ext(Path(fileitem.path).suffix)
-        if not ext:
-            return False
-        return ext in {
-            TransferFileTypes._normalize_ext(ext_item)
-            for ext_item in settings.RMT_MEDIAEXT
         }

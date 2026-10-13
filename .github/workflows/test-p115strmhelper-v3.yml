@@ -119,7 +119,7 @@ jobs:
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_increment_*.py' -v
 
-      - name: Run original transfer classification in an isolated process
+      - name: Run legacy settlement subtitle classification regressions
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_transfer_classify.py' -v
 

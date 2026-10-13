@@ -534,9 +534,11 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
 
         name = "Interstellar.2014.failed"
         source = self.seed(name, "move")
-        self.storage.add(f"/source/{name}.zh-cn.srt")
+        subtitle = self.storage.add(f"/source/{name}.zh-cn.srt")
         audio = self.storage.add(f"/source/{name}.flac")
-        self.plans[name] = extend_plan(self.plans[name], self.storage, linked=True)
+        self.plans[name] = extend_plan(
+            self.plans[name], ((subtitle, ".default.chi.zh-cn.srt"), (audio, ".flac"))
+        )
         move = self.storage.fs_move
 
         def reject_audio(ids: List[str], pid: int, **kwargs: Any) -> Any:
@@ -661,7 +663,7 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
             items=(replace(plan.items[0], source_fileitem=data),),
             final_target_path="/target/Interstellar.2014.srt",
         )
-        self.plans["legacy-subtitle"] = legacy_plan(plan, self.storage, True)
+        self.plans["legacy-subtitle"] = legacy_plan(plan, skip=True)
         result = self._execute_plan("legacy-subtitle")
         self.assertTrue(result.success)
         self.assertEqual(result.target_item.path, plan.final_target_path)
@@ -698,9 +700,12 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         from app.schemas.types import MediaType
 
         source = self.seed("Interstellar.2014")
-        self.storage.add("/source/Interstellar.2014.zh-cn.srt")
-        self.storage.add("/source/Interstellar.2014.flac")
-        plan = extend_plan(self.plans["Interstellar.2014"], self.storage, linked=True)
+        subtitle = self.storage.add("/source/Interstellar.2014.zh-cn.srt")
+        audio = self.storage.add("/source/Interstellar.2014.flac")
+        plan = extend_plan(
+            self.plans["Interstellar.2014"],
+            ((subtitle, ".default.chi.zh-cn.srt"), (audio, ".flac")),
+        )
         self.assertEqual(len(plan.items), 3)
         meta = MetaInfoPath(Path(source.path))
         media = MediaInfo(
