@@ -102,6 +102,6 @@ def publish_file(staged: Path, target: Path) -> None:
     """
     刷新暂存文件后原子替换目标，避免中断留下半个字幕或 STRM
     """
-    with staged.open("rb") as source:
+    with staged.open("r+b") as source:
         fsync(source.fileno())
     replace(staged, target)
