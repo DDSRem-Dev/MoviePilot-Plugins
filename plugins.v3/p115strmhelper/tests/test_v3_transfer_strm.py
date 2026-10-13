@@ -659,6 +659,33 @@ class TestV3TransferStrm(TestCase):
         self.assertEqual(target.read_text(), "new external owner")
         self.scrape.assert_not_called()
 
+    def test_failed_refresh_remains_pending_and_retries_only_refresh(self) -> None:
+        """
+        刷新返回失败时保留待重试状态，恢复后不重写 STRM 或重复刮削
+        """
+        self.config.transfer_monitor_media_server_refresh_enabled = True
+        refresh = self.module.MediaServerRefresh.return_value.refresh_mediaserver
+        refresh.return_value = False
+        item = self._item()
+        key = self.processor.event_key(item, self.types.EventType.TransferComplete)
+        store = self.processor.TransferPostprocessStore()
+        with self.assertRaisesRegex(RuntimeError, "媒体服务器刷新失败"):
+            self._run(item)
+        record = store.load(key)
+        self.assertEqual(record["state"], "pending")
+        self.assertFalse(record["plan"]["effects"]["refresh"])
+        self.assertTrue(record["plan"]["effects"]["scrape"])
+        target = self.library / "Example.S01E01.strm"
+        stamp = self.files.fingerprint(target)
+        refresh.return_value = True
+        self._run(item)
+        self.assertEqual(store.load(key)["state"], "done")
+        self.assertEqual(self.files.fingerprint(target), stamp)
+        self.scrape.assert_called_once()
+        self.assertEqual(refresh.call_count, 2)
+        self._run(item)
+        self.assertEqual(refresh.call_count, 2)
+
     def test_completed_write_is_not_repeated_when_scrape_retries(self) -> None:
         """
         刮削提交失败后只重试未完成效果，路径和内容使用首次固定值

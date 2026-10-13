@@ -324,7 +324,7 @@ class TransferStrmHelper:
                 path=path, item_name=plan["name"], mediainfo=media, meta=meta
             )
         elif name == "refresh":
-            MediaServerRefresh(
+            if not MediaServerRefresh(
                 func_name="【监控整理STRM生成】",
                 enabled=True,
                 mp_mediaserver=options["transfer_mp_mediaserver_paths"],
@@ -332,7 +332,8 @@ class TransferStrmHelper:
                 delay_seconds=options["transfer_monitor_media_server_refresh_delay"],
             ).refresh_mediaserver(
                 file_name=plan["name"], file_path=path, mediainfo=media
-            )
+            ):
+                raise RuntimeError("整理后处理媒体服务器刷新失败，等待重试")
         elif name == "mediainfo":
             attributes = {}
             if not options["native_emby_mediainfo_enabled"]:
