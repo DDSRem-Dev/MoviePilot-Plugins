@@ -317,8 +317,11 @@ class TransferStrmHelper:
                 elif key not in {"season_episode", "edition", "name", "episode_list"}:
                     setattr(meta, key, value)
         if name == "index":
+            target = FileItem(**plan["target"])
+            if not target.fileid:
+                target.fileid = str(client.to_id(plan["pickcode"]))
             helper = FileDbHelper()
-            helper.upsert_batch(helper.process_fileitem(FileItem(**plan["target"])))
+            helper.upsert_batch(helper.process_fileitem(target))
         elif name == "scrape":
             media_scrape_metadata(
                 path=path, item_name=plan["name"], mediainfo=media, meta=meta

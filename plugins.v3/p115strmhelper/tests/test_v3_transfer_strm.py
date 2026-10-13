@@ -555,6 +555,12 @@ class TestV3TransferStrm(TestCase):
         item["transferinfo"].fileitem = source
         target.fileid = None
         target.modify_time = 1
+        self.client.to_id.return_value = 101
+        self.database.process_fileitem.side_effect = _method(
+            Path(__file__).resolve().parents[1] / "db_manager/file_oper.py",
+            "process_fileitem",
+            {"Path": Path},
+        )
         self.remote_files[(target.storage, target.path)] = target.model_copy(
             update={"modify_time": 2}
         )
@@ -563,6 +569,11 @@ class TestV3TransferStrm(TestCase):
         self.url.get_strm_url.assert_called_once_with(
             target.pickcode, target.name, target.path
         )
+        self.client.to_id.assert_called_once_with(target.pickcode)
+        indexed = self.database.upsert_batch.call_args.args[0][0]["data"]
+        self.assertEqual(indexed["id"], 101)
+        self.assertEqual(indexed["pickcode"], target.pickcode)
+        self.assertIsNone(target.fileid)
 
     def test_same_identity_with_changed_size_is_superseded(self) -> None:
         """
