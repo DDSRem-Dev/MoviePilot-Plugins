@@ -182,21 +182,35 @@ class DurableBatchTransfer:
         if kind == "capture":
             items = self._list(first["target_oper"], first["folder"])
             sources = {}
+            errors = {}
+            valid = []
             for operation in operations:
                 source = operation.payload["source"]
                 oper = operation.payload["source_oper"]
                 parent = Path(source.path).parent
                 key = (id(oper), str(parent))
-                if key not in sources:
-                    folder = oper.get_item_strict(parent)
-                    if folder is None:
-                        raise OSError(f"源目录不存在：{parent}")
-                    sources[key] = {
-                        (str(Path(item.path)), item.fileid)
-                        for item in self._list(oper, folder)
-                    }
-                if (str(Path(source.path)), source.fileid) not in sources[key]:
-                    raise OSError(f"源文件身份已经改变：{source.path}")
+                try:
+                    if key in errors:
+                        raise errors[key]
+                    if key not in sources:
+                        try:
+                            folder = oper.get_item_strict(parent)
+                            if folder is None:
+                                raise OSError(f"源目录不存在：{parent}")
+                            sources[key] = {
+                                (str(Path(item.path)), item.fileid)
+                                for item in self._list(oper, folder)
+                            }
+                        except Exception as error:
+                            errors[key] = error
+                            raise
+                    if (str(Path(source.path)), source.fileid) not in sources[key]:
+                        raise OSError(f"源文件身份已经改变：{source.path}")
+                except Exception as error:
+                    operation.future.set_exception(error)
+                else:
+                    valid.append(operation)
+            operations = valid
             copy_ids = [
                 op.payload["source"].fileid
                 for op in operations

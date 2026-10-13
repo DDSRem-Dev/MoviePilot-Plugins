@@ -255,6 +255,34 @@ class BatchTransferContracts(LinkedCandidateContracts, TestCase):
         finally:
             _context.reset(token)
 
+    def test_missing_source_does_not_fail_other_batch_files(self) -> None:
+        """
+        同批某个源文件已消失时只拒绝该文件，其他文件继续合并复制
+        """
+        sources = [self.seed(f"missing-{index}") for index in range(3)]
+        del self.storage.items[sources[0].fileid]
+        barrier = Barrier(3, timeout=10)
+        original = self.handler.coordinator.submit
+
+        def submit(key: Any, payload: Dict[str, Any], validate: Any) -> Any:
+            if payload["kind"] == "capture":
+                barrier.wait()
+            return original(key, payload, validate)
+
+        with patch.object(self.handler.coordinator, "submit", submit):
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                futures = [
+                    pool.submit(self.run_transfer, f"missing-{index}")
+                    for index in range(3)
+                ]
+                with self.assertRaisesRegex(OSError, "源文件身份已经改变"):
+                    futures[0].result(timeout=10)
+                for future in futures[1:]:
+                    self.assertIsNotNone(future.result(timeout=10))
+        copies = [ids for kind, ids in self.storage.calls if kind == "copy"]
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(set(copies[0]), {item.fileid for item in sources[1:]})
+
     def test_copy_batch_and_replay(self) -> None:
         """
         多文件复制合并 API，副本身份正确且重放不重复复制或重命名
