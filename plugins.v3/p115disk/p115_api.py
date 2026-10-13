@@ -321,18 +321,31 @@ class P115Api:
             new_path = Path(fileitem.path) / name
             parent_id = self.get_pid_by_path(Path(fileitem.path))
             if parent_id == -1:
+                logger.error(
+                    "【P115Disk】创建目录失败：父目录不存在，目标=%r", str(new_path)
+                )
                 return None
             payload = {
                 "cname": name,
                 "pid": parent_id,
             }
+            logger.info(
+                "【P115Disk】开始创建目录：存储=%s，路径=%r，父目录ID=%s",
+                self._disk_name,
+                str(new_path),
+                parent_id,
+            )
             resp = self.client.fs_mkdir(payload, **get_ios_ua_app(app=False))
             check_response(resp)
-            logger.info(f"【P115Disk】创建目录: {resp}")
             data = resp.get("cid", resp.get("file_id", None))
             if not data:
-                logger.error(f"【P115Disk】创建目录失败: {resp}")
+                logger.error(
+                    "【P115Disk】创建目录失败：响应缺少目录ID，路径=%r", str(new_path)
+                )
                 return None
+            logger.info(
+                "【P115Disk】创建目录成功：路径=%r，目录ID=%s", str(new_path), data
+            )
             self._id_cache.add_cache(id=data, directory=new_path.as_posix())
             modify_time = int(time())
             self._id_item_cache.add_cache(
@@ -357,7 +370,12 @@ class P115Api:
                 pickcode=self.client.to_pickcode(data),
             )
         except Exception as e:
-            logger.error(f"【P115Disk】创建目录失败: {str(e)}")
+            logger.error(
+                "【P115Disk】创建目录失败：父目录=%r，名称=%r，错误类型=%s",
+                fileitem.path,
+                name,
+                type(e).__name__,
+            )
             return None
 
     def get_folder(self, path: Path) -> Optional[FileItem]:
@@ -380,6 +398,11 @@ class P115Api:
             return None
         if folder:
             if folder.type == "dir":
+                logger.debug(
+                    "【P115Disk】复用已有目录：路径=%r，目录ID=%s",
+                    str(path),
+                    folder.fileid,
+                )
                 return folder
             logger.error(f"【P115Disk】目标路径不是目录: {path}")
             return None
@@ -394,11 +417,20 @@ class P115Api:
             )
 
         try:
+            logger.info(
+                "【P115Disk】开始创建目录：存储=%s，路径=%r（含缺失的父目录）",
+                self._disk_name,
+                str(path),
+            )
             resp = self.client.fs_makedirs_app(
                 path.as_posix(), pid=0, **get_ios_ua_app()
             )
             check_response(resp)
-            logger.info(f"【P115Disk】创建目录: {resp}")
+            logger.info(
+                "【P115Disk】创建目录成功：路径=%r，目录ID=%s",
+                str(path),
+                resp["cid"],
+            )
             self._id_cache.add_cache(id=int(resp["cid"]), directory=path.as_posix())
             modify_time = int(time())
             self._id_item_cache.add_cache(
@@ -423,7 +455,11 @@ class P115Api:
                 pickcode=self.client.to_pickcode(resp["cid"]),
             )
         except Exception as e:
-            logger.error(f"【P115Disk】{path} 目录创建出现未知错误：{e}")
+            logger.error(
+                "【P115Disk】创建目录失败：路径=%r，错误类型=%s",
+                str(path),
+                type(e).__name__,
+            )
             return None
 
     def get_item(self, path: Path) -> Optional[FileItem]:
