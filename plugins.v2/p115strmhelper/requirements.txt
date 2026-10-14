@@ -1,12 +1,12 @@
 p115client==0.0.9.7.2
-sentry-sdk~=2.71.0
+sentry-sdk~=2.72.0
 aligo~=6.2.8
 qrcode_terminal~=0.8
 pyahocorasick~=2.3.0
 diskcache~=5.6.3
 zstandard~=0.25.0
 mfusepy~=3.1.0
-p115center-sdk==0.0.17
+p115center-sdk==0.0.18
 slippers-proxy~=0.3.0
 orjson
 numpy
