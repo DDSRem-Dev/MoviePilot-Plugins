@@ -49,6 +49,8 @@ class TestV3ShareReporting(TestCase):
             (self.host.types.MediaSource.TMDB, {"tmdb_id": 42}),
             (self.host.types.MediaSource.Douban, {"douban_id": "42"}),
             (self.host.types.MediaSource.Bangumi, {"bangumi_id": 42}),
+            (self.host.types.MediaSource.AniList, {"anilist_id": 42, "anidb_id": 84}),
+            (self.host.types.MediaSource.TVDB, {"tvdb_id": 42}),
         ):
             with self.subTest(source=source):
                 self.center.reset_mock()
@@ -71,6 +73,7 @@ class TestV3ShareReporting(TestCase):
                 self.assertIsInstance(payload, ShareInfo)
                 values = payload.model_dump(mode="json")
                 self.assertEqual(values["source"], source.value)
+                self.assertEqual(values["media_id"], "42")
                 self.assertEqual(values["type"], media.type.value)
                 self.assertEqual(values["title"], media.title)
                 self.assertEqual(values["year"], "2026")
@@ -93,6 +96,7 @@ class TestV3ShareReporting(TestCase):
         payload = upload.call_args.kwargs["payload"]
         self.assertEqual(payload.url, "https://www.alipan.com/s/ali-code")
         self.assertIsNone(payload.source)
+        self.assertIsNone(payload.media_id)
         self.assertIsNone(payload.title)
         self.assertIsNone(payload.tmdb_id)
 
@@ -108,8 +112,35 @@ class TestV3ShareReporting(TestCase):
         self.report("115", "share-code", "receive-code", media)
         payload = self.center.return_value.upload_share_info.call_args.kwargs["payload"]
         self.assertEqual(payload.source, "anilist")
+        self.assertEqual(payload.media_id, "42")
         for field in ("tmdb_id", "douban_id", "bangumi_id"):
             self.assertIsNone(getattr(payload, field))
+
+    def test_opaque_and_extension_identities_survive_both_share_platforms(self) -> None:
+        """
+        IMDb 和扩展来源的非数字主身份原样上报，不用其他来源编号替换
+        """
+        for platform in ("115", "aliyun"):
+            for source, native_id in (
+                ("imdb", "tt123"),
+                ("custom.catalog", "show:0042"),
+            ):
+                with self.subTest(platform=platform, source=source):
+                    media = self.host.context.MediaInfo(
+                        media_source=source,
+                        media_id=native_id,
+                        type=self.host.types.MediaType.TV,
+                        tmdb_id=12345,
+                    )
+                    self.report(platform, "share-code", "receive-code", media)
+                    payload = (
+                        self.center.return_value.upload_share_info.call_args.kwargs[
+                            "payload"
+                        ]
+                    )
+                    self.assertEqual(payload.source, source)
+                    self.assertEqual(payload.media_id, native_id)
+                    self.assertEqual(payload.tmdb_id, 12345)
 
     def test_disabled_reporting_does_not_construct_client(self) -> None:
         """

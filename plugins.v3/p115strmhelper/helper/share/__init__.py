@@ -540,7 +540,7 @@ class ShareTransferHelper:
         share_code: str,
         receive_code: Optional[str],
         file_mediainfo: Optional[MediaInfo] = None,
-    ):
+    ) -> None:
         """
         上传分享信息
         """
@@ -559,6 +559,7 @@ class ShareTransferHelper:
             url=url,
             postime=datetime.now(timezone.utc),
             source=mi.media_source if mi else None,
+            media_id=mi.media_id if mi else None,
             type=mi.type.value if mi and mi.type is not None else None,  # noqa
             title=mi.title if mi else None,
             en_title=mi.en_title if mi else None,
@@ -572,6 +573,8 @@ class ShareTransferHelper:
             tvdb_id=mi.tvdb_id if mi else None,
             douban_id=mi.douban_id if mi else None,
             bangumi_id=mi.bangumi_id if mi else None,
+            anilist_id=mi.anilist_id if mi else None,
+            anidb_id=mi.anidb_id if mi else None,
             collection_id=mi.collection_id if mi else None,
         )
 
