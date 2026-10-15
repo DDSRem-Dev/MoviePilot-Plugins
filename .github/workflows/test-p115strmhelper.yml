@@ -23,6 +23,7 @@ on:
       - 'plugins.v2/p115strmhelper/requirements.txt'
       - 'plugins.v2/p115strmhelper/rust_utils/**'
       - '.github/workflows/test-p115strmhelper.yml'
+      - '.github/scripts/verify_native_test_wheels.py'
   pull_request:
     paths:
       # utils (test_cron_utils.py)
@@ -45,6 +46,7 @@ on:
       - 'plugins.v2/p115strmhelper/requirements.txt'
       - 'plugins.v2/p115strmhelper/rust_utils/**'
       - '.github/workflows/test-p115strmhelper.yml'
+      - '.github/scripts/verify_native_test_wheels.py'
   workflow_dispatch:
 
 jobs:
@@ -97,19 +99,32 @@ jobs:
           python -c "from pathlib import Path; from shutil import copy2; src = Path('MoviePilot-Resources/resources.v2'); dst = Path('MoviePilot/app/helper'); dst.mkdir(parents=True, exist_ok=True); [copy2(p, dst / p.name) for p in src.iterdir() if p.is_file()]"
 
       - name: Build native dependencies for tests
+        shell: bash
         run: |
-          python -m pip wheel --no-deps --wheel-dir plugins.v2/p115strmhelper/wheels plugins.v2/p115strmhelper/rust_utils/full_strm_sync plugins.v2/p115strmhelper/rust_utils/txt_tree_storage plugins.v2/p115strmhelper/rust_utils/share_strm_scan
-          python -m pip download --no-deps --only-binary=:all: --dest plugins.v2/p115strmhelper/wheels "pyahocorasick~=2.3.0"
+          NATIVE_WHEELS_DIR="$(mktemp -d "$RUNNER_TEMP/p115-v2-native-wheels.XXXXXX")"
+          echo "NATIVE_WHEELS_DIR=$NATIVE_WHEELS_DIR" >> "$GITHUB_ENV"
+          python -m pip wheel --no-cache-dir --no-deps --config-settings=build-args=--locked --wheel-dir "$NATIVE_WHEELS_DIR" plugins.v2/p115strmhelper/rust_utils/full_strm_sync plugins.v2/p115strmhelper/rust_utils/txt_tree_storage plugins.v2/p115strmhelper/rust_utils/share_strm_scan
 
       - name: Install dependencies
+        shell: bash
         run: |
-          python -m pip install --no-index --find-links plugins.v2/p115strmhelper/wheels full_strm_sync==0.1.6 txt_tree_storage==0.2.1 share_strm_scan==0.2.2 pyahocorasick~=2.3.0
           python -m pip install -r MoviePilot/requirements.txt
-          python -m pip install --find-links plugins.v2/p115strmhelper/wheels -r plugins.v2/p115strmhelper/requirements.txt
+          python -m pip install --force-reinstall --no-deps "$NATIVE_WHEELS_DIR"/*.whl
+          python -m pip install --find-links plugins.v2/p115strmhelper/wheels -r plugins.v2/p115strmhelper/requirements.txt pytest
 
-      - name: Verify bundled native imports
+      - name: Verify freshly built native imports
+        shell: bash
         run: |
-          python -c "import full_strm_sync; import share_strm_scan; import txt_tree_storage; import ahocorasick"
+          python .github/scripts/verify_native_test_wheels.py "$NATIVE_WHEELS_DIR"
+          python -c "import ahocorasick"
+
+      - name: Run native tree contracts
+        working-directory: plugins.v2/p115strmhelper/rust_utils/txt_tree_storage
+        run: python -m pytest tests/test_parity.py -v
+
+      - name: Run native share scan contracts
+        working-directory: plugins.v2/p115strmhelper/rust_utils/share_strm_scan
+        run: python -m unittest discover -s tests -v
 
       - name: Start Redis (Ubuntu)
         if: runner.os == 'Linux'

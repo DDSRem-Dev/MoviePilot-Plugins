@@ -5,10 +5,12 @@ on:
     paths:
       - 'plugins.v3/p115strmhelper/**'
       - '.github/workflows/test-p115strmhelper-v3.yml'
+      - '.github/scripts/verify_native_test_wheels.py'
   pull_request:
     paths:
       - 'plugins.v3/p115strmhelper/**'
       - '.github/workflows/test-p115strmhelper-v3.yml'
+      - '.github/scripts/verify_native_test_wheels.py'
   workflow_dispatch:
 
 permissions:
@@ -80,14 +82,30 @@ jobs:
           version: '0.13.1'
           python-version: '3.14'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install locked standard host runtime
         run: |
           uv sync --project MoviePilot --locked --no-default-groups --group runtime-standard --no-install-project
           uv pip freeze --python "$VENV_PYTHON" > host-constraints.txt
 
+      - name: Build native dependencies for tests
+        run: |
+          NATIVE_WHEELS_DIR="$(mktemp -d "$RUNNER_TEMP/p115-v3-native-wheels.XXXXXX")"
+          echo "NATIVE_WHEELS_DIR=$NATIVE_WHEELS_DIR" >> "$GITHUB_ENV"
+          for module in full_strm_sync txt_tree_storage share_strm_scan; do
+            uv build --wheel --no-cache --python "$VENV_PYTHON" --config-setting=build-args=--locked --out-dir "$NATIVE_WHEELS_DIR" "plugins.v3/p115strmhelper/rust_utils/$module"
+          done
+
       - name: Install plugin and test dependencies without upgrading host
         run: |
-          uv pip install --python "$VENV_PYTHON" --constraint host-constraints.txt --find-links plugins.v3/p115strmhelper/wheels -r plugins.v3/p115strmhelper/pyproject.toml pytest fakeredis
+          uv pip install --python "$VENV_PYTHON" --constraint host-constraints.txt --find-links plugins.v3/p115strmhelper/wheels --reinstall-package full_strm_sync --reinstall-package txt_tree_storage --reinstall-package share_strm_scan -r plugins.v3/p115strmhelper/pyproject.toml pytest fakeredis "$NATIVE_WHEELS_DIR"/*.whl
+
+      - name: Verify freshly built native imports
+        run: |
+          "$VENV_PYTHON" .github/scripts/verify_native_test_wheels.py "$NATIVE_WHEELS_DIR"
+          "$VENV_PYTHON" -c 'import ahocorasick'
 
       - name: Check dependencies with the host CRC replacement
         run: |
@@ -167,10 +185,6 @@ jobs:
       - name: Run original share audit queue regressions
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_share_audit_download_queue.py' -v
-
-      - name: Verify bundled native imports
-        run: >-
-          "$VENV_PYTHON" -c 'import full_strm_sync, share_strm_scan, txt_tree_storage, ahocorasick'
 
       - name: Run native tree contracts
         working-directory: plugins.v3/p115strmhelper/rust_utils/txt_tree_storage
