@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 
 def _load_class(path: Path, name: str, namespace: Dict[str, Any]) -> Any:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     node = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name)
     node.decorator_list = []
     module = ast.Module(
