@@ -245,7 +245,7 @@ class BatchTransferContracts(
         from app.chain.transfer import TransferChain
         from app.application.transfer.notifications import TransferSuccessNotification
         from app.schemas import FileItem, TransferInfo
-        from app.schemas.types import MediaType
+        from app.schemas.types import ContentType, MediaType, MessageType
         from app.sdk.media import MediaInfo, MetaInfoPath
 
         notices = []
@@ -274,8 +274,31 @@ class BatchTransferContracts(
                     username=None,
                 )
             )
+        template = """{
+            'title': '自定义 {{ title_year }} {{ season_episode }}',
+            'text': '{{ file_count }} 个文件|{{ total_size }}'
+                    '|{{ __transferinfo__.target_diritem.path }}'
+        }"""
+        system_config = Mock()
+        system_config.get.return_value = {ContentType.OrganizeSuccess.value: template}
+        self.enterContext(
+            patch(
+                "app.application.messaging.message.get_configured_system_config",
+                return_value=system_config,
+            )
+        )
         chain = SimpleNamespace(
-            runtime_config=SimpleNamespace(history_url=None), post_message=Mock()
+            runtime_config=SimpleNamespace(history_url=None),
+            messageoper=Mock(),
+            _normalize_notification_for_dispatch=(
+                TransferChain._normalize_notification_for_dispatch
+            ),
+            _dispatch_notification_steps=Mock(),
+        )
+        chain.post_message = Mock(
+            side_effect=lambda *args, **kwargs: TransferChain.post_message(
+                chain, *args, **kwargs
+            )
         )
         chain.send_transfer_message = lambda **kwargs: (
             TransferChain.send_transfer_message(chain, **kwargs)
@@ -283,12 +306,15 @@ class BatchTransferContracts(
         for url in (None, "https://moviepilot.example/history"):
             chain.runtime_config.history_url = url
             chain.post_message.reset_mock()
+            chain._dispatch_notification_steps.reset_mock()
             TransferChain._send_transfer_success_notifications(chain, notices)
             chain.post_message.assert_called_once()
-            message = chain.post_message.call_args.args[0]
-            self.assertIn("S01", message.title)
-            self.assertIn("E01-E02", message.title)
-            self.assertIn("2 个文件", message.text)
+            chain._dispatch_notification_steps.assert_called_once()
+            message = chain._dispatch_notification_steps.call_args.args[0]
+            self.assertEqual(message.title, "自定义 小林家的龙女仆 (2017) S01 E01-E02")
+            self.assertEqual(message.text, "2 个文件|200.0B|/target/")
+            self.assertEqual(message.ctype, ContentType.OrganizeSuccess)
+            self.assertEqual(message.mtype, MessageType.Organize)
             self.assertEqual(message.image, media.get_message_image())
             self.assertEqual(
                 message.buttons,
@@ -308,7 +334,6 @@ class BatchTransferContracts(
             media,
             notices[0].transferinfo,
             buttons=buttons,
-            batch=True,
         )
         self.assertEqual(chain.post_message.call_args.args[0].buttons, [buttons[0]])
         self.assertEqual(len(buttons), 2)
@@ -320,7 +345,7 @@ class BatchTransferContracts(
             }
         )
         TransferChain.send_transfer_message(
-            chain, notices[0].meta, media, foreign_result, buttons=buttons, batch=True
+            chain, notices[0].meta, media, foreign_result, buttons=buttons
         )
         self.assertEqual(chain.post_message.call_args.args[0].buttons, buttons)
 

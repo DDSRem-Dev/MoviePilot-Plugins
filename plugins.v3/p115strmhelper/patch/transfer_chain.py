@@ -136,7 +136,10 @@ class TransferChainPatcher:
                 media = bound.arguments.get("mediainfo")
                 buttons = bound.arguments.get("buttons")
                 if (
-                    bound.arguments.get("batch")
+                    (
+                        "batch" not in message_signature.parameters
+                        or bound.arguments.get("batch")
+                    )
                     and buttons
                     and result.fileitem
                     and result.target_item
