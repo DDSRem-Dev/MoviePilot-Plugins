@@ -1,12 +1,12 @@
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from app.chain.media import MediaChain
+from app.schemas import MediaInfo, RefreshMediaItem, ServiceInfo
+from app.sdk.logging import logger
 from app.sdk.media import MetaInfoPath
 from app.sdk.services import MediaServerHelper as MpMediaServerHelper
-from app.sdk.logging import logger
-from app.schemas import ServiceInfo, RefreshMediaItem, MediaInfo
 
 from ...utils.path import PathUtils
 
@@ -76,40 +76,41 @@ class MediaServerRefresh:
         self, file_path: str, file_name: Optional[str]
     ) -> bool:
         """
-        尝试使用 Emby API 刷新
+        尝试通知 Emby 发现新增文件
 
         :param file_path (str): 文件路径
         :param file_name (str): 文件名
 
-        :return bool: 是否有 Emby 服务并已完成刷新尝试
+        :return bool: 是否已向所有选中服务成功提交发现请求
         """
         from .emby import EmbyOperate
 
+        services = self.service_infos or {}
         emby_services = {
             name: service
-            for name, service in self.service_infos.items()
+            for name, service in services.items()
             if service.type == "emby"
         }
         if not emby_services:
             return False
 
         emby_operate = EmbyOperate(func_name=self.func_name)
-        for name in emby_services.keys():
-            if emby_operate.trigger_refresh_by_path(name, file_path):
-                logger.info(f"{self.func_name}{file_name} Emby 刷新成功")
+        success = True
+        for name in emby_services:
+            if emby_operate.notify_media_updated(name, file_path):
+                logger.info(f"{self.func_name}{file_name} Emby 文件发现请求已提交")
             else:
-                logger.warning(f"{self.func_name}{file_name} Emby 刷新失败")
+                success = False
+                logger.warning(f"{self.func_name}{file_name} Emby 文件发现请求提交失败")
 
         non_emby_services = [
-            name
-            for name, service in self.service_infos.items()
-            if service.type != "emby"
+            name for name, service in services.items() if service.type != "emby"
         ]
         if non_emby_services:
             logger.warning(
                 f"{self.func_name}{file_name} 其他媒体服务器 {', '.join(non_emby_services)} 无法刷新媒体库"
             )
-        return True
+        return success and not non_emby_services
 
     def refresh_mediaserver(
         self,
@@ -187,6 +188,9 @@ class MediaServerRefresh:
                 else:
                     logger.warning(f"{self.func_name}{name} 不支持刷新")
             return True
+        if not file_path:
+            logger.warning(f"{self.func_name}未提供文件路径，跳过刷新")
+            return False
         if self.mp_mediaserver:
             status, mediaserver_path, moviepilot_path = PathUtils.get_media_path(
                 self.mp_mediaserver,
@@ -195,12 +199,17 @@ class MediaServerRefresh:
             if status:
                 logger.info(f"{self.func_name}{file_name} 刷新媒体服务器目录替换中...")
                 file_path = file_path.replace(
-                    moviepilot_path, mediaserver_path
+                    moviepilot_path, mediaserver_path, 1
                 ).replace("\\", "/")
                 logger.info(
                     f"{self.func_name}刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
                 )
                 logger.info(f"{self.func_name}刷新媒体服务器目录: {file_path}")
+            else:
+                logger.warning(
+                    f"{self.func_name}{file_name} 无法匹配媒体服务器路径，跳过刷新"
+                )
+                return False
         if not mediainfo:
             media_chain = MediaChain()
             meta = MetaInfoPath(path=Path(file_path))

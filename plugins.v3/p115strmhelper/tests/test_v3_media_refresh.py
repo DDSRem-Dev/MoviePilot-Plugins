@@ -132,7 +132,7 @@ class TestV3MediaRefresh(TestCase):
             ),
         )
         self.native = MagicMock()
-        self.native.trigger_refresh_by_path.return_value = True
+        self.native.notify_media_updated.return_value = True
         module(
             f"{prefix}.helper.mediaserver.emby",
             EmbyOperate=MagicMock(return_value=self.native),
@@ -200,14 +200,14 @@ class TestV3MediaRefresh(TestCase):
         item = self.server.refresh_library_by_items.call_args.args[0][0]
         self.assertEqual(item.target_path, Path("/server/Example.S01E01.strm"))
 
-    def test_original_emby_path_fallback_remains_compatible(self) -> None:
+    def test_unrecognized_media_reports_mapped_path_for_discovery(self) -> None:
         """
-        无识别结果时沿用原 Emby 路径回退调用
+        无识别结果时提交映射后的文件发现通知
         """
         self.chain.recognize_media.return_value = None
         self.refresh.mp_mediaserver = "/server#/local"
         self.assertTrue(self.refresh.refresh_mediaserver("/local/unknown.strm"))
-        self.native.trigger_refresh_by_path.assert_called_once_with(
+        self.native.notify_media_updated.assert_called_once_with(
             "Emby", "/server/unknown.strm"
         )
 

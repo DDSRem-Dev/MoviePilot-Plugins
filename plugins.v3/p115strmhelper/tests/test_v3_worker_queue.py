@@ -83,6 +83,7 @@ class TestV3WorkerQueue(TestCase):
             "__package__": package_name,
             "__name__": package_name + ".implementation",
             "WorkerQueue": self.base,
+            "Event": Event,
             "logger": self.logger,
             "Path": Path,
         }

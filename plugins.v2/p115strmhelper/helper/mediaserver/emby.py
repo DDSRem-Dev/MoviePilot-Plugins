@@ -1,22 +1,23 @@
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from queue import Queue
-from threading import Thread
-from time import sleep
+from threading import Event, Thread
+from time import monotonic, sleep
 from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import quote
-
-from httpx import RequestError, post as httpx_post
-from p115center import P115Center
 
 from app.helper.mediaserver import MediaServerHelper
 from app.log import logger
 from app.schemas import ServiceInfo
 from app.utils.http import RequestUtils
+from httpx import RequestError
+from httpx import post as httpx_post
+from p115center import P115Center
 
 from ...core.config import configer
 from ...schemas.emby_mediainfo import EmbyMediainfoTask
 from ...utils.path import PathUtils
 from ...utils.sentry import sentry_manager
+from .scan import library_scan
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -25,7 +26,12 @@ class EmbyOperate:
     Emby 媒体服务器操作类
     """
 
-    def __init__(self, func_name: str):
+    def __init__(self, func_name: str) -> None:
+        """
+        初始化 Emby 服务访问器
+
+        :param func_name (str): 调用方日志标识
+        """
         self.func_name = func_name
         self.mediaserver_helper = MediaServerHelper()
 
@@ -38,10 +44,13 @@ class EmbyOperate:
         :return Tuple: Emby 服务器信息
         """
         emby_server = self.mediaserver_helper.get_service(name=name, type_filter="emby")
+        if not emby_server:
+            logger.warning(f"{self.func_name}未找到 Emby 服务: {name}")
+            return "", "", ""
         emby_user = emby_server.instance.get_user()
         emby_apikey = emby_server.config.config.get("apikey")
         emby_host = emby_server.config.config.get("host")
-        if not emby_host:
+        if not emby_host or not emby_apikey:
             return "", "", ""
         if not emby_host.endswith("/"):
             emby_host += "/"
@@ -130,103 +139,64 @@ class EmbyOperate:
             )
             return None
 
-    def trigger_refresh_by_id(
-        self,
-        name: str,
-        item_id: str,
-        *,
-        recursive: bool = True,
-        metadata_refresh_mode: str = "FullRefresh",
-        image_refresh_mode: str = "FullRefresh",
-        replace_all_metadata: bool = False,
-        replace_all_images: bool = False,
-    ) -> bool:
+    def notify_media_updated(self, name: str, path: str) -> bool:
         """
-        触发指定 ID 的刷新任务
+        通知 Emby 发现新增文件，不刷新父目录元数据
 
-        :param name (str): Emby Server Name
-        :param item_id (str): ID
-        :param recursive (bool): 是否递归刷新子项
-        :param metadata_refresh_mode (str): 元数据刷新模式（如 Default、FullRefresh）
-        :param image_refresh_mode (str): 图片刷新模式（如 Default、FullRefresh）
-        :param replace_all_metadata (bool): 是否替换全部元数据
-        :param replace_all_images (bool): 是否替换全部图片
+        不支持文件变更通知接口时回退普通媒体库扫描
+        返回成功仅表示请求已提交，不代表文件已经入库
 
-        :return bool: 是否触发成功
+        :param name (str): Emby 服务器名称
+        :param path (str): Emby 可见的文件绝对路径
+
+        :return bool: 是否成功提交发现请求
         """
-        emby_host, _, emby_apikey = self.get_emby_info(name)
-        if not emby_host:
+        if not path or not (
+            Path(path).is_absolute() or PureWindowsPath(path).is_absolute()
+        ):
+            logger.warning(
+                f"{self.func_name}无法提交文件发现请求，路径不是绝对路径: {path!r}"
+            )
             return False
-
-        req_url = f"{emby_host}emby/Items/{item_id}/Refresh"
-        params = {
-            "Recursive": str(recursive).lower(),
-            "MetadataRefreshMode": metadata_refresh_mode,
-            "ImageRefreshMode": image_refresh_mode,
-            "ReplaceAllMetadata": str(replace_all_metadata).lower(),
-            "ReplaceAllImages": str(replace_all_images).lower(),
-            "api_key": emby_apikey,
-        }
         try:
-            with RequestUtils().post_res(url=req_url, params=params) as res:
-                if res and res.status_code in {200, 204}:
-                    return True
-                else:
-                    logger.warning(
-                        f"{self.func_name}触发刷新任务失败，"
-                        f"Emby 未返回有效响应 code={res.status_code!r} "
-                        f"name={name!r} item_id={item_id!r}"
-                    )
-                    return False
-        except Exception as e:
+            emby_host, _, emby_apikey = self.get_emby_info(name)
+            if not emby_host:
+                return False
+            response = RequestUtils().post_res(
+                url=f"{emby_host}emby/Library/Media/Updated",
+                params={"api_key": emby_apikey},
+                json={"Updates": [{"Path": path, "UpdateType": "Created"}]},
+            )
+            if response is None:
+                logger.warning(f"{self.func_name}{name} 文件发现请求未获得响应: {path}")
+                return False
+            with response as res:
+                status_code = res.status_code
+            if status_code in {200, 202, 204}:
+                logger.info(f"{self.func_name}{name} 文件发现请求已提交: {path}")
+                return True
+            if status_code not in {404, 405, 501}:
+                logger.warning(
+                    f"{self.func_name}{name} 文件发现请求失败: [{status_code}] {path}"
+                )
+                return False
+            service = self.mediaserver_helper.get_service(name=name, type_filter="emby")
+            if not service or not hasattr(service.instance, "refresh_root_library"):
+                logger.warning(f"{self.func_name}{name} 不支持普通媒体库扫描")
+                return False
+            success = library_scan.submit(
+                (name, emby_host, emby_apikey), service.instance.refresh_root_library
+            )
+            if success:
+                logger.info(f"{self.func_name}{name} 普通媒体库扫描请求已提交: {path}")
+            else:
+                logger.warning(f"{self.func_name}{name} 普通媒体库扫描请求失败: {path}")
+            return success
+        except Exception:
             logger.error(
-                f"{self.func_name}触发刷新任务异常 name={name!r} item_id={item_id!r}: {e}",
+                f"{self.func_name}{name} 提交文件发现请求异常: {path}", exc_info=True
             )
             return False
-
-    def trigger_refresh_by_path(
-        self,
-        name: str,
-        path: str,
-        *,
-        recursive: bool = True,
-        metadata_refresh_mode: str = "FullRefresh",
-        image_refresh_mode: str = "FullRefresh",
-        replace_all_metadata: bool = False,
-        replace_all_images: bool = False,
-    ) -> bool:
-        """
-        依据路径触发刷新任务
-
-        :param name (str): Emby Server Name
-        :param path (str): 项目路径
-        :param recursive (bool): 是否递归刷新子项
-        :param metadata_refresh_mode (str): 元数据刷新模式（如 Default、FullRefresh）
-        :param image_refresh_mode (str): 图片刷新模式（如 Default、FullRefresh）
-        :param replace_all_metadata (bool): 是否替换全部元数据
-        :param replace_all_images (bool): 是否替换全部图片
-
-        :return bool: 是否触发成功
-        """
-        path_obj = Path(path)
-        for parent in path_obj.parents:
-            if len(parent.parts) <= 1:
-                break
-            item_id = self.get_item_id_by_path(
-                name, parent.as_posix(), log_warning=False
-            )
-            if not item_id:
-                continue
-            return self.trigger_refresh_by_id(
-                name,
-                item_id,
-                recursive=recursive,
-                metadata_refresh_mode=metadata_refresh_mode,
-                image_refresh_mode=image_refresh_mode,
-                replace_all_metadata=replace_all_metadata,
-                replace_all_images=replace_all_images,
-            )
-        return False
 
     def trigger_mediainfo_refresh(self, name: str, item_id: str) -> bool:
         """
@@ -277,7 +247,17 @@ class EmbyMediaInfoOperate:
         func_name: str,
         mediaservers: Optional[List[str]] = None,
         mp_mediaserver: Optional[str] = None,
-    ):
+        stop_event: Optional[Event] = None,
+    ) -> None:
+        """
+        初始化媒体信息提取及可中断的入库等待
+
+        :param func_name (str): 调用方日志标识
+        :param mediaservers (List): 媒体服务器名称
+        :param mp_mediaserver (str): 媒体服务器路径映射
+        :param stop_event (Event): 停止入库等待的信号
+        """
+        self._stop_event = stop_event if stop_event is not None else Event()
         self.func_name = func_name
         self.media_servers = mediaservers
         self.mp_mediaserver = mp_mediaserver
@@ -372,6 +352,32 @@ class EmbyMediaInfoOperate:
             logger.error(f"{self.func_name}{service_name} 更新媒体信息失败: {e}")
         return False, need_upload, media_data
 
+    def _get_or_discover_item_id(
+        self, service_name: str, file_path: str
+    ) -> Optional[str]:
+        if self._stop_event.is_set():
+            return None
+        item_id = self.emby_operate.get_item_id_by_path(
+            service_name, file_path, log_warning=False
+        )
+        if item_id or self._stop_event.is_set():
+            return item_id
+        if not self.emby_operate.notify_media_updated(service_name, file_path):
+            return None
+        deadline = monotonic() + 60
+        while not self._stop_event.wait(min(5, max(0, deadline - monotonic()))):
+            item_id = self.emby_operate.get_item_id_by_path(
+                service_name, file_path, log_warning=False
+            )
+            if item_id:
+                return item_id
+            if monotonic() >= deadline:
+                logger.warning(
+                    f"{self.func_name}{service_name} 文件发现请求已提交，但等待入库超时: {file_path}"
+                )
+                return None
+        return None
+
     def get_mediainfo_native(self, path: Path) -> None:
         """
         执行原生 Emby 提取媒体信息
@@ -394,26 +400,16 @@ class EmbyMediaInfoOperate:
                 )
                 return
             logger.info(f"{self.func_name}{path.name} 提取媒体信息目录替换中...")
-            file_path = path.as_posix().replace(moviepilot_path, mediaserver_path)
+            file_path = path.as_posix().replace(moviepilot_path, mediaserver_path, 1)
             logger.info(
                 f"{self.func_name}提取媒体信息目录替换: {moviepilot_path} --> {mediaserver_path}"
             )
             logger.info(f"{self.func_name}提取媒体信息目录: {file_path}")
 
         for service_name, _ in media_server.items():
-            item_id = self.emby_operate.get_item_id_by_path(
-                service_name, file_path, log_warning=False
-            )
-            if not item_id:
-                sleep(10)
-                if self.emby_operate.trigger_refresh_by_path(service_name, file_path):
-                    for _ in range(3):
-                        sleep(10)
-                        item_id = self.emby_operate.get_item_id_by_path(
-                            service_name, file_path
-                        )
-                        if item_id:
-                            break
+            item_id = self._get_or_discover_item_id(service_name, file_path)
+            if self._stop_event.is_set():
+                return
             if not item_id:
                 logger.error(
                     f"{self.func_name}无法获取媒体 Id 提取媒体信息: {file_path}"
@@ -462,7 +458,7 @@ class EmbyMediaInfoOperate:
                 )
                 return
             logger.info(f"{self.func_name}{path.name} 提取媒体信息目录替换中...")
-            file_path = path.as_posix().replace(moviepilot_path, mediaserver_path)
+            file_path = path.as_posix().replace(moviepilot_path, mediaserver_path, 1)
             logger.info(
                 f"{self.func_name}提取媒体信息目录替换: {moviepilot_path} --> {mediaserver_path}"
             )
@@ -489,21 +485,9 @@ class EmbyMediaInfoOperate:
                 logger.info(
                     f"{self.func_name}尝试获取媒体 Id 提取媒体信息: {file_path}"
                 )
-                item_id = self.emby_operate.get_item_id_by_path(
-                    service_name, file_path, log_warning=False
-                )
-                if not item_id:
-                    sleep(10)
-                    if self.emby_operate.trigger_refresh_by_path(
-                        service_name, file_path
-                    ):
-                        for _ in range(3):
-                            sleep(10)
-                            item_id = self.emby_operate.get_item_id_by_path(
-                                service_name, file_path
-                            )
-                            if item_id:
-                                break
+                item_id = self._get_or_discover_item_id(service_name, file_path)
+                if self._stop_event.is_set():
+                    return
                 if not item_id:
                     logger.error(
                         f"{self.func_name}无法获取媒体 Id 提取媒体信息: {file_path}"
@@ -547,6 +531,7 @@ class EmbyMediainfoQueue:
     _TASK_SLEEP_AFTER_SEC: float = 4.0
 
     def __init__(self) -> None:
+        self._discovery_stop = Event()
         self._queue: Optional[Queue] = None
         self._worker_thread: Optional[Thread] = None
 
@@ -574,6 +559,7 @@ class EmbyMediainfoQueue:
                     func_name=task.func_name,
                     mp_mediaserver=task.mp_mediaserver,
                     mediaservers=task.mediaservers,
+                    stop_event=self._discovery_stop,
                 )
                 if configer.native_emby_mediainfo_enabled:
                     helper.get_mediainfo_native(path)
@@ -598,6 +584,7 @@ class EmbyMediainfoQueue:
         """
         if self._worker_thread is not None and self._worker_thread.is_alive():
             return
+        self._discovery_stop = Event()
         self._queue = Queue()
         self._worker_thread = Thread(
             target=self._worker,
@@ -617,6 +604,7 @@ class EmbyMediainfoQueue:
             or not self._worker_thread.is_alive()
         ):
             return
+        self._discovery_stop.set()
         try:
             self._queue.put(self._SENTINEL)
             self._worker_thread.join(timeout=30)
