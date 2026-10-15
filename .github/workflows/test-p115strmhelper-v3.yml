@@ -150,6 +150,10 @@ jobs:
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_r302_concurrency.py' -v
 
+      - name: Run Emby discovery regressions
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_emby_discovery.py' -v
+
       - name: Run original local path cleanup regressions
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_path_cleanup.py' -v

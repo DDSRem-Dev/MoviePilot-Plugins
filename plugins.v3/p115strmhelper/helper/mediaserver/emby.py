@@ -1,4 +1,4 @@
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from threading import Event
 from time import monotonic, sleep
 from typing import Dict, List, Optional, Tuple, Union
@@ -152,7 +152,7 @@ class EmbyOperate:
         :return bool: 是否成功提交发现请求
         """
         if not path or not (
-            Path(path).is_absolute() or PureWindowsPath(path).is_absolute()
+            PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
         ):
             logger.warning(
                 f"{self.func_name}无法提交文件发现请求，路径不是绝对路径: {path!r}"

@@ -2,7 +2,7 @@ import ast
 import importlib.util
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from queue import Queue
 from threading import Event, Lock, Thread, current_thread
 from types import ModuleType, SimpleNamespace
@@ -80,6 +80,7 @@ class TestEmbyDiscovery(TestCase):
             "__name__": "_emby_discovery.refresh",
             "__package__": "_emby_discovery",
             "Path": Path,
+            "PurePosixPath": PurePosixPath,
             "PureWindowsPath": PureWindowsPath,
             "Event": Event,
             "monotonic": lambda: self.clock,
@@ -199,6 +200,38 @@ class TestEmbyDiscovery(TestCase):
             self.operate.notify_media_updated("missing", "/movies/new.strm")
         )
         self.requests.post_res.assert_not_called()
+
+    def test_remote_absolute_paths_are_independent_of_host_platform(self) -> None:
+        """
+        本机路径规则不影响远端 POSIX、Windows 盘符和 UNC 绝对路径
+        """
+        for local_path_type in (PurePosixPath, PureWindowsPath):
+            with patch.dict(self.namespace, {"Path": local_path_type}):
+                for path in (
+                    "/movies/新电影.strm",
+                    r"D:\Movies\新电影.strm",
+                    r"\\server\Movies\新电影.strm",
+                ):
+                    with self.subTest(host=local_path_type.__name__, path=path):
+                        self.requests.post_res.reset_mock()
+                        self.assertTrue(self.operate.notify_media_updated("Emby", path))
+                        self.requests.post_res.assert_called_once()
+                        self.assertEqual(
+                            self.requests.post_res.call_args.kwargs["json"],
+                            {"Updates": [{"Path": path, "UpdateType": "Created"}]},
+                        )
+                for path in (
+                    "",
+                    "relative.strm",
+                    "C:relative.strm",
+                    r"\Movies\new.strm",
+                ):
+                    with self.subTest(host=local_path_type.__name__, path=path):
+                        self.requests.post_res.reset_mock()
+                        self.assertFalse(
+                            self.operate.notify_media_updated("Emby", path)
+                        )
+                        self.requests.post_res.assert_not_called()
 
     def test_windows_paths_and_reverse_proxy_prefix_are_preserved(self) -> None:
         """
