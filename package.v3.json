@@ -218,5 +218,23 @@
         "history": {
             "v3.0.0": "适配 MoviePilot V3 SDK、数据库与统一媒体身份契约"
         }
+    },
+    "StrmNotify": {
+        "name": "STRM逐条通知",
+        "description": "监控指定目录的新 STRM，等待对应 NFO/封面后发送逐条媒体通知，支持持久化去重",
+        "labels": "通知",
+        "version": "3.0.4",
+        "release": true,
+        "icon": "https://raw.githubusercontent.com/DDSRem-Dev/MoviePilot-Plugins/main/icons/StrmNotify.svg",
+        "author": "ranzhigg",
+        "system_version": ">=3.0.0",
+        "level": 1,
+        "history": {
+            "v3.0.4": "多目录公平轮询、确定性队列排序、V3 原生消息类型与更稳健的文件竞争处理；成功通知逐条落盘，异常自动重试",
+            "v3.0.3": "NFO 无封面时按等待窗口轮询，封面超时后再发送无图通知",
+            "v3.0.2": "新增插件详情页，直接查看启用状态、监控目录、扫描记录和通知设置",
+            "v3.0.1": "状态未变化时不写数据库，保留队列与通知去重的持久化",
+            "v3.0.0": "独立目录监控、NFO 匹配、可配置通知和持久化去重"
+        }
     }
 }

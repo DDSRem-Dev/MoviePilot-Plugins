@@ -28,6 +28,7 @@ Telegram 交流群: https://t.me/+1lcscM_EbqhkN2Rl
 
 #### 媒体管理类
 
+- [STRM逐条通知 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/strmnotify)：监控新增 STRM，等待 NFO/封面就绪后逐条发送媒体通知，支持多目录公平轮询、持久化去重、通知渠道及展示字段设置。
 - [神医媒体文件同步删除 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/samediasyncdel) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/samediasyncdel)：通过神医插件通知同步删除历史记录、源文件和下载任务。
 - [ffprobe命名补充 V3](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v3/ffprobenamingsupplement) / [V2](https://github.com/DDSRem-Dev/MoviePilot-Plugins/tree/main/plugins.v2/ffprobenamingsupplement)：整理重命名时调用 `ffprobe`，统一补全视频及关联字幕、音轨的 `videoFormat`、`videoCodec`、`videoBit`、`audioCodec`、`fps`、`effect`，支持 STRM
 
