@@ -131,3 +131,38 @@ class TestSha1(TestCase):
         """顺序读提示在任意平台都不抛异常"""
         with open(self.file, "rb") as f:
             self.module.P115Api._hint_sequential_read(f)
+
+    def test_sha1_cache_invalidated_on_same_second_same_size(self):
+        """
+        同路径、同字节数、同秒内被替换时缓存必须失效
+
+        这是评审指出的窗口：秒级 mtime + 大小不足以标识文件内容。
+        通过原地写入相同长度内容并把 mtime 固定在同一秒内复现。
+        """
+        api = _build_api(self.module)
+        payload = b"a" * 1024
+        self.file.write_bytes(payload)
+        stat = self.file.stat()
+        same_second = stat.st_mtime_ns // 1_000_000_000 * 1_000_000_000
+        os.utime(self.file, ns=(same_second, same_second))
+
+        with patch.object(
+            self.module.P115Api, "_calc_sha1", side_effect=["first", "second"]
+        ) as calc:
+            self.assertEqual(api._sha1_with_cache(self.file), "first")
+            # 覆盖为等长内容，并把 mtime 固定回同一秒
+            self.file.write_bytes(b"b" * 1024)
+            os.utime(self.file, ns=(same_second, same_second))
+            self.assertEqual(api._sha1_with_cache(self.file), "second")
+
+        self.assertEqual(calc.call_count, 2)
+
+    def test_sha1_cache_key_uses_nanosecond_mtime(self):
+        """
+        缓存键包含纳秒级 mtime、ctime 与 inode，避免秒级精度碰撞
+        """
+        stat = self.file.stat()
+        key = self.module.P115Api._sha1_cache_key(self.file, stat)
+
+        self.assertIn(f":{stat.st_mtime_ns}:{stat.st_ctime_ns}:", key)
+        self.assertTrue(key.endswith(f":{stat.st_ino}"))
