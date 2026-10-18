@@ -5,6 +5,15 @@
 
 Telegram 交流群: https://t.me/+1lcscM_EbqhkN2Rl
 
+## 开发目录
+
+| 宿主版本 | 插件后端 | 插件前端 | 发布清单 |
+| --- | --- | --- | --- |
+| MoviePilot V2 | `plugins.v2/<插件>/` | `frontend.v2/<插件>/` | `package.v2.json` |
+| MoviePilot V3 | `plugins.v3/<插件>/` | `frontend.v3/<插件>/` | `package.v3.json` |
+
+V2、V3 前端独立维护源码、依赖与构建配置，发布时按宿主版本打包
+
 ## 插件列表
 
 #### 探索类插件

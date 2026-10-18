@@ -1,0 +1,249 @@
+/* 对齐 MoviePilot 主站 vue-toastification 默认样式（dist/index.css 节选）与 common.scss 中的容器覆盖 */
+
+.app-page-start-toast-host.Vue-Toastification__container {
+  z-index: 2500;
+  margin-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
+}
+
+/* 无内容时不占位，避免 min-height: 100% 撑满视口 */
+.app-page-start-toast-host.Vue-Toastification__container:not(:has(.Vue-Toastification__toast)) {
+  min-height: 0 !important;
+  height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.Vue-Toastification__container {
+  z-index: 9999;
+  position: fixed;
+  padding: 4px;
+  width: 600px;
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100%;
+  color: #fff;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+@media only screen and (min-width: 600px) {
+  .Vue-Toastification__container.bottom-left,
+  .Vue-Toastification__container.bottom-right,
+  .Vue-Toastification__container.bottom-center {
+    bottom: 1em;
+    flex-direction: column-reverse;
+  }
+
+  .Vue-Toastification__container.top-right,
+  .Vue-Toastification__container.bottom-right {
+    right: 1em;
+  }
+
+  .Vue-Toastification__container.top-right .Vue-Toastification__toast,
+  .Vue-Toastification__container.bottom-right .Vue-Toastification__toast {
+    margin-left: auto;
+  }
+}
+
+@media only screen and (max-width: 600px) {
+  .Vue-Toastification__container {
+    width: 100vw;
+    padding: 0;
+    left: 0;
+    margin: 0;
+  }
+
+  .Vue-Toastification__container .Vue-Toastification__toast {
+    width: 100%;
+  }
+
+  .Vue-Toastification__container.bottom-left,
+  .Vue-Toastification__container.bottom-right,
+  .Vue-Toastification__container.bottom-center {
+    bottom: 0;
+    flex-direction: column-reverse;
+  }
+
+  .app-page-start-toast-host.Vue-Toastification__container {
+    inline-size: 100vw;
+    padding-block: 4.5rem;
+    padding-inline: 1rem;
+  }
+
+  .app-page-start-toast-host .Vue-Toastification__toast {
+    border-radius: 8px;
+  }
+}
+
+.Vue-Toastification__toast {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  max-height: 800px;
+  min-height: 64px;
+  box-sizing: border-box;
+  margin-bottom: 1rem;
+  padding: 22px 24px;
+  border-radius: 8px;
+  box-shadow:
+    0 1px 10px 0 rgba(0, 0, 0, 0.1),
+    0 2px 15px 0 rgba(0, 0, 0, 0.05);
+  justify-content: space-between;
+  font-family:
+    "Lato",
+    Helvetica,
+    "Roboto",
+    Arial,
+    sans-serif;
+  max-width: 600px;
+  min-width: 326px;
+  pointer-events: auto;
+  overflow: hidden;
+  transform: translateZ(0);
+  direction: ltr;
+}
+
+.Vue-Toastification__toast--default {
+  background-color: #1976d2;
+  color: #fff;
+}
+
+.Vue-Toastification__toast--info {
+  background-color: #2196f3;
+  color: #fff;
+}
+
+.Vue-Toastification__toast--success {
+  background-color: #4caf50;
+  color: #fff;
+}
+
+.Vue-Toastification__toast--error {
+  background-color: #ff5252;
+  color: #fff;
+}
+
+.Vue-Toastification__toast--warning {
+  background-color: #ffc107;
+  color: #fff;
+}
+
+@media only screen and (max-width: 600px) {
+  .Vue-Toastification__toast {
+    border-radius: 0;
+    margin-bottom: 0.5rem;
+  }
+}
+
+.Vue-Toastification__toast-body {
+  flex: 1;
+  line-height: 24px;
+  font-size: 16px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 与 vue-toastification VtIcon / VtCloseButton 一致 */
+.Vue-Toastification__icon {
+  margin: 0 18px 0 0;
+  background: transparent;
+  outline: none;
+  border: none;
+  padding: 0;
+  transition: 0.3s ease;
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  width: 20px;
+  min-height: 20px;
+  color: inherit;
+}
+
+.Vue-Toastification__icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.Vue-Toastification__close-button {
+  font-weight: bold;
+  font-size: 24px;
+  line-height: 24px;
+  background: transparent;
+  outline: none;
+  border: none;
+  padding: 0;
+  padding-left: 10px;
+  cursor: pointer;
+  transition: visibility 0s, opacity 0.2s linear;
+  align-items: center;
+  color: #fff;
+  opacity: 0.3;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.Vue-Toastification__close-button:hover,
+.Vue-Toastification__close-button:focus {
+  opacity: 1;
+}
+
+@keyframes bounceInRight {
+  from,
+  60%,
+  75%,
+  90%,
+  to {
+    animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  from {
+    opacity: 0;
+    transform: translate3d(3000px, 0, 0);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(-25px, 0, 0);
+  }
+
+  75% {
+    transform: translate3d(10px, 0, 0);
+  }
+
+  90% {
+    transform: translate3d(-5px, 0, 0);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+@keyframes bounceOutRight {
+  40% {
+    opacity: 1;
+    transform: translate3d(-20px, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(1000px, 0, 0);
+  }
+}
+
+.Vue-Toastification__bounce-enter-active.top-right,
+.Vue-Toastification__bounce-enter-active.bottom-right {
+  animation-name: bounceInRight;
+}
+
+.Vue-Toastification__bounce-leave-active:not(.disable-transition).top-right,
+.Vue-Toastification__bounce-leave-active:not(.disable-transition).bottom-right {
+  animation-name: bounceOutRight;
+}
+
+.Vue-Toastification__bounce-leave-active,
+.Vue-Toastification__bounce-enter-active {
+  animation-duration: 750ms;
+  animation-fill-mode: both;
+}

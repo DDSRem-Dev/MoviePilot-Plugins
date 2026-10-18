@@ -1,0 +1,254 @@
+/* 仪表盘卡片：与 plugin-page / config-card 一致，用 --v-theme-* 适配浅色与深色 */
+
+/*
+ * 拖拽把手由 MoviePilot 宿主 dashboard.vue 统一渲染，
+ * 本组件只负责填充 dashboard-plugin-vue-renderer 容器并展示内容
+ */
+.p115-dashboard-widget {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  inline-size: 100%;
+  min-block-size: 0;
+}
+
+.dashboard-widget--strm {
+  height: 100%;
+  width: 100%;
+  min-height: 420px;
+}
+
+.dashboard-widget--status {
+  height: 100%;
+  width: 100%;
+  min-height: 420px;
+}
+
+.dashboard-widget--sync-del {
+  height: 100%;
+  width: 100%;
+  min-height: 420px;
+}
+
+.sync-del-dash-card__body {
+  min-height: 280px;
+  max-height: min(70vh, 640px);
+}
+
+.sync-del-list {
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sync-del-path {
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+/* 小卡片（网盘整理 / 全量同步）：占满栅格列高度，正文区伸展，底栏贴底对齐 */
+.dashboard-widget--transfer-mini,
+.dashboard-widget--full-sync-mini {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 200px;
+  height: 100%;
+}
+
+.dashboard-widget--transfer-mini>.v-card,
+.dashboard-widget--full-sync-mini>.v-card {
+  flex: 1 1 auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 与 Vuetify v-card-text 配合：中间区域吃满剩余高度，两卡 min-height 一致 */
+.transfer-mini-card__body,
+.full-sync-mini-card__body {
+  flex: 1 1 auto;
+  min-height: 7.5rem;
+}
+
+.strm-dash-card,
+.status-dash-card {
+  border-radius: 16px !important;
+  overflow: hidden;
+  background: rgba(var(--v-theme-surface), 0.78) !important;
+  backdrop-filter: blur(18px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
+  box-shadow:
+    0 8px 28px rgba(91, 207, 250, 0.15),
+    0 2px 8px rgba(245, 171, 185, 0.1),
+    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.06) !important;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
+}
+
+/* 深色 / 高对比主题：提高不透明度与描边，避免发灰或融进背景 */
+.v-theme--dark .strm-dash-card,
+.v-theme--dark .status-dash-card,
+[data-theme="dark"] .strm-dash-card,
+[data-theme="dark"] .status-dash-card {
+  background: rgba(var(--v-theme-surface), 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow:
+    0 8px 28px rgba(91, 207, 250, 0.22),
+    0 2px 8px rgba(245, 171, 185, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/*
+ * 透明主题（MoviePilot transparent.scss）：须用 --transparent-opacity / --transparent-blur，
+ * 否则插件内 0.78 不透明 + 固定 blur 会盖住主站 .v-card 的毛玻璃
+ */
+html[data-theme="transparent"] .strm-dash-card,
+html[data-theme="transparent"] .status-dash-card {
+  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity, 0.3)) !important;
+  backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08) !important;
+  box-shadow:
+    0 4px 20px rgba(91, 207, 250, 0.1),
+    0 2px 6px rgba(245, 171, 185, 0.06),
+    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04) !important;
+}
+
+html[data-theme="transparent"] .v-theme--dark .strm-dash-card,
+html[data-theme="transparent"] .v-theme--dark .status-dash-card {
+  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity, 0.3)) !important;
+  backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+html[data-theme="transparent"] .strm-dash-item,
+html[data-theme="transparent"] .strm-history-item {
+  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity-light, 0.2)) !important;
+  backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+}
+
+html[data-theme="transparent"] .status-inner-card {
+  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity-light, 0.2)) !important;
+  backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+}
+
+html[data-theme="transparent"] .refresh-actions {
+  backdrop-filter: blur(var(--transparent-blur, 10px)) !important;
+  background: rgba(var(--v-theme-surface), var(--transparent-opacity-heavy, 0.5)) !important;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
+  box-shadow: inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04);
+}
+
+html[data-theme="transparent"] .v-theme--dark .refresh-actions {
+  background: rgba(var(--v-theme-surface), var(--transparent-opacity-heavy, 0.5)) !important;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.15) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.status-dash-row .v-col.d-flex {
+  align-self: stretch;
+}
+
+.status-inner-card {
+  min-block-size: 100%;
+  border-radius: 12px !important;
+}
+
+.strm-dash-card__body {
+  min-height: 320px;
+  max-height: min(70vh, 640px);
+}
+
+.strm-dash-list {
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.strm-kind-field {
+  max-width: 280px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.strm-dash-item {
+  border-radius: 12px;
+  border-inline-start: 3px solid rgb(var(--v-theme-primary));
+  transition: box-shadow 0.2s ease;
+}
+
+.strm-dash-item--fail {
+  border-inline-start-color: rgb(var(--v-theme-error));
+}
+
+.strm-dash-item:hover,
+.strm-history-item:hover {
+  box-shadow: 0 2px 12px rgba(var(--v-theme-on-surface), 0.12);
+}
+
+.v-theme--dark .strm-dash-item:hover,
+.v-theme--dark .strm-history-item:hover,
+[data-theme="dark"] .strm-dash-item:hover,
+[data-theme="dark"] .strm-history-item:hover {
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+}
+
+.strm-history-item {
+  border-inline-start: 3px solid rgb(var(--v-theme-primary));
+  transition: box-shadow 0.2s ease;
+}
+
+.strm-history-item--fail {
+  border-inline-start-color: rgb(var(--v-theme-error));
+}
+
+.strm-section-label {
+  letter-spacing: 0.02em;
+}
+
+.strm-extra-line {
+  word-break: break-word;
+}
+
+.refresh-actions {
+  background: linear-gradient(135deg,
+      rgba(var(--v-theme-primary), 0.08) 0%,
+      rgba(245, 171, 185, 0.07) 100%) !important;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04);
+}
+
+.v-theme--dark .refresh-actions,
+[data-theme="dark"] .refresh-actions {
+  background: linear-gradient(to top,
+      rgba(var(--v-theme-surface), 0.92) 0%,
+      rgba(var(--v-theme-surface), 0.88) 100%) !important;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.2) !important;
+  box-shadow:
+    0 -2px 12px rgba(91, 207, 250, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 768px) {
+  .dashboard-widget--strm {
+    min-height: 360px;
+  }
+
+  .strm-dash-card__body {
+    max-height: min(65vh, 520px);
+  }
+
+  .dashboard-widget--sync-del {
+    min-height: 360px;
+  }
+
+  .sync-del-dash-card__body {
+    max-height: min(65vh, 520px);
+  }
+}

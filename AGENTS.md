@@ -10,10 +10,10 @@ plugin.
 
 ### 1.1 Directory and Manifest Mapping
 
-| Target | Source directory | Package manifest | Dependency manifest |
-|--------|------------------|------------------|---------------------|
-| MoviePilot V2 | `plugins.v2/<plugin_name>/` | `package.v2.json` | `requirements.txt` |
-| MoviePilot V3 | `plugins.v3/<plugin_name>/` | `package.v3.json` | `pyproject.toml` |
+| Target | Source directory | Frontend directory | Package manifest | Dependency manifest |
+|--------|------------------|--------------------|------------------|---------------------|
+| MoviePilot V2 | `plugins.v2/<plugin_name>/` | `frontend.v2/<plugin_name>/` | `package.v2.json` | `requirements.txt` |
+| MoviePilot V3 | `plugins.v3/<plugin_name>/` | `frontend.v3/<plugin_name>/` | `package.v3.json` | `pyproject.toml` |
 
 - Plugin directory names are lowercase; manifest keys use the plugin class ID,
   such as `p115disk` and `P115Disk`
@@ -25,6 +25,13 @@ plugin.
   compatible, and validate each implementation separately
 - Preserve the existing version tree unless the task explicitly requests
   migration or removal
+- Frontend source, `package.json`, lockfile, and Vite configuration are maintained
+  independently in each version tree. Do not import or symlink across trees or
+  fall back to another version's frontend when a project is missing
+- Build and copy assets using `.github/scripts/plugin_frontend.py` with an explicit
+  `--source-directory` and `--plugin`. Only the matching backend's `dist/` is updated
+- Preserve the host-facing `dist/assets/remoteEntry.js` and exposed component
+  names unless the target host contract changes
 
 ### 1.2 MoviePilot API Boundaries
 

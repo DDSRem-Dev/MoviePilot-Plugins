@@ -1,0 +1,65 @@
+name: Test plugin frontends
+
+on:
+  push:
+    paths:
+      - 'frontend.v2/**'
+      - 'frontend.v3/**'
+      - '.github/scripts/plugin_frontend.py'
+      - '.github/scripts/get_plugin_meta.py'
+      - '.github/scripts/tests/test_plugin_frontend.py'
+      - '.github/workflows/test-plugin-frontends.yml'
+      - '.github/workflows/plugins-release.yml'
+  pull_request:
+    paths:
+      - 'frontend.v2/**'
+      - 'frontend.v3/**'
+      - '.github/scripts/plugin_frontend.py'
+      - '.github/scripts/get_plugin_meta.py'
+      - '.github/scripts/tests/test_plugin_frontend.py'
+      - '.github/workflows/test-plugin-frontends.yml'
+      - '.github/workflows/plugins-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      frontends: ${{ steps.matrix.outputs.frontends }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test version routing and packaging
+        run: python3 -m unittest discover -s .github/scripts/tests -p 'test_plugin_frontend.py' -v
+      - name: Discover independent frontends
+        id: matrix
+        run: |
+          FRONTENDS=$(python3 .github/scripts/plugin_frontend.py --list)
+          echo "frontends=$FRONTENDS" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    if: ${{ needs.discover.outputs.frontends != '[]' }}
+    runs-on: ubuntu-latest
+    name: Build ${{ matrix.frontend.frontend_path }}
+    strategy:
+      fail-fast: false
+      matrix:
+        frontend: ${{ fromJson(needs.discover.outputs.frontends) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.frontend.frontend_path }}/package-lock.json
+      - name: Build and package matching frontend
+        env:
+          SOURCE_DIRECTORY: ${{ matrix.frontend.source_directory }}
+          PLUGIN_NAME: ${{ matrix.frontend.plugin }}
+        run: python3 .github/scripts/plugin_frontend.py --source-directory "$SOURCE_DIRECTORY" --plugin "$PLUGIN_NAME"
+      - name: Test frontend behavior
+        working-directory: ${{ matrix.frontend.frontend_path }}
+        run: npm run test --if-present

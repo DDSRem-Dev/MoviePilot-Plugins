@@ -12,8 +12,10 @@ build/
 develop-eggs/
 node_modules/
 frontend/*/dist/
+frontend.v2/*/dist/
+frontend.v3/*/dist/
 plugins.v2/*/dist/
-plugins.v3/p115strmhelper/dist/
+plugins.v3/*/dist/
 downloads/
 eggs/
 .eggs/
