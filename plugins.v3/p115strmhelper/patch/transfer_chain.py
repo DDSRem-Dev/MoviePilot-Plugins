@@ -272,6 +272,9 @@ class TransferChainPatcher:
                     return execute_plan(original_execute, owner, checkpoint, **kwargs)
 
             def step(owner: Any, **kwargs: Any) -> Any:
+                # 覆盖暂存的完整性校验和步骤身份必须由宿主保留
+                if "require_target_absent" in kwargs or "materialize_kind" in kwargs:
+                    return original_step(**kwargs)
                 context = _context.get()
                 source = kwargs["source_fileitem"]
                 if (
