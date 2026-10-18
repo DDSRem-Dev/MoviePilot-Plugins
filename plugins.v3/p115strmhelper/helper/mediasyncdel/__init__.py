@@ -33,6 +33,52 @@ from ...utils.sentry import sentry_manager
 from ...utils.webhook import WebhookUtils
 
 
+# 媒体文件同名旁挂文件的后缀：同目录下与视频主干相同，但不是可删除的媒体本体
+_NON_MEDIA_SIDECAR_EXTENSIONS = frozenset(
+    {
+        "nfo",
+        "srt",
+        "ass",
+        "ssa",
+        "sub",
+        "idx",
+        "sup",
+        "vtt",
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "bmp",
+        "gif",
+        "torrent",
+        "txt",
+        "log",
+        "db",
+        "xml",
+        "json",
+        "url",
+        "lnk",
+        "ini",
+        "sfv",
+        "md5",
+        "part",
+        "tmp",
+        "bak",
+    }
+)
+
+
+def _media_extensions() -> Tuple[str, ...]:
+    """
+    读取当前媒体文件后缀，保持 MoviePilot 配置中的偏好顺序
+
+    :return Tuple: 去掉点号并转小写后的媒体后缀，按配置优先级排列
+    """
+    return tuple(
+        str(ext).lstrip(".").lower() for ext in (settings.RMT_MEDIAEXT or []) if ext
+    )
+
+
 @sentry_manager.capture_all_class_exceptions
 class MediaSyncDelHelper:
     """
@@ -466,9 +512,15 @@ class MediaSyncDelHelper:
             file_dir_fileitem = self.storagechain.get_file_item(
                 storage=configer.storage_module, path=Path(file_dir)
             )
-            for item in self.storagechain.list_files(file_dir_fileitem):
-                if item.basename == file_basename:
-                    return item.extension
+            if not file_dir_fileitem:
+                return None
+            # 同主干的旁挂文件（nfo/srt/jpg 等）同样满足主干相同，
+            # 必须按媒体后缀筛选，否则会把字幕或封面的后缀当成媒体后缀
+            candidates = self.__match_stem_candidates(
+                file_dir_fileitem, file_basename
+            )
+            if candidates:
+                return self.__resolve_media_extension(candidates[0]) or None
         except Exception as e:
             logger.error(f"【同步删除】获取115网盘媒体后缀失败: {e}")
         return None
@@ -633,9 +685,74 @@ class MediaSyncDelHelper:
             return "", []
         return msg, transfer_history
 
+    @staticmethod
+    def __resolve_media_extension(item: Any) -> str:
+        """
+        提取文件项的媒体后缀
+
+        优先使用 FileItem.extension，缺失时回退解析路径后缀，
+        避免不同储存实现字段填充不一致导致判定失效
+
+        :param item (Any): 文件项
+
+        :return str: 去掉点号的小写后缀，无法判定时返回空字符串
+        """
+        extension = str(getattr(item, "extension", None) or "").strip().lstrip(".")
+        if extension:
+            return extension.lower()
+        return Path(str(getattr(item, "path", "") or "")).suffix.lstrip(".").lower()
+
+    def __match_stem_candidates(
+        self, parent_item: Any, stem: str, preferred_extension: str = ""
+    ) -> List[Any]:
+        """
+        在父目录中收集与给定主干同名、且确属媒体文件的条目
+
+        典型媒体目录中 `Movie (2020).mkv` 与 `Movie (2020).nfo`、`.srt`、`.jpg`
+        的主干完全相同，因此必须按媒体后缀排除旁挂文件，
+        否则后续删除会命中字幕、元数据或封面，而真正的视频仍留在网盘。
+
+        排序保证结果确定：同名后缀优先，其次按 RMT_MEDIAEXT 的偏好顺序，
+        最后按路径字典序，避免依赖列目录返回顺序。
+
+        :param parent_item (Any): 父目录文件项
+        :param stem (str): 文件名主干
+        :param preferred_extension (str): 期望的后缀，用于同主干多候选时的优先选择
+
+        :return List: 按优先级排序的候选文件项
+        """
+        media_extensions = _media_extensions()
+        preferred = preferred_extension.lstrip(".").lower()
+        ranked: List[Tuple[Tuple[int, int, str], Any]] = []
+        for item in self.storagechain.list_files(parent_item) or []:
+            if item.type != "file" or item.basename != stem:
+                continue
+            extension = self.__resolve_media_extension(item)
+            if media_extensions:
+                if extension not in media_extensions:
+                    logger.debug(
+                        f"【同步删除】跳过同名非媒体文件：{item.path}（后缀 {extension or '未知'}）"
+                    )
+                    continue
+                order = media_extensions.index(extension)
+            else:
+                # 未配置媒体后缀时无法正面确认，退回排除已知旁挂后缀
+                if not extension or extension in _NON_MEDIA_SIDECAR_EXTENSIONS:
+                    logger.debug(
+                        f"【同步删除】跳过同名非媒体文件：{item.path}（后缀 {extension or '未知'}）"
+                    )
+                    continue
+                order = 0
+            same_extension = 0 if preferred and extension == preferred else 1
+            ranked.append(
+                ((same_extension, order, str(getattr(item, "path", "") or "")), item)
+            )
+        ranked.sort(key=lambda entry: entry[0])
+        return [item for _, item in ranked]
+
     def __match_file_by_stem(self, storage: str, file_path: str):
         """
-        按文件名主干在父目录中查找网盘真实文件
+        按文件名主干在父目录中查找网盘真实媒体文件
 
         用于 Emby 上报的容器格式与网盘扩展名不一致的场景，
         例如 115 上的 (48).mov 被 Emby 识别为 mp4。
@@ -652,12 +769,18 @@ class MediaSyncDelHelper:
             )
             if not parent_item:
                 return None
-            for item in self.storagechain.list_files(parent_item) or []:
-                if item.type == "file" and item.basename == path.stem:
-                    logger.info(
-                        f"【同步删除】按文件名主干匹配到网盘真实文件：{item.path}"
-                    )
-                    return item
+            candidates = self.__match_stem_candidates(
+                parent_item, path.stem, path.suffix
+            )
+            if not candidates:
+                return None
+            if len(candidates) > 1:
+                logger.info(
+                    f"【同步删除】同名同主干媒体文件 {len(candidates)} 个，"
+                    f"按后缀优先级选择：{candidates[0].path}"
+                )
+            logger.info(f"【同步删除】按文件名主干匹配到网盘真实文件：{candidates[0].path}")
+            return candidates[0]
         except Exception as e:
             logger.warn(f"【同步删除】按文件名主干匹配网盘文件失败：{e}")
         return None

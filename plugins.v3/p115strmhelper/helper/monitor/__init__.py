@@ -779,6 +779,7 @@ class DirectoryUploadRescan:
     而本巡检只看「本地文件 + 目标 STRM 是否存在」，与事件是否丢失无关。
 
     仅提交命名规则可推导出 STRM 的文件，且每轮提交数量有上限，避免瞬时冲击队列。
+    多个监控目录之间按轮转起点轮流优先，避免某个目录长期占满额度导致其余目录失效。
     """
 
     DEFAULT_INTERVAL_MINUTES = 10
@@ -790,6 +791,8 @@ class DirectoryUploadRescan:
         self._stop_event: Optional[Event] = None
         self._lock = Lock()
         self._lifecycle_lock = Lock()
+        # 轮转起点：保证每个监控目录都能在有限轮次内成为首个扫描目标
+        self._rotation_index = 0
 
     @staticmethod
     def _config_bool(key: str, default: bool) -> bool:
@@ -885,6 +888,29 @@ class DirectoryUploadRescan:
         out_dir = Path(dest_strm) / PathUtils.sanitize_path_parts(rel).parent
         return out_dir / StrmGenerater.get_strm_filename(file_path)
 
+    def _rotate_entries(
+        self, entries: List[Tuple[str, str]]
+    ) -> List[Tuple[str, str]]:
+        """
+        按轮转起点重排监控目录，并把起点推进一项
+
+        `_collect_missing` 在达到单轮上限时立即返回，因此首个目录会占用全部额度。
+        每个监控目录都可能长期存在大量缺失文件（例如其 STRM 输出目录不可写），
+        若起点固定，后续目录将永远得不到巡检；轮转起点可保证所有目录
+        在 len(entries) 轮内至少被优先扫描一次。
+
+        :param entries (List): (监控目录, STRM 输出目录) 列表
+
+        :return List: 以本轮起点开始的目录列表
+        """
+        if not entries:
+            return []
+        index = self._rotation_index % len(entries)
+        self._rotation_index = (index + 1) % len(entries)
+        if index == 0:
+            return list(entries)
+        return list(entries[index:]) + list(entries[:index])
+
     def _collect_missing(self, entries: List[Tuple[str, str]], limit: int) -> List[Tuple[str, str]]:
         """
         扫描监控目录，收集缺少对应 STRM 的上传候选文件
@@ -969,7 +995,7 @@ class DirectoryUploadRescan:
         while not stop_event.is_set():
             try:
                 if self._config_bool("directory_upload_rescan_enabled", True):
-                    self._tick(client, entries)
+                    self._tick(client, self._rotate_entries(entries))
             except Exception as e:
                 logger.error(f"【目录上传】漏传巡检异常: {e}", exc_info=True)
             if stop_event.wait(self._interval_seconds()):
@@ -1023,8 +1049,8 @@ class DirectoryUploadRescan:
             )
             self._thread.start()
             logger.info(
-                f"【目录上传】漏传巡检已启动：每 {int(self._interval_seconds() // 60)} 分钟扫描"
-                f" {len(entries)} 个监控目录，单轮最多提交 {self._max_submit()} 个"
+                f"【目录上传】漏传巡检已启动：每 {int(self._interval_seconds() // 60)} 分钟巡检"
+                f" {len(entries)} 个监控目录（轮转起点，单轮最多提交 {self._max_submit()} 个）"
             )
 
     def stop(self, timeout: float = 10) -> bool:
