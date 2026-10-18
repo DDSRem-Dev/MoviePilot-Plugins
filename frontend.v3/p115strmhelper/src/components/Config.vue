@@ -273,6 +273,7 @@ const loading = ref(true);
 const saveLoading = ref(false);
 const syncLoading = ref(false);
 const clearIdPathCacheLoading = ref(false);
+const clearP115ClientCacheLoading = ref(false);
 const clearIncrementSkipCacheLoading = ref(false);
 const clearR302CacheLoading = ref(false);
 // 主分类标签
@@ -970,6 +971,31 @@ const clearIdPathCache = async () => {
   }
 };
 
+const clearP115ClientCache = async () => {
+  clearP115ClientCacheLoading.value = true;
+  message.text = '';
+  try {
+    const result = await props.api.post(`plugin/${PLUGIN_ID}/clear_p115client_cache`);
+    if (result && result.code === 0) {
+      message.text = result.msg || 'P115Client 缓存清理成功';
+      message.type = 'success';
+    } else {
+      throw new Error(result?.msg || 'P115Client 缓存清理失败');
+    }
+  } catch (err) {
+    message.text = `P115Client 缓存清理失败: ${err.message || '未知错误'}`;
+    message.type = 'error';
+    console.error('P115Client 缓存清理失败:', err);
+  } finally {
+    clearP115ClientCacheLoading.value = false;
+    setTimeout(() => {
+      if (message.type === 'success' || message.type === 'error') {
+        message.text = '';
+      }
+    }, 3000);
+  }
+};
+
 // 清理增量同步跳过路径缓存
 const clearIncrementSkipCache = async () => {
   clearIncrementSkipCacheLoading.value = true;
@@ -1313,6 +1339,7 @@ provide('monitorLifeMinFileSizeFormattedRef', monitorLifeMinFileSizeFormattedRef
 // Loading states
 provide('syncLoading', syncLoading);
 provide('clearIdPathCacheLoading', clearIdPathCacheLoading);
+provide('clearP115ClientCacheLoading', clearP115ClientCacheLoading);
 provide('clearIncrementSkipCacheLoading', clearIncrementSkipCacheLoading);
 provide('clearR302CacheLoading', clearR302CacheLoading);
 
@@ -1324,6 +1351,7 @@ provide('isAliTokenVisible', isAliTokenVisible);
 // Actions
 provide('triggerFullSync', triggerFullSync);
 provide('clearIdPathCache', clearIdPathCache);
+provide('clearP115ClientCache', clearP115ClientCache);
 provide('clearIncrementSkipCache', clearIncrementSkipCache);
 provide('clearR302Cache', clearR302Cache);
 provide('checkLifeEventStatus', checkLifeEventStatus);

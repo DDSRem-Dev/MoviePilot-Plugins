@@ -535,6 +535,13 @@ class P115StrmHelper(_PluginBase):
                 "summary": "清理文件路径ID缓存",
             },
             {
+                "path": "/clear_p115client_cache",
+                "endpoint": self.api.clear_p115client_cache_api,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "清理 P115Client 缓存",
+            },
+            {
                 "path": "/clear_increment_skip_cache",
                 "endpoint": self.api.clear_increment_skip_cache_api,
                 "methods": ["POST"],

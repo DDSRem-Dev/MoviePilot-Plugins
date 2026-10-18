@@ -1,6 +1,8 @@
 from pathlib import Path, PurePosixPath
 from typing import Any, List, Dict, Tuple, Optional
 
+from p115client.const import ID_TO_DIRNODE_CACHE
+
 from app.sdk.plugin import _PluginBase
 from app.schemas import FileItem, Response, StorageOperSelectionEventData, StorageUsage
 from app.schemas.exception import StorageQueryError
@@ -146,7 +148,7 @@ class P115Disk(_PluginBase):
                 "auth": "bear",
                 "methods": ["POST"],
                 "summary": "清理缓存",
-                "description": "清理115网盘文件路径ID缓存和文件详情ID缓存",
+                "description": "清理115网盘文件路径ID缓存、文件详情ID缓存和 P115Client 目录节点缓存",
             }
         ]
 
@@ -428,7 +430,7 @@ class P115Disk(_PluginBase):
                             {
                                 "component": "div",
                                 "props": {"class": "text-caption text-medium-emphasis"},
-                                "text": "清理115网盘文件路径ID缓存和文件详情ID缓存",
+                                "text": "清理115网盘文件路径ID缓存、文件详情ID缓存和 P115Client 目录节点缓存",
                             },
                         ],
                     },
@@ -847,6 +849,9 @@ class P115Disk(_PluginBase):
 
             self._p115_api._id_cache.clear()
             self._p115_api._id_item_cache.clear()
+            # 原地清空，确保运行中任务持有的目录缓存引用同步失效
+            for cache in tuple(ID_TO_DIRNODE_CACHE.values()):
+                cache.clear()
 
             logger.info("【P115Disk】缓存清理成功")
             return Response(success=True, message="缓存清理成功")

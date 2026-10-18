@@ -77,6 +77,21 @@
                         </v-btn>
                       </v-card>
                     </v-col>
+                    <v-col cols="12" md="6">
+                      <v-card variant="outlined" class="pa-4 d-flex flex-column cache-card" style="height: 100%;">
+                        <div class="d-flex align-center mb-3">
+                          <v-icon color="primary" class="mr-2">mdi-cached</v-icon>
+                          <span class="text-subtitle-1 font-weight-medium">清理 P115Client 缓存</span>
+                        </div>
+                        <p class="text-body-2 text-grey-darken-1 mb-3 flex-grow-1">
+                          清理 P115Client 共享的账号及分享目录节点缓存，后续访问时重新获取目录信息。
+                        </p>
+                        <v-btn color="primary" variant="outlined" :loading="clearP115ClientCacheLoading"
+                          @click="clearP115ClientCache" prepend-icon="mdi-cached" block>
+                          清理 P115Client 缓存
+                        </v-btn>
+                      </v-card>
+                    </v-col>
                   </v-row>
                 </v-card-text>
               </v-card>
@@ -642,6 +657,7 @@ const sidebarNavKeyItems = [
 const config = inject('config');
 const isTransferModuleEnhancementLocked = inject('isTransferModuleEnhancementLocked');
 const clearIdPathCacheLoading = inject('clearIdPathCacheLoading');
+const clearP115ClientCacheLoading = inject('clearP115ClientCacheLoading');
 const clearIncrementSkipCacheLoading = inject('clearIncrementSkipCacheLoading');
 const clearR302CacheLoading = inject('clearR302CacheLoading');
 const skipUploadWaitSizeFormattedRef = inject('skipUploadWaitSizeFormattedRef');
@@ -649,6 +665,7 @@ const forceUploadWaitSizeFormattedRef = inject('forceUploadWaitSizeFormattedRef'
 const skipSlowUploadSizeFormattedRef = inject('skipSlowUploadSizeFormattedRef');
 const machineId = inject('machineId');
 const clearIdPathCache = inject('clearIdPathCache');
+const clearP115ClientCache = inject('clearP115ClientCache');
 const clearIncrementSkipCache = inject('clearIncrementSkipCache');
 const clearR302Cache = inject('clearR302Cache');
 const getMachineId = inject('getMachineId');

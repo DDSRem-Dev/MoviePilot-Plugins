@@ -14,7 +14,7 @@ from p115center import P115Center
 from qrcode import make as qr_make
 from orjson import dumps, loads
 from p115client import P115Client, check_response
-from p115client.const import APP_TO_SSOENT
+from p115client.const import APP_TO_SSOENT, ID_TO_DIRNODE_CACHE
 from p115client.exception import P115DataError
 from p115client.tool.attr import normalize_attr
 from p115client.tool.fs_files import fs_files_iter
@@ -1346,6 +1346,23 @@ class Api:
         """
         idpathcacher.clear()
         return ApiResponse(msg="文件路径ID缓存已清理")
+
+    @staticmethod
+    def clear_p115client_cache_api() -> ApiResponse:
+        """
+        清理 P115Client 共享的账号及分享目录节点缓存
+
+        :return ApiResponse: 缓存清理结果
+        """
+        try:
+            # 原地清空，确保运行中任务持有的目录缓存引用同步失效
+            for cache in tuple(ID_TO_DIRNODE_CACHE.values()):
+                cache.clear()
+            logger.info("【P115Client】目录节点缓存已清理")
+            return ApiResponse(msg="P115Client 缓存已清理")
+        except Exception as e:
+            logger.error(f"【P115Client】缓存清理失败: {e}", exc_info=True)
+            return ApiResponse(code=1, msg=f"P115Client 缓存清理失败: {e}")
 
     @staticmethod
     def clear_increment_skip_cache_api() -> ApiResponse:
