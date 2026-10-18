@@ -954,19 +954,51 @@ class P115Api:
         except (OSError, ValueError):
             pass
 
+    @staticmethod
+    def _sha1_cache_key(filepath: Path, file_stat: os.stat_result) -> str:
+        """
+        构造文件 SHA1 缓存键
+
+        必须能唯一标识「当前文件内容」。仅用秒级 mtime 时，同路径、同字节数、
+        且 mtime 落在同一秒内的替换文件会命中旧哈希，进而把旧文件身份用于
+        115 秒传校验。因此改用：
+
+        - 纳秒级 mtime：常规写入必然变化；
+        - 纳秒级 ctime：原地覆盖并强制保留 mtime（cp -p、utime 还原）时仍会变化；
+        - inode：同秒同大小但被替换成新文件时变化。
+
+        三者复合后，只有「删除后重建且 inode、mtime、ctime 全部一致」才能命中，
+        该情形下文件内容在常规文件系统上已无区分依据。
+
+        :param filepath (Path): 文件路径
+        :param file_stat (os.stat_result): 文件的 os.stat 结果
+
+        :return str: 缓存键
+        """
+        mtime_ns = getattr(file_stat, "st_mtime_ns", None)
+        if mtime_ns is None:
+            mtime_ns = int(file_stat.st_mtime * 1_000_000_000)
+        ctime_ns = getattr(file_stat, "st_ctime_ns", None)
+        if ctime_ns is None:
+            ctime_ns = int(file_stat.st_ctime * 1_000_000_000)
+        return (
+            f"{filepath.as_posix()}:{file_stat.st_size}:"
+            f"{mtime_ns}:{ctime_ns}:{getattr(file_stat, 'st_ino', 0)}"
+        )
+
     def _get_cached_sha1(self, filepath: Path) -> Optional[str]:
         """
-        读取文件 SHA1 缓存（键为路径 + 大小 + mtime）
+        读取文件 SHA1 缓存（键为路径 + 大小 + 纳秒 mtime + inode）
 
         :param filepath (Path): 文件路径
 
         :return str: 命中返回 SHA1，未命中返回 None
         """
         try:
-            stat = filepath.stat()
+            file_stat = filepath.stat()
         except OSError:
             return None
-        key = f"{filepath.as_posix()}:{stat.st_size}:{int(stat.st_mtime)}"
+        key = self._sha1_cache_key(filepath, file_stat)
         with self._sha1_lock:
             if len(self._sha1_cache) > self._sha1_cache_max:
                 self._sha1_cache.clear()
@@ -980,10 +1012,10 @@ class P115Api:
         :param value (str): 计算得到的 SHA1
         """
         try:
-            stat = filepath.stat()
+            file_stat = filepath.stat()
         except OSError:
             return
-        key = f"{filepath.as_posix()}:{stat.st_size}:{int(stat.st_mtime)}"
+        key = self._sha1_cache_key(filepath, file_stat)
         with self._sha1_lock:
             if len(self._sha1_cache) > self._sha1_cache_max:
                 self._sha1_cache.clear()
