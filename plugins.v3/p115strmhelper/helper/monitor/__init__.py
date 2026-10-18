@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
+from os import walk as os_walk
 from pathlib import Path
 from re import search as re_search, IGNORECASE
 from shutil import rmtree
@@ -19,7 +20,9 @@ from app.sdk.utilities import SystemUtils
 
 from ...core.config import configer
 from ...helper.strm import MonitorStrmHelper
+from ...utils.path import PathUtils
 from ...utils.sentry import sentry_manager
+from ...utils.strm import StrmGenerater
 from .directory_upload_queue import DirectoryUploadTask, directory_upload_queue
 
 
@@ -437,16 +440,18 @@ class DirectoryStabilityTracker:
         )
         return True
 
-    def submit(self, client: P115Client, file_path: str, mon_path: str) -> None:
+    def submit(self, client: P115Client, file_path: str, mon_path: str) -> bool:
         """
         提交一个待稳定确认的文件，已在跟踪中或近期已处理则忽略
 
         :param client (P115Client): 115 客户端
         :param file_path (str): 文件路径
         :param mon_path (str): 监控根目录
+
+        :return bool: 本次真正加入待处理集合时返回 True
         """
         with self._lock:
-            self._submit_file_locked(client, file_path, mon_path)
+            return self._submit_file_locked(client, file_path, mon_path)
 
     def submit_directory(
         self,
@@ -764,6 +769,324 @@ class DirectoryStabilityTracker:
 directory_upload_stability_tracker = DirectoryStabilityTracker()
 
 
+class DirectoryUploadRescan:
+    """
+    目录上传漏传巡检
+
+    周期性扫描监控目录，找出「本地存在上传候选文件、但没有对应 STRM」的漏传条目，
+    重新提交给稳定性跟踪器。用于兜住被丢弃的 watchfiles Change.added 事件：
+    队列停止、插件重载或监控中断期间新增的文件不会被插件自动补发，
+    而本巡检只看「本地文件 + 目标 STRM 是否存在」，与事件是否丢失无关。
+
+    仅提交命名规则可推导出 STRM 的文件，且每轮提交数量有上限，避免瞬时冲击队列。
+    多个监控目录之间按轮转起点轮流优先，避免某个目录长期占满额度导致其余目录失效。
+    """
+
+    DEFAULT_INTERVAL_MINUTES = 10
+    DEFAULT_MAX_SUBMIT = 300
+    FIRST_SCAN_DELAY_SECONDS = 120
+
+    def __init__(self) -> None:
+        self._thread: Optional[Thread] = None
+        self._stop_event: Optional[Event] = None
+        self._lock = Lock()
+        self._lifecycle_lock = Lock()
+        # 轮转起点：保证每个监控目录都能在有限轮次内成为首个扫描目标
+        self._rotation_index = 0
+
+    @staticmethod
+    def _config_bool(key: str, default: bool) -> bool:
+        """
+        读取布尔型巡检配置
+
+        :param key (str): 配置项名称
+        :param default (bool): 配置缺失时的默认值
+
+        :return bool: 配置值
+        """
+        value = configer.get_config(key)
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _config_int(key: str, default: int, minimum: int = 1) -> int:
+        """
+        读取整数型巡检配置
+
+        :param key (str): 配置项名称
+        :param default (int): 配置缺失或非法时的默认值
+        :param minimum (int): 允许的最小值
+
+        :return int: 配置值
+        """
+        value = configer.get_config(key)
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return default
+        return number if number >= minimum else default
+
+    def _interval_seconds(self) -> float:
+        """
+        巡检间隔秒数
+        """
+        return (
+            self._config_int(
+                "directory_upload_rescan_interval", self.DEFAULT_INTERVAL_MINUTES
+            )
+            * 60
+        )
+
+    def _max_submit(self) -> int:
+        """
+        单轮最多提交的文件数量
+        """
+        return self._config_int(
+            "directory_upload_rescan_max_submit", self.DEFAULT_MAX_SUBMIT
+        )
+
+    @staticmethod
+    def _upload_entries() -> List[Tuple[str, str]]:
+        """
+        读取目录上传配置中可用于巡检的（监控目录, STRM 输出目录）组合
+
+        未配置 STRM 输出目录的监控项不参与巡检，因为没有可校验的 STRM 产物
+
+        :return List: (监控目录, STRM 输出目录) 列表
+        """
+        entries: List[Tuple[str, str]] = []
+        for item in configer.get_config("directory_upload_path") or []:
+            if not item:
+                continue
+            src = str(item.get("src") or "").strip()
+            dest_strm = str(item.get("dest_strm") or "").strip()
+            if not src or not dest_strm:
+                continue
+            entries.append((src, dest_strm))
+        return entries
+
+    @staticmethod
+    def _expected_strm_path(
+        file_path: Path, mon_path: str, dest_strm: str
+    ) -> Optional[Path]:
+        """
+        按插件生成 STRM 时的同一规则推导预期 STRM 路径
+
+        :param file_path (Path): 本地文件路径
+        :param mon_path (str): 监控根目录
+        :param dest_strm (str): STRM 输出目录
+
+        :return Path: 预期 STRM 路径，无法推导时返回 None
+        """
+        try:
+            rel = file_path.relative_to(mon_path)
+        except ValueError:
+            return None
+        out_dir = Path(dest_strm) / PathUtils.sanitize_path_parts(rel).parent
+        return out_dir / StrmGenerater.get_strm_filename(file_path)
+
+    def _rotate_entries(
+        self, entries: List[Tuple[str, str]]
+    ) -> List[Tuple[str, str]]:
+        """
+        按轮转起点重排监控目录，并把起点推进一项
+
+        `_collect_missing` 在达到单轮上限时立即返回，因此首个目录会占用全部额度。
+        每个监控目录都可能长期存在大量缺失文件（例如其 STRM 输出目录不可写），
+        若起点固定，后续目录将永远得不到巡检；轮转起点可保证所有目录
+        在 len(entries) 轮内至少被优先扫描一次。
+
+        :param entries (List): (监控目录, STRM 输出目录) 列表
+
+        :return List: 以本轮起点开始的目录列表
+        """
+        if not entries:
+            return []
+        index = self._rotation_index % len(entries)
+        self._rotation_index = (index + 1) % len(entries)
+        if index == 0:
+            return list(entries)
+        return list(entries[index:]) + list(entries[:index])
+
+    def _collect_missing(self, entries: List[Tuple[str, str]], limit: int) -> List[Tuple[str, str]]:
+        """
+        扫描监控目录，收集缺少对应 STRM 的上传候选文件
+
+        :param entries (List): (监控目录, STRM 输出目录) 列表
+        :param limit (int): 最多收集的文件数量
+
+        :return List: (文件路径, 监控根目录) 列表
+        """
+        upload_extensions = _directory_upload_extensions("directory_upload_uploadext")
+        allowed_extensions = set(upload_extensions) if upload_extensions is not None else None
+        missing: List[Tuple[str, str]] = []
+        for mon_path, dest_strm in entries:
+            if not Path(mon_path).is_dir():
+                continue
+            for current_dir, dir_names, file_names in os_walk(mon_path, followlinks=False):
+                current = Path(current_dir)
+                dir_names[:] = [
+                    name
+                    for name in dir_names
+                    if not _is_directory_upload_ignored_path(current / name)
+                ]
+                for name in file_names:
+                    file_path = current / name
+                    if (
+                        allowed_extensions is not None
+                        and file_path.suffix.lower() not in allowed_extensions
+                    ):
+                        continue
+                    if _is_directory_upload_ignored_path(file_path):
+                        continue
+                    if not file_path.is_file():
+                        continue
+                    strm_path = self._expected_strm_path(file_path, mon_path, dest_strm)
+                    if strm_path is None or strm_path.exists():
+                        continue
+                    missing.append((str(file_path), mon_path))
+                    if len(missing) >= limit:
+                        return missing
+        return missing
+
+    def _tick(self, client: P115Client, entries: List[Tuple[str, str]]) -> None:
+        """
+        执行一轮漏传巡检并按上限提交
+
+        :param client (P115Client): 115 客户端
+        :param entries (List): (监控目录, STRM 输出目录) 列表
+        """
+        limit = self._max_submit()
+        missing = self._collect_missing(entries, limit + 1)
+        if not missing:
+            logger.debug("【目录上传】漏传巡检：未发现缺少 STRM 的本地文件")
+            return
+        overflow = len(missing) > limit
+        submitted = 0
+        for file_path, mon_path in missing[:limit]:
+            try:
+                if directory_upload_stability_tracker.submit(client, file_path, mon_path):
+                    submitted += 1
+            except Exception as e:
+                logger.error(
+                    f"【目录上传】漏传巡检提交 {file_path} 失败: {e}", exc_info=True
+                )
+        logger.warning(
+            f"【目录上传】漏传巡检：发现 {len(missing)} 个本地文件缺少 STRM，"
+            f"本轮新增提交 {submitted} 个"
+            + ("（超出本轮上限，剩余将在下轮继续）" if overflow else "")
+        )
+
+    def _run(
+        self, client: P115Client, entries: List[Tuple[str, str]], stop_event: Event
+    ) -> None:
+        """
+        巡检线程主体
+
+        :param client (P115Client): 115 客户端
+        :param entries (List): (监控目录, STRM 输出目录) 列表
+        :param stop_event (Event): 停止事件
+        """
+        if stop_event.wait(self.FIRST_SCAN_DELAY_SECONDS):
+            return
+        while not stop_event.is_set():
+            try:
+                if self._config_bool("directory_upload_rescan_enabled", True):
+                    self._tick(client, self._rotate_entries(entries))
+            except Exception as e:
+                logger.error(f"【目录上传】漏传巡检异常: {e}", exc_info=True)
+            if stop_event.wait(self._interval_seconds()):
+                return
+
+    def start(
+        self,
+        client: Optional[P115Client] = None,
+        active_mon_paths: Optional[List[str]] = None,
+    ) -> None:
+        """
+        启动巡检线程（幂等）
+
+        可通过配置项 directory_upload_rescan_enabled 关闭，
+        directory_upload_rescan_interval 调整间隔（分钟），
+        directory_upload_rescan_max_submit 调整单轮提交上限
+
+        :param client (P115Client): 当前 115 客户端
+        :param active_mon_paths (List): 当前配置中的有效监控根目录
+        """
+        if client is None:
+            return
+        entries = self._upload_entries()
+        if not entries:
+            logger.debug("【目录上传】漏传巡检：没有可巡检的监控目录配置，跳过启动")
+            return
+        if not self._config_bool("directory_upload_rescan_enabled", True):
+            logger.info("【目录上传】漏传巡检已按配置关闭")
+            return
+        active_paths = {
+            str(Path(path).absolute()) for path in (active_mon_paths or []) if path
+        }
+        if active_paths:
+            entries = [
+                (src, dest_strm)
+                for src, dest_strm in entries
+                if str(Path(src).absolute()) in active_paths
+            ]
+        if not entries:
+            return
+        with self._lifecycle_lock, self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            stop_event = Event()
+            self._stop_event = stop_event
+            self._thread = Thread(
+                target=self._run,
+                args=(client, entries, stop_event),
+                name="P115StrmHelper-DirectoryUploadRescan",
+                daemon=True,
+            )
+            self._thread.start()
+            logger.info(
+                f"【目录上传】漏传巡检已启动：每 {int(self._interval_seconds() // 60)} 分钟巡检"
+                f" {len(entries)} 个监控目录（轮转起点，单轮最多提交 {self._max_submit()} 个）"
+            )
+
+    def stop(self, timeout: float = 10) -> bool:
+        """
+        停止巡检线程
+
+        :param timeout (float): 等待线程退出的最长秒数
+
+        :return bool: 巡检线程已退出返回 True
+        """
+        with self._lock:
+            if self._thread is current_thread():
+                if self._stop_event is not None:
+                    self._stop_event.set()
+                return False
+        with self._lifecycle_lock:
+            with self._lock:
+                thread = self._thread
+                stop_event = self._stop_event
+                if stop_event is not None:
+                    stop_event.set()
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=max(0, timeout))
+                if thread.is_alive():
+                    logger.warning("【目录上传】漏传巡检线程尚未退出，保留原线程")
+                    return False
+            with self._lock:
+                if self._thread is thread:
+                    self._thread = None
+                    self._stop_event = None
+                return True
+
+
+directory_upload_rescan = DirectoryUploadRescan()
+
+
 @sentry_manager.capture_plugin_exceptions
 def process_file_change(
     client: P115Client,
@@ -809,6 +1132,54 @@ def process_file_change(
         return
     logger.debug(f"【目录上传】文件 创建: {file_path}")
     directory_upload_stability_tracker.submit(client, file_path, mon_path)
+
+
+@sentry_manager.capture_plugin_exceptions
+def _resolve_uploaded_pickcode(
+    client: P115Client,
+    uploaded_file_item: FileItem,
+    target_file_path: Optional[Path] = None,
+) -> Optional[str]:
+    """
+    解析上传文件的 pickcode
+
+    CloudDrive2 对刚上传或仍在云端落盘的文件可能返回 "<父目录id>/<文件名>" 形式的复合
+    id，直接转成整数会抛 ValueError 并中断后续 STRM 生成与本地清理；此处只接受纯数字
+    id，复合 id 一律回退到 115 侧按路径查询真实文件 id，避免把目录 id 当成文件 id。
+
+    :param client (P115Client): 115 客户端
+    :param uploaded_file_item (FileItem): 上传返回的云端文件项
+    :param target_file_path (Path): 云端文件路径，用于回退查询
+
+    :return str: 17 位 pickcode，无法解析时返回 None
+    """
+    raw_fileid = str(getattr(uploaded_file_item, "fileid", "") or "").strip()
+    file_id = raw_fileid if raw_fileid.isdigit() else ""
+    if raw_fileid and not file_id:
+        logger.debug(f"【目录上传】非纯数字网盘文件 ID: {raw_fileid}，回退按路径查询")
+    if not file_id and target_file_path is not None:
+        try:
+            queried = get_id_to_path(
+                client,
+                Path(target_file_path).as_posix(),
+                **configer.get_ios_ua_app(app=False),
+            )
+            if queried is not None and str(queried).strip().isdigit():
+                file_id = str(queried).strip()
+        except Exception as e:
+            logger.warning(f"【目录上传】按路径查询网盘文件 ID 失败: {e}")
+    if not file_id:
+        logger.warning(f"【目录上传】无法解析网盘文件 ID，跳过生成 STRM: {raw_fileid}")
+        return None
+    try:
+        pickcode = str(client.to_pickcode(int(file_id)))
+    except Exception as e:
+        logger.warning(f"【目录上传】生成 pickcode 失败: {e}")
+        return None
+    if not (len(pickcode) == 17 and pickcode.isalnum()):
+        logger.warning(f"【目录上传】无效 pickcode: {pickcode}")
+        return None
+    return pickcode
 
 
 @sentry_manager.capture_plugin_exceptions
@@ -981,17 +1352,31 @@ def handle_file(
                     )
                     if dest_strm:
                         if upload_storage == "CloudDrive储存":
-                            setattr(
+                            # 按路径回退查询必须使用 115 原生路径，
+                            # CloudDrive2 挂载前缀（如 /115open）不在 115 文件树中
+                            pickcode = _resolve_uploaded_pickcode(
+                                client,
                                 uploaded_file_item,
-                                "pickcode",
-                                client.to_pickcode(int(uploaded_file_item.fileid)),
+                                Path(dest_remote) / rel,
                             )
-                        MonitorStrmHelper.generate_strm_after_upload(
+                            if not pickcode:
+                                logger.error(
+                                    f"【目录上传】{file_path} 无法解析 pickcode，"
+                                    "保留本地文件等待重试"
+                                )
+                                return
+                            setattr(uploaded_file_item, "pickcode", pickcode)
+                        if not MonitorStrmHelper.generate_strm_after_upload(
                             uploaded_file_item=uploaded_file_item,
                             dest_strm=dest_strm,
                             mon_path=mon_path,
                             local_file_path=file_path,
-                        )
+                        ):
+                            logger.error(
+                                f"【目录上传】{file_path} 生成 STRM 失败，"
+                                "保留本地文件等待重试"
+                            )
+                            return
                 else:
                     logger.error(f"【目录上传】{file_path} 上传网盘失败")
                     return
