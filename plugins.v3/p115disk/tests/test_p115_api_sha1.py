@@ -3,9 +3,11 @@ P115Api SHA1 计算与缓存回归测试
 
 覆盖：
 1. 大文件分块从 8KB 提升到 8MB 后哈希结果不变；
-2. SHA1 缓存命中（同路径 + 大小 + mtime 只计算一次）；
-3. 文件变化后缓存失效；
-4. 缓存容量上限触发清理。
+2. SHA1 缓存命中（同路径 + 大小 + 纳秒 mtime + 平台相关 ctime + inode 只计算一次）；
+3. 文件变化后缓存失效（含同秒同大小的覆盖）；
+4. 读取期间文件变化时不写缓存；
+5. 读取路径不清空缓存；
+6. 缓存容量上限触发清理。
 """
 
 import importlib
@@ -157,12 +159,63 @@ class TestSha1(TestCase):
 
         self.assertEqual(calc.call_count, 2)
 
-    def test_sha1_cache_key_uses_nanosecond_mtime(self):
+    def test_sha1_cache_key_includes_ctime_only_on_posix(self):
         """
-        缓存键包含纳秒级 mtime、ctime 与 inode，避免秒级精度碰撞
+        缓存键按平台选取失效依据
+
+        POSIX 用纳秒 mtime + 纳秒 ctime + inode；Windows 上 st_ctime 是创建时间、
+        覆盖文件不改变它，因此不纳入，只依赖 mtime + inode。
         """
         stat = self.file.stat()
         key = self.module.P115Api._sha1_cache_key(self.file, stat)
 
-        self.assertIn(f":{stat.st_mtime_ns}:{stat.st_ctime_ns}:", key)
+        self.assertIn(f":{stat.st_mtime_ns}", key)
         self.assertTrue(key.endswith(f":{stat.st_ino}"))
+        if os.name == "nt":
+            self.assertNotIn(f":{stat.st_ctime_ns}:", key)
+        else:
+            self.assertIn(f":{stat.st_mtime_ns}:{stat.st_ctime_ns}:", key)
+
+    def test_sha1_not_cached_when_file_changes_during_read(self):
+        """
+        读取期间文件被改动时不写缓存，避免把旧内容的哈希挂到新状态的键上
+
+        通过让 _calc_sha1 在计算过程中改写文件模拟上传与本地写入重叠。
+        """
+        api = _build_api(self.module)
+        original = self.module.P115Api._calc_sha1
+
+        def calc_then_touch(path, size=None):
+            value = original(path, size)
+            # 计算完成后再写入内容并推进 mtime，模拟并发写入
+            path.write_bytes(b"changed during read" * 64)
+            stat = path.stat()
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+            return value
+
+        with patch.object(
+            self.module.P115Api, "_calc_sha1", side_effect=calc_then_touch
+        ):
+            api._sha1_with_cache(self.file)
+
+        # 状态已变化，缓存不应写入任何条目
+        with patch.object(
+            self.module.P115Api, "_calc_sha1", return_value="recomputed"
+        ) as calc:
+            self.assertEqual(api._sha1_with_cache(self.file), "recomputed")
+        self.assertEqual(calc.call_count, 1)
+
+    def test_read_path_does_not_clear_cache(self):
+        """
+        读取路径不清空缓存，避免刚写入的哈希在下一次查询时被整体丢弃
+
+        复现评审场景：缓存达到 max + 1 条后查询应仍能命中，而不是先清空再 miss。
+        """
+        api = _build_api(self.module)
+        api._sha1_cache_max = 1
+        api._store_cached_sha1(self.file, "value")
+        api._sha1_cache["path:1:1:1:1"] = "extra"
+
+        self.assertGreater(len(api._sha1_cache), api._sha1_cache_max)
+        self.assertEqual(api._get_cached_sha1(self.file), "value")
+        self.assertIn("path:1:1:1:1", api._sha1_cache)

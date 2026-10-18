@@ -964,11 +964,10 @@ class P115Api:
         115 秒传校验。因此改用：
 
         - 纳秒级 mtime：常规写入必然变化；
-        - 纳秒级 ctime：原地覆盖并强制保留 mtime（cp -p、utime 还原）时仍会变化；
+        - 纳秒级 ctime：原地覆盖并强制保留 mtime（cp -p、utime 还原）时仍会变化。
+          仅 POSIX 有意义：Windows 上 st_ctime 是创建时间，覆盖文件不会改变它，
+          拿它做失效依据会给出「未变化」的错误结论，因此 Windows 下不纳入；
         - inode：同秒同大小但被替换成新文件时变化。
-
-        三者复合后，只有「删除后重建且 inode、mtime、ctime 全部一致」才能命中，
-        该情形下文件内容在常规文件系统上已无区分依据。
 
         :param filepath (Path): 文件路径
         :param file_stat (os.stat_result): 文件的 os.stat 结果
@@ -978,17 +977,23 @@ class P115Api:
         mtime_ns = getattr(file_stat, "st_mtime_ns", None)
         if mtime_ns is None:
             mtime_ns = int(file_stat.st_mtime * 1_000_000_000)
+        inode = getattr(file_stat, "st_ino", 0)
+        if os.name == "nt":
+            return f"{filepath.as_posix()}:{file_stat.st_size}:{mtime_ns}:{inode}"
         ctime_ns = getattr(file_stat, "st_ctime_ns", None)
         if ctime_ns is None:
             ctime_ns = int(file_stat.st_ctime * 1_000_000_000)
         return (
             f"{filepath.as_posix()}:{file_stat.st_size}:"
-            f"{mtime_ns}:{ctime_ns}:{getattr(file_stat, 'st_ino', 0)}"
+            f"{mtime_ns}:{ctime_ns}:{inode}"
         )
 
     def _get_cached_sha1(self, filepath: Path) -> Optional[str]:
         """
         读取文件 SHA1 缓存（键为路径 + 大小 + 纳秒 mtime + inode）
+
+        读取路径只做查询，不做容量清理：写入路径已保证条目数不超过上限，
+        若在查询前清空会让下一次查询必然 miss，反而使刚写入的哈希失效。
 
         :param filepath (Path): 文件路径
 
@@ -1000,22 +1005,29 @@ class P115Api:
             return None
         key = self._sha1_cache_key(filepath, file_stat)
         with self._sha1_lock:
-            if len(self._sha1_cache) > self._sha1_cache_max:
-                self._sha1_cache.clear()
             return self._sha1_cache.get(key)
 
-    def _store_cached_sha1(self, filepath: Path, value: str) -> None:
+    def _store_cached_sha1(
+        self, filepath: Path, value: str, expected_key: Optional[str] = None
+    ) -> None:
         """
         写入文件 SHA1 缓存
 
         :param filepath (Path): 文件路径
         :param value (str): 计算得到的 SHA1
+        :param expected_key (str): 读取开始前的缓存键。给出时只有当前文件状态
+            仍与该键一致才写入，避免把旧内容的哈希挂到新状态的键上
         """
         try:
             file_stat = filepath.stat()
         except OSError:
             return
         key = self._sha1_cache_key(filepath, file_stat)
+        if expected_key is not None and key != expected_key:
+            logger.debug(
+                f"【P115Disk】SHA1 读取期间文件状态变化，跳过缓存: {filepath.name}"
+            )
+            return
         with self._sha1_lock:
             if len(self._sha1_cache) > self._sha1_cache_max:
                 self._sha1_cache.clear()
@@ -1035,9 +1047,16 @@ class P115Api:
         if cached:
             logger.debug(f"【P115Disk】SHA1 命中缓存: {filepath}")
             return cached
+        # 读取前记录文件状态，读完再比对：读取期间文件被写入或替换时，
+        # 这段内容对应的哈希不能挂到新状态的键上，否则重试会拿到不匹配的值
+        begin_key = None
+        try:
+            begin_key = self._sha1_cache_key(filepath, filepath.stat())
+        except OSError:
+            pass
         started = monotonic()
         value = self._calc_sha1(filepath)
-        self._store_cached_sha1(filepath, value)
+        self._store_cached_sha1(filepath, value, expected_key=begin_key)
         logger.info(
             f"【P115Disk】SHA1 计算完成: {filepath.name} "
             f"耗时 {monotonic() - started:.1f}s"
