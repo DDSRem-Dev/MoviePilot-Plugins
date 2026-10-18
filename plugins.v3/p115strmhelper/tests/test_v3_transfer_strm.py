@@ -597,17 +597,20 @@ class TestV3TransferStrm(TestCase):
 
     def test_same_identity_with_changed_size_is_superseded(self) -> None:
         """
-        忽略整理时间差异后，文件大小变化仍阻止旧事件写入
+        精确快照已固定后，文件大小变化仍阻止旧事件写入
         """
         item = self._item()
         target = item["transferinfo"].target_item
         target.size = 100
         target.modify_time = 1
+        with patch.object(self.helper, "_prepare_file", side_effect=OSError("failed")):
+            with self.assertRaises(OSError):
+                self._run(item)
         self.remote_files[(target.storage, target.path)] = target.model_copy(
             update={"size": 200, "modify_time": 2}
         )
         self._run(item)
-        self.assertFalse(self.library.exists())
+        self.assertFalse((self.library / "Example.S01E01.strm").exists())
         self.scrape.assert_not_called()
         key = self.processor.event_key(item, self.types.EventType.TransferComplete)
         self.assertEqual(

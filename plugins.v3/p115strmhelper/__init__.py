@@ -325,6 +325,27 @@ class P115StrmHelper(_PluginBase):
         """
         apis = [
             {
+                "path": "/transfer_postprocess_list",
+                "endpoint": self.api.transfer_postprocess_list_api,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "分页查询整理后处理记录",
+            },
+            {
+                "path": "/transfer_postprocess_status",
+                "endpoint": self.api.transfer_postprocess_status_api,
+                "methods": ["GET"],
+                "auth": "bear",
+                "summary": "查询整理后处理状态",
+            },
+            {
+                "path": "/transfer_postprocess_retry",
+                "endpoint": self.api.transfer_postprocess_retry_api,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "核验并重试整理后处理",
+            },
+            {
                 "path": "/redirect_url",
                 "endpoint": self.api.redirect_url_get,
                 "methods": ["GET"],
@@ -1247,7 +1268,9 @@ class P115StrmHelper(_PluginBase):
 
                 search_keyword = args.strip()
 
-                action = Action(command="search", view="search_list", value=search_keyword)
+                action = Action(
+                    command="search", view="search_list", value=search_keyword
+                )
 
                 immediate_messages = self.action_handler.process(session, action)
                 # 报错，截断后续运行
@@ -1480,7 +1503,9 @@ class P115StrmHelper(_PluginBase):
                     post_message(
                         channel=event_data.get("channel"),
                         source=event_data.get("source"),
-                        title=i18n.translate("p115_add_offline_success", count=added_count),
+                        title=i18n.translate(
+                            "p115_add_offline_success", count=added_count
+                        ),
                         userid=userid,
                     )
                 else:
@@ -1582,7 +1607,9 @@ class P115StrmHelper(_PluginBase):
                     immediate_messages = self.action_handler.process(session, action)
                     if immediate_messages:
                         for msg in immediate_messages:
-                            self.__send_message(session, text=msg.get("text"), title="错误")
+                            self.__send_message(
+                                session, text=msg.get("text"), title="错误"
+                            )
                         return
 
                     session.go_to("share_recieve_paths")
@@ -1880,6 +1907,7 @@ class P115StrmHelper(_PluginBase):
             return
 
         with servicer.sync_operation():
+
             def share_strm_center(url: str) -> Optional[Dict[str, Any]]:
                 """
                 从中心化服务获取分享STRM的媒体信息
@@ -1892,9 +1920,7 @@ class P115StrmHelper(_PluginBase):
                         return None
                 try:
                     _params = UrlUtils.parse_query_params(url)
-                    cache_key = (
-                        f"{_params['share_code']}:{_params['receive_code']}:{_params['id']}"
-                    )
+                    cache_key = f"{_params['share_code']}:{_params['receive_code']}:{_params['id']}"
                     if cache_key not in sharestrmcacher.file_item_dict:
                         return None
                     _client = P115Center()
@@ -1916,7 +1942,9 @@ class P115StrmHelper(_PluginBase):
                     logger.warning(f"【媒体数据补充】{url} 中心化获取媒体信息失败: {e}")
                     return None
 
-            def resolve_media_info(media_path: str, media_item: FileItem) -> Dict[str, Any]:
+            def resolve_media_info(
+                media_path: str, media_item: FileItem
+            ) -> Dict[str, Any]:
                 """
                 按原有中心化优先、ffprobe 兜底策略获取主视频媒体信息
 
@@ -1938,8 +1966,10 @@ class P115StrmHelper(_PluginBase):
                             resp = client.download_emby_mediainfo_data(
                                 [(data_dict["sha1"], data_dict["size"])]
                             )
-                            resolved_info = RenameDictUtils.emby_mediainfo_to_rename_fields(
-                                resp[data_dict["sha1"].upper()]
+                            resolved_info = (
+                                RenameDictUtils.emby_mediainfo_to_rename_fields(
+                                    resp[data_dict["sha1"].upper()]
+                                )
                             )
                             pantransfercacher.file_item_dict.pop(media_item.fileid)
                             if resolved_info:
@@ -1965,14 +1995,18 @@ class P115StrmHelper(_PluginBase):
                         f"P115StrmHelper/redirect_url/{media_item.fileid}"
                     )
                 else:
-                    logger.error(f"【媒体数据补充】不支持的存储类型: {media_item.storage}")
+                    logger.error(
+                        f"【媒体数据补充】不支持的存储类型: {media_item.storage}"
+                    )
                     return {}
                 if need_ffprobe:
-                    resolved_info, error_message = RenameDictUtils.ffprobe_get_media_info(
-                        **params
+                    resolved_info, error_message = (
+                        RenameDictUtils.ffprobe_get_media_info(**params)
                     )
                     if not resolved_info:
-                        logger.error(f"【媒体数据补充】获取媒体信息失败: {error_message}")
+                        logger.error(
+                            f"【媒体数据补充】获取媒体信息失败: {error_message}"
+                        )
                         return {}
                 return resolved_info
 
@@ -1999,7 +2033,9 @@ class P115StrmHelper(_PluginBase):
                             else []
                         )
                     except Exception as e:
-                        logger.warning(f"【媒体数据补充】读取伴随文件同目录列表失败: {e}")
+                        logger.warning(
+                            f"【媒体数据补充】读取伴随文件同目录列表失败: {e}"
+                        )
                         sibling_items = []
                     probe_item = RenameDictUtils.find_related_media_item(
                         source_path=source_path,
@@ -2009,7 +2045,9 @@ class P115StrmHelper(_PluginBase):
                         subtitle_exts=settings.RMT_SUBEXT,
                     )
                     if not probe_item:
-                        logger.debug(f"【媒体数据补充】未找到唯一同名主视频: {source_path}")
+                        logger.debug(
+                            f"【媒体数据补充】未找到唯一同名主视频: {source_path}"
+                        )
                         return
                     probe_path = str(probe_item.path)
                 media_info = resolve_media_info(probe_path, probe_item)
@@ -2092,12 +2130,16 @@ class P115StrmHelper(_PluginBase):
             data.source = "P115StrmHelper"
             media_title = getattr(mediainfo, "title", "") or ""
             data.reason = f"媒体库已存在：{media_title}（{exist_info.server}）"
-            logger.info(f"【媒体库存在拦截】拦截整理 {data.fileitem.path}，{data.reason}")
+            logger.info(
+                f"【媒体库存在拦截】拦截整理 {data.fileitem.path}，{data.reason}"
+            )
 
             try:
                 target_path = data.target_path
                 if target_path.suffix:
-                    rename_format = settings.RENAME_FORMAT(getattr(mediainfo, "type", None))
+                    rename_format = settings.RENAME_FORMAT(
+                        getattr(mediainfo, "type", None)
+                    )
                     dir_to_clean = DirectoryHelper.get_media_root_path(
                         rename_format, target_path
                     )
@@ -2171,7 +2213,9 @@ class P115StrmHelper(_PluginBase):
                     f"【分享STRM覆盖检查】使用缓存大小: {data.target_size} for {data.target_path}"
                 )
             else:
-                media_info, error_message = RenameDictUtils.ffprobe_get_media_info(url=url)
+                media_info, error_message = RenameDictUtils.ffprobe_get_media_info(
+                    url=url
+                )
                 if media_info and media_info.get("file_size"):
                     data.target_size = media_info["file_size"]
                     data.source = "P115StrmHelper"

@@ -787,26 +787,68 @@ class TestV3Database(TestCase):
         已安装 V3 的数据库升级后保留原数据并创建事件和资源表
         """
         self.db.init_database()
-        self.models.File.upsert_batch_by_list(None, [dict(id=1, parent_id=0, name="kept", path="/kept")])
+        self.models.File.upsert_batch_by_list(
+            None, [dict(id=1, parent_id=0, name="kept", path="/kept")]
+        )
         with self.owner.get_database().engine.begin() as connection:
             self.models.TransferPostprocess.__table__.drop(connection)
             self.models.TransferResource.__table__.drop(connection)
-            connection.execute(text("UPDATE alembic_version SET version_num='p115v3_db_01'"))
+            connection.execute(
+                text("UPDATE alembic_version SET version_num='p115v3_db_01'")
+            )
         self.registry.release_all_databases()
         self.db.init_database()
         self.assertEqual(self.models.File.get_by_id(None, 1).name, "kept")
         self.assertEqual(self.count(self.models.TransferPostprocess), 0)
         self.assertEqual(self.count(self.models.TransferResource), 0)
 
+    def test_postprocess_list_filters_paginates_and_isolates_instances(self) -> None:
+        """
+        后处理列表稳定分页、筛选状态并隔离不同实例的数据
+        """
+        self.db.init_database()
+        module = importlib.import_module(
+            f"{self.prefix}.db_manager.transfer_postprocess"
+        )
+        store = module.TransferPostprocessStore()
+        plan = {
+            "identity": {"path": "/电影/a.mkv", "size": 0},
+            "operations": [{"path": "/媒体/a.strm"}],
+            "superseded_reason": "大小不一致",
+        }
+        for key, state in (("c", "done"), ("b", "superseded"), ("a", "pending")):
+            store.save(key * 64, plan, state)
+        first = store.list_records(page_size=1)
+        second = store.list_records(page=2, page_size=1)
+        self.assertEqual(first["total"], 2)
+        self.assertEqual(first["items"][0]["key"], "a" * 64)
+        self.assertEqual(second["items"][0]["key"], "b" * 64)
+        self.assertEqual(first["items"][0]["size"], 0)
+        self.assertNotIn("plan", first["items"][0])
+        self.assertEqual(store.list_records("done")["total"], 1)
+        self.assertEqual(store.list_records("all")["total"], 3)
+        self.assertEqual(store.list_records(page=99)["items"], [])
+        first["items"][0]["cloud_path"] = "changed"
+        self.assertEqual(store.load("a" * 64)["plan"], plan)
+        self.bind_owner(clone=True)
+        self.db.init_database()
+        self.assertEqual(module.TransferPostprocessStore().list_records()["total"], 0)
+
     def test_postprocess_file_and_checkpoint_commit_atomically(self) -> None:
         """
         事件计划与文件归属在同一事务提交，失败不留下单边成功记录
         """
         self.db.init_database()
-        module = importlib.import_module(f"{self.prefix}.db_manager.transfer_postprocess")
+        module = importlib.import_module(
+            f"{self.prefix}.db_manager.transfer_postprocess"
+        )
         store = module.TransferPostprocessStore()
         path = self.directory / "library/电影.strm"
-        operation = {"path": str(path), "identity": {"fileid": "123"}, "after": {"sha256": "abc"}}
+        operation = {
+            "path": str(path),
+            "identity": {"fileid": "123"},
+            "after": {"sha256": "abc"},
+        }
         plan = {"operations": [operation]}
         key = "a" * 64
         store.save(key, plan)

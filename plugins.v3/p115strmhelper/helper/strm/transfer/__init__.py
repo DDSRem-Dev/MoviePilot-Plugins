@@ -31,6 +31,35 @@ class TransferStrmHelper:
     持久处理整理完成事件的 STRM、字幕和音轨后处理
     """
 
+    def retry_postprocess(
+        self,
+        key: str,
+        client: P115Client,
+        mediainfodownloader: MediaInfoDownloader,
+    ) -> str:
+        """
+        按事件键核验旧版大小误判并执行原计划，失败后可继续重试
+
+        :param key (str): 后处理事件键
+        :param client (P115Client): 当前实例的网盘客户端
+        :param mediainfodownloader (MediaInfoDownloader): 当前实例的下载器
+
+        :return str: 执行后的持久状态
+        """
+        processor = TransferPostprocessor()
+        record = processor.store.load(key)
+        if record is None:
+            raise ValueError("后处理事件不存在")
+        processor.run(
+            key,
+            record["plan"]["roots"],
+            lambda: record["plan"],
+            lambda plan, staged: self._prepare_file(plan, staged, mediainfodownloader),
+            lambda name, plan: self._effect(name, plan, client),
+            retry_superseded=True,
+        )
+        return processor.store.load(key)["state"]
+
     @staticmethod
     def _get_overwrite_mode(storage_name: str, pan_dir_path: str) -> Optional[str]:
         """

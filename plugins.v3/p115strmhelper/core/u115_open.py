@@ -447,7 +447,10 @@ class U115OpenHelper:
                                 if info_resp["file_category"] == "1"
                                 else None,
                                 pickcode=info_resp["pick_code"],
-                                size=StringUtils.num_filesize(info_resp["size"])
+                                size=int(info_resp["size_byte"])
+                                if info_resp.get("size_byte") is not None
+                                and info_resp["file_category"] == "1"
+                                else file_size
                                 if info_resp["file_category"] == "1"
                                 else None,
                                 modify_time=info_resp["utime"],

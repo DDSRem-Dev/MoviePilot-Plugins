@@ -8,6 +8,7 @@ from app.sdk.logging import logger
 
 from ....db_manager.transfer_postprocess import TransferPostprocessStore
 from .files import fingerprint, lock_libraries, publish_file, validate_path
+from .identity import freeze_size, has_started, is_display_size, matches_file
 
 
 def file_identity(item: Any) -> Dict[str, Any]:
@@ -57,19 +58,14 @@ def is_current(identity: Dict[str, Any]) -> bool:
     校验当前云端目标仍是该事件的文件，缺少可比身份则拒绝确认
 
     移动和重命名会改变云端修改时间，完成事件仍可能携带操作前的时间
-    因此使用文件 ID 或 pickcode 及大小核对身份，不以修改时间判断事件过期
+    使用文件标识及固定的精确大小核对身份，不以修改时间判断事件过期
     """
     current = current_file(identity)
-    if current is None:
-        return False
-    field = "fileid" if identity.get("fileid") else "pickcode"
-    expected = identity.get(field)
-    actual = getattr(current, field, None)
-    if not expected or not actual:
-        raise RuntimeError("整理后处理无法确认云端文件身份，等待重试")
-    if str(expected) != str(actual):
+    if not matches_file(identity, current):
         return False
     actual_size = getattr(current, "size", None)
+    if identity.get("size") is not None and actual_size is None:
+        raise RuntimeError("整理后处理未取得云端精确大小，等待重试")
     if (
         identity.get("size") is not None
         and actual_size is not None
@@ -94,12 +90,18 @@ class TransferPostprocessor:
         build: Callable[[], Dict[str, Any]],
         prepare: Callable[[Dict[str, Any], Path], None],
         effect: Callable[[str, Dict[str, Any]], None],
+        retry_superseded: bool = False,
     ) -> None:
         """
         串行执行事件计划，成功或过期事件重投时直接确认
+
+        :param retry_superseded (bool): 显式核验并恢复旧版显示大小误判的终态
         """
         existing = self.store.load(key)
-        if existing and existing["state"] in {"done", "superseded"}:
+        if existing and (
+            existing["state"] == "done"
+            or (existing["state"] == "superseded" and not retry_superseded)
+        ):
             logger.debug(
                 "【监控整理STRM生成】事件已处理，跳过重复执行: %s，状态: %s",
                 key,
@@ -108,7 +110,10 @@ class TransferPostprocessor:
             return
         with lock_libraries(existing["plan"]["roots"] if existing else roots):
             record = self.store.load(key)
-            if record and record["state"] in {"done", "superseded"}:
+            if record and (
+                record["state"] == "done"
+                or (record["state"] == "superseded" and not retry_superseded)
+            ):
                 logger.debug(
                     "【监控整理STRM生成】事件已处理，跳过重复执行: %s，状态: %s",
                     key,
@@ -116,10 +121,24 @@ class TransferPostprocessor:
                 )
                 return
             plan = record["plan"] if record else build()
+            if record and record["state"] == "superseded":
+                self._recover_size_mismatch(plan)
+                self.store.save(key, plan)
             if not record:
                 self.store.save(key, plan)
             else:
                 logger.info("【监控整理STRM生成】恢复未完成的后处理: %s", key)
+            if (
+                plan["identity"]["storage"] == "u115"
+                and plan["identity"].get("size_source") != "storage"
+                and not has_started(plan)
+            ):
+                current = current_file(plan["identity"])
+                if not matches_file(plan["identity"], current):
+                    self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
+                    return
+                freeze_size(plan, current)
+                self.store.save(key, plan)
             if not is_current(plan["identity"]):
                 self._supersede(key, plan, "云端目标已不存在或文件身份已变化")
                 return
@@ -158,7 +177,9 @@ class TransferPostprocessor:
                             )
                         raise
                     if not written:
-                        self._supersede(key, plan, "文件发布期间云端目标或本地文件已变化")
+                        self._supersede(
+                            key, plan, "文件发布期间云端目标或本地文件已变化"
+                        )
                         return
                 else:
                     output = plan["operations"][0]
@@ -215,7 +236,37 @@ class TransferPostprocessor:
                 self.store.save(key, plan)
             self.store.save(key, plan, "done")
 
+    def _recover_size_mismatch(self, plan: Dict[str, Any]) -> None:
+        """
+        仅恢复未产生副作用且能够证明显示值来源的旧计划
+        """
+        identity = plan["identity"]
+        if (
+            identity["storage"] != "u115"
+            or identity.get("size_source") == "storage"
+            or has_started(plan)
+        ):
+            raise ValueError("仅支持恢复未执行的旧版 115 大小误判记录")
+        current = current_file(identity)
+        if not matches_file(identity, current) or not is_display_size(
+            identity.get("size"), getattr(current, "size", None)
+        ):
+            raise ValueError("云端身份或大小不符合旧版显示大小误判条件")
+        for operation in plan["operations"]:
+            if operation["kind"] != "write":
+                continue
+            path = Path(operation["path"])
+            validate_path(path, plan["roots"])
+            if (
+                fingerprint(path) != operation["before"]
+                or self.store.owner(path) != operation["owner"]
+            ):
+                raise ValueError("本地目标或归属已变化，不能恢复旧事件")
+        freeze_size(plan, current)
+        plan.pop("superseded_reason", None)
+
     def _supersede(self, key: str, plan: Dict[str, Any], reason: str) -> None:
+        plan["superseded_reason"] = reason
         self.store.save(key, plan, "superseded")
         logger.warning(
             "【监控整理STRM生成】%s，停止该事件后处理: %s，目标: %s",
@@ -315,7 +366,9 @@ class TransferPostprocessor:
         if not is_current(plan["identity"]):
             raise RuntimeError("整理后处理云端目标在清理期间已变化，等待重新确认")
         if fingerprint(path) != actual or self.store.owner(path) != operation["owner"]:
-            logger.debug("【监控整理STRM生成】删除前文件或归属已变化，跳过清理: %s", path)
+            logger.debug(
+                "【监控整理STRM生成】删除前文件或归属已变化，跳过清理: %s", path
+            )
             operation["done"] = True
             self.store.save(key, plan)
             return
@@ -324,13 +377,15 @@ class TransferPostprocessor:
                 if operation.get("cleanup_reason") == "latest":
                     label = "旧版本 STRM 文件"
                     logger.info(
-                        "【监控整理STRM生成】latest 模式：删除旧版本 STRM 文件: %s", path
+                        "【监控整理STRM生成】latest 模式：删除旧版本 STRM 文件: %s",
+                        path,
                     )
                 else:
                     label = "旧 STRM 文件"
                     if operation.get("cleanup_reason") == "move":
                         logger.info(
-                            "【监控整理STRM生成】检测到重新整理，清理旧 STRM 文件: %s", path
+                            "【监控整理STRM生成】检测到重新整理，清理旧 STRM 文件: %s",
+                            path,
                         )
                     else:
                         logger.info("【监控整理STRM生成】清理旧 STRM 文件: %s", path)

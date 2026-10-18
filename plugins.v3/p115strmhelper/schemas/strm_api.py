@@ -180,6 +180,14 @@ class ManualTransferPayload(BaseModel):
     path: str = Field(description="网盘路径")
 
 
+class TransferPostprocessRetryPayload(BaseModel):
+    """
+    按事件键重试整理后处理的请求
+    """
+
+    key: str = Field(pattern=r"^[0-9a-f]{64}$", description="后处理事件键")
+
+
 class StrmApiStatusCode:
     """
     API STRM 错误

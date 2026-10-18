@@ -30,6 +30,8 @@ from .core.aliyunpan import AliyunPanLogin
 from .core.p115 import get_pid_by_path, get_pickcode_by_path
 from .helper.life.test import MonitorLifeTest
 from .helper.strm import ApiSyncStrmHelper
+from .helper.strm.transfer import TransferStrmHelper
+from .db_manager.transfer_postprocess import TransferPostprocessStore
 from .helper.backup import backup_helper
 from .schemas.offline import (
     OfflineTasksPayload,
@@ -81,6 +83,7 @@ from .schemas.strm_api import (
     StrmApiPayloadByPathData,
     StrmApiPayloadRemoveData,
     ManualTransferPayload,
+    TransferPostprocessRetryPayload,
 )
 from .schemas.sync_del_history import DeleteSyncDelHistoryPayload
 from .schemas.strm_exec_history import DeleteStrmSyncHistoryPayload
@@ -1696,6 +1699,76 @@ class Api:
                 ),
             ),
         )
+
+    @staticmethod
+    def transfer_postprocess_list_api(
+        state: str = Query(
+            "unfinished",
+            pattern=r"^(unfinished|all|pending|superseded|done)$",
+            description="后处理状态筛选",
+        ),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(20, ge=1, le=100, description="每页记录数"),
+    ) -> ApiResponse:
+        """
+        分页列出当前实例的整理后处理事件
+        """
+        with servicer.sync_operation():
+            return ApiResponse(
+                data=TransferPostprocessStore().list_records(state, page, page_size)
+            )
+
+    @staticmethod
+    def transfer_postprocess_status_api(
+        key: str = Query(..., pattern=r"^[0-9a-f]{64}$", description="后处理事件键"),
+    ) -> ApiResponse:
+        """
+        查看当前实例的后处理状态及固定目标
+        """
+        with servicer.sync_operation():
+            record = TransferPostprocessStore().load(key)
+            if record is None:
+                return ApiResponse(code=-1, msg="后处理事件不存在")
+            plan = record["plan"]
+            return ApiResponse(
+                data={
+                    "key": key,
+                    "state": record["state"],
+                    "cloud_path": plan["identity"]["path"],
+                    "local_path": plan["operations"][0]["path"],
+                    "size": plan["identity"].get("size"),
+                    "reason": plan.get("superseded_reason"),
+                }
+            )
+
+    @staticmethod
+    def transfer_postprocess_retry_api(
+        payload: TransferPostprocessRetryPayload,
+    ) -> ApiResponse:
+        """
+        核验并重试当前实例的大小误判记录或未完成计划
+        """
+        try:
+            with servicer.sync_operation():
+                if not servicer.client:
+                    return ApiResponse(code=-1, msg="115客户端未初始化")
+                state = TransferStrmHelper().retry_postprocess(
+                    key=payload.key,
+                    client=servicer.client,
+                    mediainfodownloader=servicer.mediainfodownloader,
+                )
+            return ApiResponse(
+                code=0 if state == "done" else -1,
+                msg="后处理完成" if state == "done" else "事件已过期，未继续执行",
+                data={"key": payload.key, "state": state},
+            )
+        except ValueError as error:
+            return ApiResponse(code=-1, msg=str(error))
+        except Exception as error:
+            logger.error(
+                "【监控整理STRM生成】重试后处理失败: %s", payload.key, exc_info=True
+            )
+            return ApiResponse(code=-1, msg=f"后处理失败，可稍后重试: {error}")
 
     def api_strm_sync_creata(self, payload: StrmApiPayloadData) -> ApiResponse:
         """

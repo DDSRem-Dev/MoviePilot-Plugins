@@ -26,6 +26,7 @@
             <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
             <div class="text-caption mb-2">监控MoviePilot整理入库事件，自动在本地对应目录生成STRM文件。</div>
           </v-alert>
+          <TransferPostprocessRecovery />
           <v-row>
             <v-col cols="12" md="4">
               <v-switch v-model="config.transfer_monitor_enabled" label="启用" color="info"></v-switch>
@@ -1045,6 +1046,7 @@
 
 <script setup>
 import { computed, ref, inject } from 'vue';
+import TransferPostprocessRecovery from '../dialogs/TransferPostprocessRecovery.vue';
 
 const strmSubTab = ref('tab-transfer');
 

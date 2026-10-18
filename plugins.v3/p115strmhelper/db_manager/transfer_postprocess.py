@@ -4,6 +4,8 @@ from os.path import normcase
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from sqlalchemy import func, select
+
 from . import ct_db_manager
 from .models.transfer_postprocess import TransferPostprocess, TransferResource
 
@@ -40,6 +42,60 @@ class TransferPostprocessStore:
         with self._handle.session() as db:
             db.merge(TransferPostprocess(key=key, state=state, plan=deepcopy(plan)))
             db.commit()
+
+    def list_records(
+        self, state: str = "unfinished", page: int = 1, page_size: int = 20
+    ) -> Dict[str, Any]:
+        """
+        分页查询当前实例的事件摘要，避免返回完整执行计划
+
+        :param state (str): unfinished、all 或具体事件状态
+        :param page (int): 从 1 开始的页码
+        :param page_size (int): 每页记录数，最多 100 条
+
+        :return Dict: 事件摘要列表、总数和分页信息
+        """
+        if state not in {"unfinished", "all", "pending", "superseded", "done"}:
+            raise ValueError("无效的后处理状态")
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("无效的分页参数")
+        conditions = []
+        if state == "unfinished":
+            conditions.append(TransferPostprocess.state.in_(("pending", "superseded")))
+        elif state != "all":
+            conditions.append(TransferPostprocess.state == state)
+        with self._handle.session() as db:
+            total = db.scalar(
+                select(func.count()).select_from(TransferPostprocess).where(*conditions)
+            )
+            records = db.scalars(
+                select(TransferPostprocess)
+                .where(*conditions)
+                .order_by(TransferPostprocess.key)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            items = []
+            for record in records:
+                plan = record.plan
+                identity = plan.get("identity", {})
+                operations = plan.get("operations", [])
+                items.append(
+                    {
+                        "key": record.key,
+                        "state": record.state,
+                        "cloud_path": identity.get("path"),
+                        "local_path": operations[0].get("path") if operations else None,
+                        "size": identity.get("size"),
+                        "reason": plan.get("superseded_reason"),
+                    }
+                )
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
 
     def owner(self, path: Path) -> Optional[Dict[str, Any]]:
         """
