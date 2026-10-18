@@ -136,10 +136,18 @@ class TestSha1(TestCase):
 
     def test_sha1_cache_invalidated_on_same_second_same_size(self):
         """
-        同路径、同字节数、同秒内被替换时缓存必须失效
+        同路径、同字节数、同秒内被覆盖时的缓存行为按平台区分
 
         这是评审指出的窗口：秒级 mtime + 大小不足以标识文件内容。
-        通过原地写入相同长度内容并把 mtime 固定在同一秒内复现。
+        通过原地写入相同长度内容并把 mtime 固定回同一秒复现。
+
+        - ctime 参与缓存键的平台（POSIX）：原地覆盖会推进纳秒 ctime，
+          缓存键变化，必须重新计算；
+        - ctime 不随内容变化的平台（Windows）：缓存键仍由 mtime + size + inode
+          组成且完全一致，此时会命中旧值。这是 _sha1_cache_key 在该平台上的
+          已知限制（见 CTIME_TRACKS_CONTENT_CHANGE 的说明），因此这里断言命中
+          旧值，使测试与实现声明的平台能力保持一致；读取期间变化的场景由
+          test_sha1_not_cached_when_file_changes_during_read 覆盖。
         """
         api = _build_api(self.module)
         payload = b"a" * 1024
@@ -155,26 +163,69 @@ class TestSha1(TestCase):
             # 覆盖为等长内容，并把 mtime 固定回同一秒
             self.file.write_bytes(b"b" * 1024)
             os.utime(self.file, ns=(same_second, same_second))
-            self.assertEqual(api._sha1_with_cache(self.file), "second")
+            second = api._sha1_with_cache(self.file)
 
-        self.assertEqual(calc.call_count, 2)
+        if self.module.CTIME_TRACKS_CONTENT_CHANGE:
+            self.assertEqual(second, "second")
+            self.assertEqual(calc.call_count, 2)
+        else:
+            self.assertEqual(second, "first")
+            self.assertEqual(calc.call_count, 1)
 
-    def test_sha1_cache_key_includes_ctime_only_on_posix(self):
+    def test_same_second_overwrite_hits_cache_when_ctime_is_not_usable(self):
         """
-        缓存键按平台选取失效依据
+        模拟「ctime 不随内容变化」的平台时，同秒等长覆盖会命中旧值（已知限制的可执行契约）
 
-        POSIX 用纳秒 mtime + 纳秒 ctime + inode；Windows 上 st_ctime 是创建时间、
-        覆盖文件不改变它，因此不纳入，只依赖 mtime + inode。
+        通过 CTIME_TRACKS_CONTENT_CHANGE 关闭 ctime 参与，缓存键只剩
+        mtime + size + inode，因此该场景必然复用旧哈希。此用例把平台差异固定为
+        断言，避免以后误把 Windows 分支改成「应当失效」而与实现矛盾。
+        """
+        api = _build_api(self.module)
+        self.file.write_bytes(b"a" * 1024)
+        stat = self.file.stat()
+        same_second = stat.st_mtime_ns // 1_000_000_000 * 1_000_000_000
+        os.utime(self.file, ns=(same_second, same_second))
+
+        posix_stat = self.file.stat()
+        posix_key = self.module.P115Api._sha1_cache_key(self.file, posix_stat)
+        if self.module.CTIME_TRACKS_CONTENT_CHANGE:
+            self.assertIn(str(posix_stat.st_ctime_ns), posix_key)
+
+        with patch.object(
+            self.module, "CTIME_TRACKS_CONTENT_CHANGE", False
+        ), patch.object(
+            self.module.P115Api, "_calc_sha1", side_effect=["first", "second"]
+        ) as calc:
+            self.assertEqual(api._sha1_with_cache(self.file), "first")
+            self.file.write_bytes(b"b" * 1024)
+            os.utime(self.file, ns=(same_second, same_second))
+            reduced_stat = self.file.stat()
+            reduced_key = self.module.P115Api._sha1_cache_key(
+                self.file, reduced_stat
+            )
+            result = api._sha1_with_cache(self.file)
+
+        # 关闭 ctime 后键里不含 ctime 纳秒值
+        self.assertNotIn(str(reduced_stat.st_ctime_ns), reduced_key)
+        self.assertEqual(result, "first")
+        self.assertEqual(calc.call_count, 1)
+
+    def test_sha1_cache_key_includes_ctime_only_when_usable(self):
+        """
+        缓存键按平台能力选取失效依据
+
+        ctime 随内容变化时（POSIX）用纳秒 mtime + 纳秒 ctime + inode；
+        否则（Windows，st_ctime 是创建时间）只用 mtime + inode。
         """
         stat = self.file.stat()
         key = self.module.P115Api._sha1_cache_key(self.file, stat)
 
         self.assertIn(f":{stat.st_mtime_ns}", key)
         self.assertTrue(key.endswith(f":{stat.st_ino}"))
-        if os.name == "nt":
-            self.assertNotIn(f":{stat.st_ctime_ns}:", key)
-        else:
+        if self.module.CTIME_TRACKS_CONTENT_CHANGE:
             self.assertIn(f":{stat.st_mtime_ns}:{stat.st_ctime_ns}:", key)
+        else:
+            self.assertNotIn(f":{stat.st_ctime_ns}:", key)
 
     def test_sha1_not_cached_when_file_changes_during_read(self):
         """

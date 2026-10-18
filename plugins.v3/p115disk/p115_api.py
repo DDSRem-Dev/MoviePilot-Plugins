@@ -29,6 +29,13 @@ from .cache import IdPathCache, ItemIdCache
 from .tools import RateLimiter, get_ios_ua_app
 
 
+# 本平台的 st_ctime 是否随内容修改而变化。
+# POSIX 上 ctime 是 inode 状态变更时间，原地覆盖必然推进，可作为内容变更信号；
+# Windows 上 st_ctime 是创建时间，覆盖文件不会改变它，据其判断会得出「未变化」
+# 的错误结论，因此在那里不纳入 SHA1 缓存键。
+CTIME_TRACKS_CONTENT_CHANGE = os.name != "nt"
+
+
 def _build_download_path(fileitem: FileItem, base_path: Path) -> Optional[Path]:
     """
     构造限制在目标目录内的下载路径
@@ -965,8 +972,9 @@ class P115Api:
 
         - 纳秒级 mtime：常规写入必然变化；
         - 纳秒级 ctime：原地覆盖并强制保留 mtime（cp -p、utime 还原）时仍会变化。
-          仅 POSIX 有意义：Windows 上 st_ctime 是创建时间，覆盖文件不会改变它，
-          拿它做失效依据会给出「未变化」的错误结论，因此 Windows 下不纳入；
+          仅在本平台 ctime 随内容变化时纳入（见 CTIME_TRACKS_CONTENT_CHANGE）；
+          Windows 上 st_ctime 是创建时间，覆盖文件不改变它，拿它做失效依据会给出
+          「未变化」的错误结论，因此不纳入；
         - inode：同秒同大小但被替换成新文件时变化。
 
         :param filepath (Path): 文件路径
@@ -978,7 +986,7 @@ class P115Api:
         if mtime_ns is None:
             mtime_ns = int(file_stat.st_mtime * 1_000_000_000)
         inode = getattr(file_stat, "st_ino", 0)
-        if os.name == "nt":
+        if not CTIME_TRACKS_CONTENT_CHANGE:
             return f"{filepath.as_posix()}:{file_stat.st_size}:{mtime_ns}:{inode}"
         ctime_ns = getattr(file_stat, "st_ctime_ns", None)
         if ctime_ns is None:
