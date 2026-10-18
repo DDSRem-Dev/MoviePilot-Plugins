@@ -200,6 +200,67 @@ class TestDirectoryUploadRescan(TestCase):
         self.assertTrue(self.submitted[0][0].endswith("ep1.mkv"))
         self.assertTrue(self.logger.warning.called)
 
+    def test_rotate_entries_advances_start_directory(self) -> None:
+        """
+        每轮把起始监控目录后移一位，保证所有目录都能被优先扫描
+        """
+        rescan = self.rescan_cls()
+        entries = [
+            ("/media/a", "/strm/a"),
+            ("/media/b", "/strm/b"),
+            ("/media/c", "/strm/c"),
+        ]
+
+        first = rescan._rotate_entries(entries)
+        second = rescan._rotate_entries(entries)
+        third = rescan._rotate_entries(entries)
+        fourth = rescan._rotate_entries(entries)
+
+        self.assertEqual(first[0][0], "/media/a")
+        self.assertEqual(second[0][0], "/media/b")
+        self.assertEqual(third[0][0], "/media/c")
+        # 一轮结束回到起点，且顺序保持环形
+        self.assertEqual(fourth[0][0], "/media/a")
+        self.assertEqual(
+            [entry[0] for entry in second],
+            ["/media/b", "/media/c", "/media/a"],
+        )
+
+    def test_rotation_gives_every_directory_a_turn_at_full_limit(self) -> None:
+        """
+        前序目录长期占满额度时，后续目录仍能在轮转中拿到巡检机会
+
+        场景：目录 A 缺失文件远多于单轮上限，目录 B 只有一个漏传文件。
+        若固定从 A 开始，B 永远不会被提交；轮转后 B 在其作为起点的轮次被处理。
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            library_a = root / "a"
+            library_b = root / "b"
+            (library_a / "A").mkdir(parents=True)
+            (library_b / "B").mkdir(parents=True)
+            for index in range(5):
+                (library_a / "A" / f"ep{index}.mkv").write_text("v")
+            (library_b / "B" / "only.mkv").write_text("v")
+
+            rescan = self.rescan_cls()
+            rescan._max_submit = lambda: 2
+            entries = [(str(library_a), str(library_a)), (str(library_b), str(library_b))]
+
+            # 第一轮以 A 为起点，额度被 A 占满
+            rescan._tick(None, rescan._rotate_entries(entries))
+            first_round = list(self.submitted)
+            # 第二轮以 B 为起点，B 的漏传文件必须被提交
+            rescan._tick(None, rescan._rotate_entries(entries))
+            second_round = self.submitted[len(first_round):]
+
+        self.assertTrue(all("/a/" in path for path, _ in first_round))
+        self.assertEqual(len(first_round), 2)
+        # 第二轮起点是 B，B 的漏传文件优先于 A 的剩余文件被提交
+        self.assertEqual(Path(second_round[0][0]).name, "only.mkv")
+
     def test_tick_is_silent_when_nothing_is_missing(self) -> None:
         """
         没有漏传时只记录调试日志

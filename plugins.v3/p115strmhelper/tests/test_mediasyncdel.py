@@ -79,10 +79,11 @@ class TestMediaSyncDelHelper(TestCase):
         )
         helper.storagechain.list_files.return_value = [real_item]
 
-        result = helper._MediaSyncDelHelper__match_file_by_stem(
-            storage="115网盘Plus",
-            file_path="/MoviePilot/媒体库/demo/(48).mp4",
-        )
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/(48).mp4",
+            )
 
         self.assertIs(result, real_item)
 
@@ -119,12 +120,206 @@ class TestMediaSyncDelHelper(TestCase):
         helper.storagechain.get_file_item.side_effect = [None, object()]
         helper.storagechain.list_files.return_value = [real_item]
 
-        helper._MediaSyncDelHelper__delete_p115_files(
-            storage="115网盘Plus",
-            file_path="/MoviePilot/媒体库/demo/(48).mp4",
-            media_name="(48)",
-        )
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]):
+            helper._MediaSyncDelHelper__delete_p115_files(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/(48).mp4",
+                media_name="(48)",
+            )
 
         helper.storagechain.delete_media_file.assert_called_once_with(
             fileitem=real_item
         )
+
+    def test_match_file_by_stem_skips_sidecar_files(self):
+        """
+        同主干的字幕、NFO、封面必须被排除，不能当成待删除的媒体文件
+
+        场景：目录内同时存在 Movie (2020).nfo/.srt/.jpg 与 Movie (2020).mov，
+        Emby 上报 Container 为 mp4，兜底匹配只能命中 .mov。
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        sidecars = [
+            SimpleNamespace(
+                type="file",
+                basename="Movie (2020)",
+                extension=ext,
+                path=f"/MoviePilot/媒体库/demo/Movie (2020).{ext}",
+            )
+            for ext in ("nfo", "srt", "jpg")
+        ]
+        real_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mov",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mov",
+        )
+        # 旁挂文件排在视频之前，验证过滤而非“碰巧先遇到视频”
+        helper.storagechain.list_files.return_value = sidecars + [real_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIs(result, real_item)
+
+    def test_match_file_by_stem_returns_none_when_only_sidecars_exist(self):
+        """
+        目录内只有旁挂文件时返回 None，避免删除字幕或元数据
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        helper.storagechain.list_files.return_value = [
+            SimpleNamespace(
+                type="file",
+                basename="Movie (2020)",
+                extension="srt",
+                path="/MoviePilot/媒体库/demo/Movie (2020).srt",
+            )
+        ]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIsNone(result)
+
+    def test_match_file_by_stem_prefers_media_extension_order(self):
+        """
+        同主干存在多个媒体文件时按 RMT_MEDIAEXT 的偏好顺序确定性选择
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        avi_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="avi",
+            path="/MoviePilot/媒体库/demo/Movie (2020).avi",
+        )
+        mkv_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mkv",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mkv",
+        )
+        helper.storagechain.list_files.return_value = [avi_item, mkv_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".avi"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIs(result, mkv_item)
+
+    def test_match_file_by_stem_prefers_requested_extension(self):
+        """
+        候选中有与期望后缀一致的文件时优先选择它
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        mkv_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mkv",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mkv",
+        )
+        mp4_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mp4",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+        )
+        helper.storagechain.list_files.return_value = [mkv_item, mp4_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIs(result, mp4_item)
+
+    def test_match_file_by_stem_falls_back_to_sidecar_filter_without_mediaext(self):
+        """
+        未配置 RMT_MEDIAEXT 时退回排除已知旁挂后缀，仍不会误删字幕
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        srt_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="srt",
+            path="/MoviePilot/媒体库/demo/Movie (2020).srt",
+        )
+        mov_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mov",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mov",
+        )
+        helper.storagechain.list_files.return_value = [srt_item, mov_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", []):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIs(result, mov_item)
+
+    def test_get_p115_media_suffix_skips_sidecar_extension(self):
+        """
+        获取网盘媒体后缀时跳过同主干旁挂文件，返回真实媒体后缀
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        nfo_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="nfo",
+            path="/MoviePilot/媒体库/demo/Movie (2020).nfo",
+        )
+        mov_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mov",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mov",
+        )
+        helper.storagechain.list_files.return_value = [nfo_item, mov_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]), patch.object(
+            module.PathUtils,
+            "get_p115_media_path",
+            return_value=(
+                "",
+                [
+                    "/媒体库/电影/Movie (2020)",
+                    "x",
+                    "/MoviePilot/媒体库/电影/Movie (2020)",
+                ],
+            ),
+        ):
+            result = helper._MediaSyncDelHelper__get_p115_media_suffix(
+                "/媒体库/电影/Movie (2020)/Movie (2020).mp4",
+                "/媒体库#/MoviePilot/媒体库",
+            )
+
+        self.assertEqual(result, "mov")
