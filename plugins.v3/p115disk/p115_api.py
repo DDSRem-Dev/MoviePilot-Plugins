@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from threading import RLock
@@ -26,6 +27,13 @@ from app.sdk.logging import logger
 
 from .cache import IdPathCache, ItemIdCache
 from .tools import RateLimiter, get_ios_ua_app
+
+
+# 本平台的 st_ctime 是否随内容修改而变化。
+# POSIX 上 ctime 是 inode 状态变更时间，原地覆盖必然推进，可作为内容变更信号；
+# Windows 上 st_ctime 是创建时间，覆盖文件不会改变它，据其判断会得出「未变化」
+# 的错误结论，因此在那里不纳入 SHA1 缓存键。
+CTIME_TRACKS_CONTENT_CHANGE = os.name != "nt"
 
 
 def _build_download_path(fileitem: FileItem, base_path: Path) -> Optional[Path]:
@@ -66,7 +74,6 @@ class P115Api:
         self._copy_call_counter = 0
         self._move_call_counter = 0
         self._delete_call_counter = 0
-        self._get_pid_by_path_call_counter = 0
 
         self._get_item_rate_limiter = RateLimiter(
             max_calls=2, time_window=2.0, name="get_item"
@@ -87,6 +94,11 @@ class P115Api:
         self._get_item_fail_records: Dict[str, Dict[str, float]] = {}
         self._get_item_blacklist: Dict[str, float] = {}
 
+        # 整文件 SHA1 缓存：键为 路径:大小:mtime，避免重试/秒传重复哈希大文件
+        self._sha1_cache: Dict[str, str] = {}
+        self._sha1_cache_max = 64
+        self._sha1_lock = RLock()
+
     def get_pid_by_path(self, path: Path) -> int:
         """
         通过文件夹路径获取文件夹 ID
@@ -95,33 +107,56 @@ class P115Api:
 
         :return int: 目录 ID
         """
+        path_str = path.as_posix()
         try:
-            if path.as_posix() == "/":
+            if path_str == "/":
                 return 0
-            pid = self._id_cache.get_id_by_dir(directory=path.as_posix())
+            pid = self._id_cache.get_id_by_dir(directory=path_str)
             if pid:
                 return pid
             self._get_pid_by_path_rate_limiter.acquire()
-            self._get_pid_by_path_call_counter = (
-                self._get_pid_by_path_call_counter + 1
-            ) % 2
-            if self._get_pid_by_path_call_counter == 0:
-                resp = self.client.fs_dir_getid(
-                    path.as_posix(), **get_ios_ua_app(app=False)
-                )
-            else:
-                resp = self.client.fs_dir_getid_app(path.as_posix(), **get_ios_ua_app())
-            check_response(resp)
-            pid = resp.get("id", -1)
+            resp: Optional[Dict] = None
+            api_errors: List[str] = []
+            # app 接口优先，web 接口偶发 405，仅作为回退
+            for label, getter in (
+                (
+                    "app",
+                    lambda: self.client.fs_dir_getid_app(
+                        path_str, **get_ios_ua_app()
+                    ),
+                ),
+                (
+                    "web",
+                    lambda: self.client.fs_dir_getid(
+                        path_str, **get_ios_ua_app(app=False)
+                    ),
+                ),
+            ):
+                try:
+                    current = getter()
+                    check_response(current)
+                    resp = current
+                    break
+                except Exception as api_error:
+                    api_errors.append(f"{label}: {api_error}")
+            if resp is None:
+                raise OSError("; ".join(api_errors) or "获取文件夹ID失败")
+            # 115 返回的 id 是字符串，统一归一化为 int，保证 -1 判定与缓存键可靠
+            try:
+                pid = int(resp.get("id", -1))
+            except (TypeError, ValueError):
+                pid = -1
             if pid == 0:
                 resp = self.client.fs_makedirs_app(
-                    path.as_posix(), pid=0, **get_ios_ua_app()
+                    path_str, pid=0, **get_ios_ua_app()
                 )
                 check_response(resp)
-                pid = resp["cid"]
-                self._id_cache.add_cache(id=int(pid), directory=path.as_posix())
+                pid = int(resp["cid"])
+                self._id_cache.add_cache(id=pid, directory=path_str)
                 return pid
-            if pid != 0:
+            if pid > 0:
+                # 命中后写入路径缓存，避免后续 list 重复请求 115 接口
+                self._id_cache.add_cache(id=pid, directory=path_str)
                 return pid
             return -1
         except Exception as e:
@@ -888,20 +923,153 @@ class P115Api:
 
         :param filepath (Path): 文件路径
         :param size (int): 前多少字节，为 None 则计算整个文件
+
+        :raises InterruptedError: 传输被取消
         """
         sha1 = hashes.Hash(hashes.SHA1())
-        with open(filepath, "rb") as f:
-            if size:
-                chunk = f.read(size)
+        if size:
+            with open(filepath, "rb") as f:
                 if global_vars.is_transfer_stopped(filepath.as_posix()):
                     raise InterruptedError
+                chunk = f.read(size)
+            sha1.update(chunk)
+            return sha1.finalize().hex()
+
+        # 大分块读取：8KB → 8MB，并降低取消检查频率（每块查一次约 200k 次函数调用）
+        chunk_size = 8 * 1024 * 1024
+        path_str = filepath.as_posix()
+        with open(filepath, "rb") as f:
+            P115Api._hint_sequential_read(f)
+            while chunk := f.read(chunk_size):
+                if global_vars.is_transfer_stopped(path_str):
+                    raise InterruptedError
                 sha1.update(chunk)
-            else:
-                while chunk := f.read(8192):
-                    if global_vars.is_transfer_stopped(filepath.as_posix()):
-                        raise InterruptedError
-                    sha1.update(chunk)
         return sha1.finalize().hex()
+
+    @staticmethod
+    def _hint_sequential_read(fileobj) -> None:
+        """
+        向内核声明顺序读，触发预读以减少大文件哈希的随机停顿
+
+        :param fileobj: 已打开的文件对象
+        """
+        fadvise = getattr(os, "posix_fadvise", None)
+        if fadvise is None:
+            return
+        try:
+            fadvise(fileobj.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+        except (OSError, ValueError):
+            pass
+
+    @staticmethod
+    def _sha1_cache_key(filepath: Path, file_stat: os.stat_result) -> str:
+        """
+        构造文件 SHA1 缓存键
+
+        必须能唯一标识「当前文件内容」。仅用秒级 mtime 时，同路径、同字节数、
+        且 mtime 落在同一秒内的替换文件会命中旧哈希，进而把旧文件身份用于
+        115 秒传校验。因此改用：
+
+        - 纳秒级 mtime：常规写入必然变化；
+        - 纳秒级 ctime：原地覆盖并强制保留 mtime（cp -p、utime 还原）时仍会变化。
+          仅在本平台 ctime 随内容变化时纳入（见 CTIME_TRACKS_CONTENT_CHANGE）；
+          Windows 上 st_ctime 是创建时间，覆盖文件不改变它，拿它做失效依据会给出
+          「未变化」的错误结论，因此不纳入；
+        - inode：同秒同大小但被替换成新文件时变化。
+
+        :param filepath (Path): 文件路径
+        :param file_stat (os.stat_result): 文件的 os.stat 结果
+
+        :return str: 缓存键
+        """
+        mtime_ns = getattr(file_stat, "st_mtime_ns", None)
+        if mtime_ns is None:
+            mtime_ns = int(file_stat.st_mtime * 1_000_000_000)
+        inode = getattr(file_stat, "st_ino", 0)
+        if not CTIME_TRACKS_CONTENT_CHANGE:
+            return f"{filepath.as_posix()}:{file_stat.st_size}:{mtime_ns}:{inode}"
+        ctime_ns = getattr(file_stat, "st_ctime_ns", None)
+        if ctime_ns is None:
+            ctime_ns = int(file_stat.st_ctime * 1_000_000_000)
+        return (
+            f"{filepath.as_posix()}:{file_stat.st_size}:"
+            f"{mtime_ns}:{ctime_ns}:{inode}"
+        )
+
+    def _get_cached_sha1(self, filepath: Path) -> Optional[str]:
+        """
+        读取文件 SHA1 缓存（键为路径 + 大小 + 纳秒 mtime + inode）
+
+        读取路径只做查询，不做容量清理：写入路径已保证条目数不超过上限，
+        若在查询前清空会让下一次查询必然 miss，反而使刚写入的哈希失效。
+
+        :param filepath (Path): 文件路径
+
+        :return str: 命中返回 SHA1，未命中返回 None
+        """
+        try:
+            file_stat = filepath.stat()
+        except OSError:
+            return None
+        key = self._sha1_cache_key(filepath, file_stat)
+        with self._sha1_lock:
+            return self._sha1_cache.get(key)
+
+    def _store_cached_sha1(
+        self, filepath: Path, value: str, expected_key: Optional[str] = None
+    ) -> None:
+        """
+        写入文件 SHA1 缓存
+
+        :param filepath (Path): 文件路径
+        :param value (str): 计算得到的 SHA1
+        :param expected_key (str): 读取开始前的缓存键。给出时只有当前文件状态
+            仍与该键一致才写入，避免把旧内容的哈希挂到新状态的键上
+        """
+        try:
+            file_stat = filepath.stat()
+        except OSError:
+            return
+        key = self._sha1_cache_key(filepath, file_stat)
+        if expected_key is not None and key != expected_key:
+            logger.debug(
+                f"【P115Disk】SHA1 读取期间文件状态变化，跳过缓存: {filepath.name}"
+            )
+            return
+        with self._sha1_lock:
+            if len(self._sha1_cache) > self._sha1_cache_max:
+                self._sha1_cache.clear()
+            self._sha1_cache[key] = value
+
+    def _sha1_with_cache(self, filepath: Path) -> str:
+        """
+        计算文件 SHA1，命中缓存时直接返回
+
+        上传重试、重复上传同一文件（常见于秒传场景）可省去整文件哈希。
+
+        :param filepath (Path): 文件路径
+
+        :return str: 文件 SHA1
+        """
+        cached = self._get_cached_sha1(filepath)
+        if cached:
+            logger.debug(f"【P115Disk】SHA1 命中缓存: {filepath}")
+            return cached
+        # 读取前记录文件状态，读完再比对：读取期间文件被写入或替换时，
+        # 这段内容对应的哈希不能挂到新状态的键上，否则重试会拿到不匹配的值
+        begin_key = None
+        try:
+            begin_key = self._sha1_cache_key(filepath, filepath.stat())
+        except OSError:
+            pass
+        started = monotonic()
+        value = self._calc_sha1(filepath)
+        self._store_cached_sha1(filepath, value, expected_key=begin_key)
+        logger.info(
+            f"【P115Disk】SHA1 计算完成: {filepath.name} "
+            f"耗时 {monotonic() - started:.1f}s"
+        )
+        return value
 
     def _get_oss_token(self) -> Tuple[str, str, str, str, datetime]:
         """
@@ -978,10 +1146,10 @@ class P115Api:
             return None
         target_pid = target_dir_item.fileid
 
-        # 计算文件特征值
+        # 计算文件特征值（命中 SHA1 缓存时跳过整文件哈希）
         file_size = local_path.stat().st_size
         try:
-            file_sha1 = self._calc_sha1(local_path)
+            file_sha1 = self._sha1_with_cache(local_path)
         except InterruptedError:
             logger.info(f"【P115Disk】{local_path} 上传已取消！")
             return None
