@@ -128,7 +128,7 @@
         "name": "115网盘STRM助手",
         "description": "115网盘STRM生成一条龙服务",
         "labels": "云盘",
-        "version": "2.8.78",
+        "version": "2.8.79",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "release": true,
@@ -136,6 +136,7 @@
         "system_version": ">=2.13.14",
         "level": 1,
         "history": {
+            "v2.8.79": "- 修复清空 STRM 文件内链接地址时配置保存失败或后续配置加载中断的问题，统一处理空字符串与纯空白并保留其他设置（#476）\n- 未配置地址时明确提示补全配置，避免生成缺少域名的 STRM 链接；完善前端空值处理和填写提示",
             "v2.8.78": "- 修复 115 秒传结果使用显示大小换算导致文件大小不准确的问题，优先读取精确字节数，缺失时使用本地源文件大小（#475）\n- 优化 Emby 新文件发现与媒体库刷新，避免触发父目录全量刷新；发现通知不可用时回退到普通媒体库扫描，并合并并发扫描请求（#470）\n- 修复跨平台部署时 Emby 远端路径校验错误，兼容 POSIX、Windows 盘符及 UNC 路径；优化媒体信息提取等待和停止处理\n- V2、V3 前端独立构建与打包；更新 Rust 组件构建依赖及预编译 wheel",
             "v2.8.77": "同步更新依赖版本",
             "v2.8.76": "适配 RE0（原 HDHive）新域名及签到、搜索、解锁流程；完善 Cloudflare 验证、登录与首次偏好设置处理；优化搜索速度和稳定性",
