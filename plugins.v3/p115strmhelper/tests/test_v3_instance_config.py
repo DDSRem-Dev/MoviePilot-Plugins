@@ -484,6 +484,24 @@ class TestV3InstanceConfig(TestCase):
         self.assertEqual(config.model_dump(), before)
         self.assertTrue(token.exists())
 
+    def test_empty_address_survives_host_construction_and_initialization(self) -> None:
+        """
+        已保存的空地址配置可重新构造和初始化插件，且持久化为 null
+        """
+        for value in (None, "", " \t\n"):
+            with self.subTest(value=value):
+                persisted = {"moviepilot_address": value, "notify": True}
+                entry_type, config, _, api_factory, _ = self._entry_type(persisted)
+                entry = entry_type()
+                entry.init_plugin(persisted)
+                self.assertIsNone(config.moviepilot_address)
+                self.assertTrue(config.notify)
+                self.assertIsNotNone(entry.action_handler)
+                api_factory.assert_called_once_with(client=None)
+                payload = entry.update_config.call_args.args[0]
+                self.assertIsNone(payload["moviepilot_address"])
+                self.assertTrue(payload["notify"])
+
     def test_reinitialize_refuses_config_change_while_stop_is_pending(self) -> None:
         """
         初始化入口关停未完成时保留旧配置和服务归属

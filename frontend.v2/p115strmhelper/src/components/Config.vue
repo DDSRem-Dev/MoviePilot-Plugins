@@ -105,7 +105,7 @@
                       </v-text-field>
                     </v-col>
                     <v-col cols="12" md="4">
-                      <v-text-field v-model="config.moviepilot_address" label="STRM 文件内链接地址" hint="点右侧图标自动填充当前站点地址。"
+                      <v-text-field v-model="config.moviepilot_address" label="STRM 文件内链接地址" hint="留空时无法生成 STRM。点右侧图标自动填充当前站点地址。"
                         persistent-hint density="compact" variant="outlined" hide-details="auto">
                         <template v-slot:append>
                           <v-icon icon="mdi-web" @click="setMoviePilotAddressToCurrentOrigin" aria-label="使用当前站点地址"
@@ -756,6 +756,7 @@ const saveConfig = async () => {
   message.text = '';
   message.type = 'info';
   try {
+    config.moviepilot_address = config.moviepilot_address?.trim() || null;
     // 文件大小输入框：从 ref 同步到 config 再提交
     config.upload_module_skip_upload_wait_size = parseSize(skipUploadWaitSizeFormattedRef.value) || 0;
     config.upload_module_force_upload_wait_size = parseSize(forceUploadWaitSizeFormattedRef.value) || 0;

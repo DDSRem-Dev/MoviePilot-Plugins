@@ -388,13 +388,16 @@ class StrmUrlGetter:
     获取 Strm URL
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         初始化 STRM URL 获取器，加载 URL 模板解析器
         """
         self.strm_url_encode = configer.strm_url_encode
 
-        self.base_url_cache = f"{configer.moviepilot_address.rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url"
+        address = (configer.moviepilot_address or "").strip().rstrip("/")
+        self.base_url_cache = (
+            f"{address}/api/v1/plugin/P115StrmHelper/redirect_url" if address else ""
+        )
 
         self.url_template_resolver = None
         if configer.strm_url_template_enabled:
@@ -416,7 +419,10 @@ class StrmUrlGetter:
         :param file_path (str): 文件网盘路径
 
         :return str: STRM URL 字符串
+
+        :raises ValueError: 未配置 STRM 文件内链接地址
         """
+        self._require_base_url()
         if self.url_template_resolver:
             try:
                 result = self.url_template_resolver.render(
@@ -469,7 +475,10 @@ class StrmUrlGetter:
         :param file_path (str): 文件网盘路径
 
         :return str: 分享 STRM URL 字符串
+
+        :raises ValueError: 未配置 STRM 文件内链接地址
         """
+        self._require_base_url()
         if self.url_template_resolver:
             try:
                 result = self.url_template_resolver.render(
@@ -490,6 +499,10 @@ class StrmUrlGetter:
             strm_url += f"&file_name={file_name}"
 
         return strm_url
+
+    def _require_base_url(self) -> None:
+        if not self.base_url_cache:
+            raise ValueError("请先在基础设置中填写 STRM 文件内链接地址，再生成 STRM")
 
 
 class StrmGenerater:

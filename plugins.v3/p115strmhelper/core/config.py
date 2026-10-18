@@ -175,6 +175,13 @@ class ConfigManager(BaseModel):
         validate_assignment=True,
     )
 
+    @field_validator("moviepilot_address", mode="before")
+    @classmethod
+    def _normalize_moviepilot_address(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
     @field_validator(
         "cron_full_sync_strm", "increment_sync_cron", "cron_clear", mode="before"
     )
