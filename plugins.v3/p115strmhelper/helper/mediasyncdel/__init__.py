@@ -633,6 +633,35 @@ class MediaSyncDelHelper:
             return "", []
         return msg, transfer_history
 
+    def __match_file_by_stem(self, storage: str, file_path: str):
+        """
+        按文件名主干在父目录中查找网盘真实文件
+
+        用于 Emby 上报的容器格式与网盘扩展名不一致的场景，
+        例如 115 上的 (48).mov 被 Emby 识别为 mp4。
+
+        :param storage (str): 储存类型
+        :param file_path (str): 按 Emby 容器格式拼出的期望路径
+
+        :return FileItem: 匹配到的文件项，未找到返回 None
+        """
+        try:
+            path = Path(file_path)
+            parent_item = self.storagechain.get_file_item(
+                storage=storage, path=path.parent
+            )
+            if not parent_item:
+                return None
+            for item in self.storagechain.list_files(parent_item) or []:
+                if item.type == "file" and item.basename == path.stem:
+                    logger.info(
+                        f"【同步删除】按文件名主干匹配到网盘真实文件：{item.path}"
+                    )
+                    return item
+        except Exception as e:
+            logger.warn(f"【同步删除】按文件名主干匹配网盘文件失败：{e}")
+        return None
+
     def __delete_p115_files(self, storage: str, file_path: str, media_name: str):
         """
         删除 115 网盘文件
@@ -648,6 +677,12 @@ class MediaSyncDelHelper:
             fileitem = self.storagechain.get_file_item(
                 storage=storage, path=Path(file_path)
             )
+            if not fileitem:
+                # 兜底：Emby 上报的 Container 可能与网盘真实扩展名不一致
+                # （例如 mov 文件被识别为 mp4），此时按文件名主干在父目录中匹配真实文件
+                fileitem = self.__match_file_by_stem(
+                    storage=storage, file_path=file_path
+                )
             if not fileitem:
                 logger.warn(f"【同步删除】{media_name} 网盘媒体不存在：{file_path}")
                 return

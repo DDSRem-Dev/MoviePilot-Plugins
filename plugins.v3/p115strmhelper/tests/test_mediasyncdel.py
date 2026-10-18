@@ -7,7 +7,7 @@ MediaSyncDelHelper 测试模块
 import importlib
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -61,3 +61,70 @@ class TestMediaSyncDelHelper(TestCase):
 
         self.assertEqual(result, "iso")
         helper.storagechain.get_file_item.assert_not_called()
+
+    def test_match_file_by_stem_falls_back_to_real_extension(self):
+        """
+        精确路径不存在时按文件名主干匹配网盘真实文件
+
+        场景：115 上是 (48).mov，Emby 上报的 Container 为 mp4。
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        real_item = SimpleNamespace(
+            type="file",
+            basename="(48)",
+            path="/MoviePilot/媒体库/demo/(48).mov",
+        )
+        helper.storagechain.list_files.return_value = [real_item]
+
+        result = helper._MediaSyncDelHelper__match_file_by_stem(
+            storage="115网盘Plus",
+            file_path="/MoviePilot/媒体库/demo/(48).mp4",
+        )
+
+        self.assertIs(result, real_item)
+
+    def test_match_file_by_stem_returns_none_without_parent(self):
+        """
+        父目录不存在时按主干匹配返回 None，不抛异常
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = None
+
+        result = helper._MediaSyncDelHelper__match_file_by_stem(
+            storage="115网盘Plus",
+            file_path="/MoviePilot/媒体库/missing/(48).mp4",
+        )
+
+        self.assertIsNone(result)
+        helper.storagechain.list_files.assert_not_called()
+
+    def test_delete_p115_files_uses_stem_fallback(self):
+        """
+        网盘文件与 Emby 容器后缀不一致时，仍能删除真实文件
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        real_item = SimpleNamespace(
+            type="file",
+            basename="(48)",
+            path="/MoviePilot/媒体库/demo/(48).mov",
+        )
+        # 第一次按期望路径查文件返回 None，第二次查父目录成功
+        helper.storagechain.get_file_item.side_effect = [None, object()]
+        helper.storagechain.list_files.return_value = [real_item]
+
+        helper._MediaSyncDelHelper__delete_p115_files(
+            storage="115网盘Plus",
+            file_path="/MoviePilot/媒体库/demo/(48).mp4",
+            media_name="(48)",
+        )
+
+        helper.storagechain.delete_media_file.assert_called_once_with(
+            fileitem=real_item
+        )

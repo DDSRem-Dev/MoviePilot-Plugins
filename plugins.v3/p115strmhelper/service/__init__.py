@@ -17,7 +17,10 @@ from ..core.p115 import get_pid_by_path
 from ..helper.clean import Cleaner
 from ..helper.life import MonitorLife
 from ..helper.mediainfo_download import MediaInfoDownloader
-from ..helper.monitor import directory_upload_stability_tracker
+from ..helper.monitor import (
+    directory_upload_rescan,
+    directory_upload_stability_tracker,
+)
 from ..helper.monitor.directory_upload_queue import (
     DirectoryUploadTask,
     directory_upload_queue,
@@ -670,6 +673,7 @@ class ServiceHelper:
             ]
             directory_upload_queue.start()
             directory_upload_stability_tracker.start(self.client, active_mon_paths)
+            directory_upload_rescan.start(self.client, active_mon_paths)
             for item in configer.directory_upload_path or []:
                 if not item:
                     continue
@@ -877,6 +881,7 @@ class ServiceHelper:
             for name, component in (
                 ("目录上传稳定性跟踪", directory_upload_stability_tracker),
                 ("目录上传", directory_upload_queue),
+                ("目录上传漏传巡检", directory_upload_rescan),
             ):
                 try:
                     if component.stop() is False:
