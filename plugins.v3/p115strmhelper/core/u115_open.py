@@ -76,6 +76,63 @@ class U115OpenHelper:
             slow_timeout=configer.get_slow_timeout(),
         )
 
+    @staticmethod
+    def _secupload_recheck_interval() -> int:
+        """
+        获取分片上传期间复判秒传的间隔
+
+        :return int: 间隔秒数，0 表示关闭复判
+        """
+        if not configer.get_config("upload_module_recheck_secupload"):
+            return 0
+        interval = int(
+            configer.get_config("upload_module_recheck_secupload_interval") or 0
+        )
+        if interval <= 0:
+            interval = 5 * 60
+        return max(interval, 60)
+
+    def _recheck_secupload(
+        self,
+        target_name: str,
+        file_size: int,
+        target_param: str,
+        file_sha1: str,
+        file_preid: str,
+    ) -> bool:
+        """
+        分片上传期间复判一次秒传
+
+        只提交基础字段，不复用二次认证的 sign_key 与 sign_val
+
+        :param target_name (str): 目标文件名
+        :param file_size (int): 文件大小
+        :param target_param (str): 目标目录参数
+        :param file_sha1 (str): 文件 SHA1
+        :param file_preid (str): 文件前 128MB 的 SHA1
+
+        :return bool: 命中秒传返回 True
+        """
+        try:
+            resp = self._request_api(
+                "POST",
+                "/open/upload/init",
+                data={
+                    "file_name": target_name,
+                    "file_size": file_size,
+                    "target": target_param,
+                    "fileid": file_sha1,
+                    "preid": file_preid,
+                },
+                timeout=120.0,
+            )
+        except Exception as e:
+            logger.warn(f"【P115Open】分片上传期间复判秒传失败: {e}")
+            return False
+        if not resp or not resp.get("state"):
+            return False
+        return (resp.get("data") or {}).get("status") == 2
+
     @property
     def access_token(self) -> Optional[str]:
         """
@@ -314,6 +371,28 @@ class U115OpenHelper:
         file_size = local_path.stat().st_size
         file_sha1 = self._calc_sha1(local_path)
         file_preid = self._calc_sha1(local_path, 128 * 1024 * 1024)
+
+        def send_secupload_result(elapsed_time: float) -> None:
+            """
+            按秒传成功发送通知
+
+            :param elapsed_time (float): 本次上传耗时（秒）
+            """
+            send_upload_info(
+                file_sha1,
+                file_preid,
+                False,
+                "",
+                str(file_size),
+                target_name,
+                int(elapsed_time),
+            )
+            send_upload_result_notify(
+                success=True,
+                target_name=target_name,
+                file_size=file_size,
+                elapsed_time=elapsed_time,
+            )
 
         # 获取目标目录CID
         target_cid = target_dir.fileid
@@ -629,6 +708,8 @@ class U115OpenHelper:
                 return None
 
             parts = []
+            recheck_interval = self._secupload_recheck_interval()
+            last_recheck = perf_counter()
             # 逐个上传分片
             with open(local_path, "rb") as fileobj:
                 part_number = 1
@@ -715,6 +796,31 @@ class U115OpenHelper:
                     # 更新进度
                     progress = (offset * 100) / file_size
                     progress_callback(progress)
+
+                    if (
+                        recheck_interval > 0
+                        and perf_counter() - last_recheck >= recheck_interval
+                    ):
+                        last_recheck = perf_counter()
+                        if self._recheck_secupload(
+                            target_name,
+                            file_size,
+                            target_param,
+                            file_sha1,
+                            file_preid,
+                        ):
+                            logger.info(
+                                f"【P115Open】{target_name} 分片上传期间命中秒传，"
+                                f"中止剩余分片"
+                            )
+                            try:
+                                bucket.abort_multipart_upload(object_name, upload_id)
+                            except Exception as e:
+                                logger.warn(
+                                    f"【P115Open】中止分片上传失败: {e}"
+                                )
+                            send_secupload_result(perf_counter() - start_time)
+                            return U115OpenHelper._delay_get_item(target_path)
         except Exception as e:
             logger.error(f"【P115Open】{target_name} 分块生成出现未知错误: {e}")
             return None
