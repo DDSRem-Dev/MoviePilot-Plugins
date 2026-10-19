@@ -442,6 +442,8 @@ const config = reactive({
   upload_module_skip_upload_wait_size: 0,
   upload_module_force_upload_wait_size: 0,
   upload_module_skip_slow_upload_size: 0,
+  upload_module_recheck_secupload: false,
+  upload_module_recheck_secupload_interval: 300,
   upload_open_result_notify: false,
   upload_share_info: true,
   upload_offline_info: true,

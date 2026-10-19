@@ -38,6 +38,56 @@ class P115DiskCore:
         self._p115_api = p115_api
         self.p115_center = P115Center(configer.get_config("machine_id"))
 
+    @staticmethod
+    def _secupload_recheck_interval() -> int:
+        """
+        获取分片上传期间复判秒传的间隔
+
+        :return int: 间隔秒数，0 表示关闭复判
+        """
+        if not configer.get_config("upload_module_recheck_secupload"):
+            return 0
+        interval = int(
+            configer.get_config("upload_module_recheck_secupload_interval") or 0
+        )
+        if interval <= 0:
+            interval = 5 * 60
+        return max(interval, 60)
+
+    def _recheck_secupload(
+        self,
+        target_name: str,
+        file_size: int,
+        file_sha1: str,
+        target_pid: Any,
+        read_range_hash: Any,
+    ) -> bool:
+        """
+        分片上传期间复判一次秒传
+
+        :param target_name (str): 目标文件名
+        :param file_size (int): 文件大小
+        :param file_sha1 (str): 文件 SHA1
+        :param target_pid (Any): 目标目录 ID
+        :param read_range_hash (Any): 区间哈希计算函数
+
+        :return bool: 命中秒传返回 True
+        """
+        try:
+            resp = self._p115_api.client.upload_file_init(
+                filename=target_name,
+                filesize=file_size,
+                filesha1=file_sha1,
+                pid=target_pid,
+                read_range_bytes_or_hash=read_range_hash,
+            )
+        except Exception as e:
+            logger.warn(f"【P115Disk】{target_name} 分片上传期间复判秒传失败: {e}")
+            return False
+        if not isinstance(resp, dict) or not resp.get("state"):
+            return False
+        return bool(resp.get("reuse"))
+
     def upload(
         self,
         target_dir: FileItem,
@@ -183,6 +233,32 @@ class P115DiskCore:
         logger.info(f"【P115Disk】开始上传: {local_path} -> {target_path}")
         progress_callback = transfer_process(local_path.as_posix())
 
+        def finish_by_secupload(elapsed_time: float) -> Optional[FileItem]:
+            """
+            按秒传成功收尾
+
+            :param elapsed_time (float): 本次上传耗时（秒）
+
+            :return FileItem: 网盘文件项
+            """
+            progress_callback(100)
+            send_upload_info(
+                file_sha1,
+                "",
+                True,
+                "",
+                str(file_size),
+                target_name,
+                int(elapsed_time),
+            )
+            send_upload_result_notify(
+                success=True,
+                target_name=target_name,
+                file_size=file_size,
+                elapsed_time=elapsed_time,
+            )
+            return self._p115_api.get_item(target_path)
+
         try:
             wait_start_time = perf_counter()
             send_wait = False
@@ -243,25 +319,7 @@ class P115DiskCore:
                 # 检查是否秒传成功
                 if init_resp.get("reuse"):
                     logger.info(f"【P115Disk】{target_name} 秒传成功")
-                    progress_callback(100)
-                    end_time = perf_counter()
-                    elapsed_time = end_time - start_time
-                    send_upload_info(
-                        file_sha1,
-                        "",
-                        True,
-                        "",
-                        str(file_size),
-                        target_name,
-                        int(elapsed_time),
-                    )
-                    send_upload_result_notify(
-                        success=True,
-                        target_name=target_name,
-                        file_size=file_size,
-                        elapsed_time=elapsed_time,
-                    )
-                    return self._p115_api.get_item(target_path)
+                    return finish_by_secupload(perf_counter() - start_time)
 
                 # 判断是等待秒传还是直接上传
                 upload_module_skip_upload_wait_size = int(
@@ -401,6 +459,8 @@ class P115DiskCore:
                 object_name, params={"encoding-type": "url", "sequential": ""}
             ).upload_id
             parts = []
+            recheck_interval = self._secupload_recheck_interval()
+            last_recheck = perf_counter()
 
             # 逐个上传分片并更新进度
             with open(local_path, "rb") as fileobj:
@@ -499,6 +559,30 @@ class P115DiskCore:
                     progress = (offset * 100) / file_size
                     progress_callback(progress)
                     logger.debug(f"【P115Disk】上传进度: {progress:.1f}%")
+
+                    if (
+                        recheck_interval > 0
+                        and perf_counter() - last_recheck >= recheck_interval
+                    ):
+                        last_recheck = perf_counter()
+                        if self._recheck_secupload(
+                            target_name,
+                            file_size,
+                            file_sha1,
+                            target_pid,
+                            read_range_hash,
+                        ):
+                            logger.info(
+                                f"【P115Disk】{target_name} 分片上传期间命中秒传，"
+                                f"中止剩余分片"
+                            )
+                            try:
+                                bucket.abort_multipart_upload(object_name, upload_id)
+                            except Exception as e:
+                                logger.warn(
+                                    f"【P115Disk】中止分片上传失败: {e}"
+                                )
+                            return finish_by_secupload(perf_counter() - start_time)
 
             # 完成上传
             progress_callback(100)
