@@ -378,6 +378,7 @@ class U115OpenHelper:
 
             :param elapsed_time (float): 本次上传耗时（秒）
             """
+            progress_callback(100)
             send_upload_info(
                 file_sha1,
                 file_preid,
