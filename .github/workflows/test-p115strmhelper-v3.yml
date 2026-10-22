@@ -77,7 +77,7 @@ jobs:
           postgres-version: '17'
 
       - name: Set up uv and standard Python
-        uses: astral-sh/setup-uv@v10.3.0
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           version: '0.13.1'
           python-version: '3.14'
