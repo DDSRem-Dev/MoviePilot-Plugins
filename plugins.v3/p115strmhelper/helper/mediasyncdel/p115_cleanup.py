@@ -346,10 +346,13 @@ class P115Cleaner:
         except ValueError:
             return 0
 
-    def _scan_tree(self, d: Any) -> Tuple[List[Any], List[Any]]:
+    def _scan_tree(
+        self, d: Any, stop_on_video: bool = False
+    ) -> Optional[Tuple[List[Any], List[Any]]]:
         """
         遍历子树，返回 (所有文件, 所有子目录)。列表失败、类型未知、嵌套过深、条目过多均抛异常，
-        调用方一律视为失败（绝不当作空目录）。
+        调用方一律视为失败（绝不当作空目录）。stop_on_video=True 时一旦发现视频/strm 立即返回
+        None（用于判断“是否已无视频”：大合集目录不必为此遍历整棵树，避免大量 115 请求）。
         """
         files: List[Any] = []
         dirs: List[Any] = []
@@ -359,7 +362,13 @@ class P115Cleaner:
             cur, depth = stack.pop()
             if depth > MAX_DIR_DEPTH:
                 raise ValueError(f"目录嵌套过深: {cur.path}")
-            for it in self._list(cur):
+            listing = self._list(cur)
+            if stop_on_video and any(
+                getattr(it, "type", "") == "file" and _ext_of(it.name) in self.video_exts
+                for it in listing
+            ):
+                return None
+            for it in listing:
                 entries += 1
                 if entries > MAX_DIR_ENTRIES:
                     raise ValueError(f"目录条目过多(>{MAX_DIR_ENTRIES})")
@@ -385,10 +394,14 @@ class P115Cleaner:
         if not self.purge_leftovers or self._depth_below_root(d.path, root) < MIN_PURGE_DEPTH_BELOW_ROOT:
             return None
         try:
-            f1, d1 = self._scan_tree(d)
-            if self._video_paths(f1):
+            first = self._scan_tree(d, stop_on_video=True)
+            if first is None:
                 return None
-            f2, d2 = self._scan_tree(d)
+            f1, d1 = first
+            second = self._scan_tree(d, stop_on_video=True)
+            if second is None:
+                return None
+            f2, d2 = second
         except Exception:
             return None
         same = {_posix(x.path) for x in f1} == {_posix(x.path) for x in f2} and {

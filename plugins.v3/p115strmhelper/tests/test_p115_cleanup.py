@@ -775,3 +775,25 @@ class Review2(TestCase):
         r = dgroup(c, SHOW)
         self.assertFalse(r.ok)
         self.assertEqual(c.deleted, [])
+
+
+class BigCollectionEarlyExit(TestCase):
+    def test_climb_does_not_walk_whole_collection(self):
+        coll = f"{ROOT}/合集/演员"
+        files = [f"{coll}/W{i:04d}/W{i:04d}.mkv" for i in range(300)]
+        files.append(f"{coll}/Target/Target.mkv")
+        c = FakeChain(files)
+        calls = {"n": 0}
+        orig = c.list_files
+
+        def counting(item, recursion=False):
+            calls["n"] += 1
+            return orig(item, recursion)
+
+        c.list_files = counting
+        r = cleaner(c).delete_video_group("u115", f"{coll}/Target/Target.mkv", ROOT)
+        self.assertTrue(r.ok, r)
+        self.assertNotIn(f"{coll}/Target", c.dirs)
+        self.assertIn(coll, c.dirs)
+        self.assertLess(calls["n"], 30)
+        self.assertEqual(len([f for f in c.files if "/W" in f]), 300)
