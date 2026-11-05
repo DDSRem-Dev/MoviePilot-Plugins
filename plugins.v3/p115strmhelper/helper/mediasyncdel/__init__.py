@@ -27,6 +27,7 @@ from .p115_cleanup import (
     select_video_suffix,
     valid_container_suffix,
     dir_event_allowed,
+    is_video_library_item,
     looks_like_media_file,
 )
 from ...core.config import configer
@@ -745,6 +746,18 @@ class MediaSyncDelHelper:
         episode_num = event_data.episode_id
         # 原始数据
         json_object = getattr(event_data, "json_object", {})
+
+        # 仅限视频库：音乐/照片/图书/合集等条目不做同步删除
+        _raw_type = (
+            json_object.get("Item", {}).get("Type")
+            if isinstance(json_object, dict)
+            else None
+        )
+        if not is_video_library_item(_raw_type):
+            logger.warn(
+                f"【同步删除】{media_name} 条目类型 {_raw_type} 不属于视频库，跳过"
+            )
+            return None
 
         # 对于 Emby 新版本 API 单独处理，兼容季删除
         if json_object.get("Item", {}).get("Type", None) == "Season":

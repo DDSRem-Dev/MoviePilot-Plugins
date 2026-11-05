@@ -708,3 +708,26 @@ class PurgeHardening(TestCase):
         self.assertTrue(r.ok, r)
         self.assertIn(f"{SHOW}/Season 2/b.mkv", c.files)
         self.assertNotIn(f"{SHOW}/Season 1", c.dirs)
+
+
+class VideoLibraryOnly(TestCase):
+    def test_allowed_types(self):
+        for t in ("Movie", "Episode", "Season", "Series", "Video", "MusicVideo"):
+            self.assertTrue(mod.is_video_library_item(t), t)
+
+    def test_rejected_types(self):
+        rejected = (
+            "Audio", "MusicAlbum", "MusicArtist", "Photo", "PhotoAlbum", "Book",
+            "AudioBook", "BoxSet", "Folder", "CollectionFolder", "Playlist",
+            "", None, "movie",
+        )
+        for t in rejected:
+            self.assertFalse(mod.is_video_library_item(t), t)
+
+    def test_audio_file_never_a_deletion_target(self):
+        # 即使事件被放行，音频文件也不是视频目标
+        c = FakeChain([f"{M}/track.mp3", f"{M}/track.flac"])
+        for name in ("track.mp3", "track.flac"):
+            r = cleaner(c).delete_video_group("u115", f"{M}/{name}", ROOT)
+            self.assertFalse(r.ok)
+        self.assertEqual(c.deleted, [])
