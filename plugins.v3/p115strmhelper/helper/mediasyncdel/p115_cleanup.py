@@ -1,6 +1,10 @@
 """
 115 网盘同步删除：精确的“视频 + 外挂字幕 + 残留文件 + 空目录”清理计划与执行
 
+适用范围：仅限视频库（电影/电视剧/动漫等，Emby 条目类型 Movie/Episode/Season/Series/Video/MusicVideo）。
+音乐、照片、图书、合集等其他类型的删除事件一律不处理；映射路径应只指向纯视频库目录，
+因为子树内无视频/strm 后会清理其余全部文件。
+
 契约：
 - 单视频：目标为调用方给出的精确视频路径，不做模糊候选选择；目标是目录/非视频则拒绝。
 - 外挂字幕仅匹配 ``<视频主名>(.<标记>){0,3}.<字幕扩展名>``，主名后必须紧跟 ``.``，
@@ -48,6 +52,18 @@ def _stem_of(name: str) -> str:
 
 def _posix(path: Any) -> str:
     return str(path).replace("\\", "/").rstrip("/") or "/"
+
+
+# 仅限视频库：只处理这些 Emby 条目类型（MoviePilot 会把 MusicAlbum/Photo/Book/BoxSet 等
+# 其余类型统一标成 MOV，不能靠 item_type 区分，必须看 Item.Type）
+VIDEO_LIBRARY_ITEM_TYPES = frozenset(
+    {"Movie", "Episode", "Season", "Series", "Video", "MusicVideo"}
+)
+
+
+def is_video_library_item(item_type: Any) -> bool:
+    """仅视频库条目允许同步删除；类型缺失或为音乐/照片/图书/合集等一律拒绝"""
+    return str(item_type) in VIDEO_LIBRARY_ITEM_TYPES
 
 
 def path_is_canonical(path: Any) -> bool:
