@@ -29,13 +29,14 @@ except Exception:  # pragma: no cover
     logger = logging.getLogger("p115_cleanup")
 
 MAX_SUBTITLE_TAGS = 3
-# 目录子树内已没有任何视频/strm 时，其余全部文件都可清理；分类目录（根下一级）只在完全为空时才删
-MIN_PURGE_DEPTH_BELOW_ROOT = 2
+# 目录子树内已没有任何视频/strm 时，其余全部文件都可清理；映射根应为 Emby 媒体库根目录，
+# 根本身永远不删；根下的片名目录/中间分类目录按同一规则处理
+MIN_PURGE_DEPTH_BELOW_ROOT = 1
 # 目录级（季/剧集）删除的边界
-MIN_DIR_DEPTH_BELOW_ROOT = 2  # 目录必须在媒体库根之下至少两级（根/分类/片名）
+MIN_DIR_DEPTH_BELOW_ROOT = 1  # 目录必须严格位于媒体库根之下（映射根应为 Emby 媒体库根目录）
 MAX_DIR_DEPTH = 6
-MAX_DIR_ENTRIES = 3000
-MAX_DIR_VIDEOS = 500
+MAX_DIR_ENTRIES = 10000
+MAX_DIR_VIDEOS = 2000
 
 
 def _norm_exts(exts: Optional[Iterable[str]]) -> Set[str]:
@@ -137,7 +138,6 @@ class CleanupResult:
     errors: List[str] = field(default_factory=list)
     mode: str = "file"
     files_deleted: List[str] = field(default_factory=list)  # 复核确认已不存在
-    delete_requested: List[str] = field(default_factory=list)  # 删除请求返回成功
     leftovers_deleted: List[str] = field(default_factory=list)  # 视频/strm 全无后清理的其余文件
 
 
@@ -149,8 +149,9 @@ class DirPlan:
     dir_item: Any = None
     present: bool = False
     root: Optional[str] = None
-    files: List[Any] = field(default_factory=list)  # 待删视频+字幕
-    dirs: List[Any] = field(default_factory=list)  # 遍历到的目录（含自身）
+    files: List[Any] = field(default_factory=list)  # 子树内全部文件
+    dirs: List[Any] = field(default_factory=list)  # 子树内全部子目录
+    video_paths: Set[str] = field(default_factory=set)
     videos: int = 0
 
 
@@ -174,7 +175,8 @@ class P115Cleaner:
         self.dir_cleanup_storages = set(dir_cleanup_storages)
         self.sub_exts = _norm_exts(sub_exts)
         self.audio_exts = _norm_exts(audio_exts)
-        self.video_exts = _norm_exts(video_exts) - self.sub_exts - self.audio_exts
+        # strm 始终视为视频（本地 strm 或 115 上的 strm 都不能被残留清理误当杂项）
+        self.video_exts = (_norm_exts(video_exts) | {"strm"}) - self.sub_exts - self.audio_exts
 
     # ---- 底层查询（失败一律抛出，由上层视为失败） ----
     def _get_item(self, storage: str, path: str) -> Optional[Any]:
@@ -344,101 +346,89 @@ class P115Cleaner:
         except ValueError:
             return 0
 
-    def _scan_leftovers(self, d: Any) -> Optional[Tuple[List[Any], List[Any]]]:
-        """扫描子树；有视频/strm、类型未知、列表失败、超限均返回 None"""
+    def _scan_tree(self, d: Any) -> Tuple[List[Any], List[Any]]:
+        """
+        遍历子树，返回 (所有文件, 所有子目录)。列表失败、类型未知、嵌套过深、条目过多均抛异常，
+        调用方一律视为失败（绝不当作空目录）。
+        """
         files: List[Any] = []
         dirs: List[Any] = []
         stack = [(d, 0)]
         entries = 0
-        try:
-            while stack:
-                cur, depth = stack.pop()
-                if depth > MAX_DIR_DEPTH:
-                    return None
-                for it in self._list(cur):
-                    entries += 1
-                    if entries > MAX_DIR_ENTRIES:
-                        return None
-                    t = getattr(it, "type", "")
-                    if t == "dir":
-                        dirs.append(it)
-                        stack.append((it, depth + 1))
-                    elif t == "file":
-                        if _ext_of(it.name) in self.video_exts:
-                            return None  # 仍有视频/strm
-                        files.append(it)
-                    else:
-                        return None
-        except Exception:
-            return None
+        while stack:
+            cur, depth = stack.pop()
+            if depth > MAX_DIR_DEPTH:
+                raise ValueError(f"目录嵌套过深: {cur.path}")
+            for it in self._list(cur):
+                entries += 1
+                if entries > MAX_DIR_ENTRIES:
+                    raise ValueError(f"目录条目过多(>{MAX_DIR_ENTRIES})")
+                t = getattr(it, "type", "")
+                if t == "dir":
+                    dirs.append(it)
+                    stack.append((it, depth + 1))
+                elif t == "file":
+                    files.append(it)
+                else:
+                    raise ValueError(f"条目类型未知: {it.path}")
         return files, dirs
 
-    def _purge_leftovers(self, storage: str, d: Any, root: Optional[str], r: CleanupResult) -> bool:
+    def _video_paths(self, files: List[Any]) -> Set[str]:
+        return {_posix(f.path) for f in files if _ext_of(f.name) in self.video_exts}
+
+    def _dead_tree(self, d: Any, root: Optional[str]) -> Optional[Tuple[List[Any], List[Any]]]:
         """
-        目录子树内已没有任何视频/strm（扩展名取 MoviePilot 媒体扩展名，已含 strm）时，
-        删除其余所有文件和空壳子目录，使目录变空。写入前连续两次扫描且结果一致；
-        仍有视频/strm、列表失败、条目过多、层级过浅（分类目录）均保持原样并返回 False。
-        删除后以列表复核：请求成功但仍存在的文件写入 errors，不计入 leftovers_deleted。
+        子树内已没有任何视频/strm（扩展名取 MoviePilot 媒体扩展名，已含 strm）时返回
+        (其余文件, 子目录)，否则 None。写入前连续两次扫描且结果一致；列表失败、超限、
+        层级不足（目录即媒体库根）均返回 None。
         """
         if not self.purge_leftovers or self._depth_below_root(d.path, root) < MIN_PURGE_DEPTH_BELOW_ROOT:
-            return False
-        first = self._scan_leftovers(d)
-        if first is None:
-            return False
-        second = self._scan_leftovers(d)
-        if second is None or {_posix(x.path) for x in first[0]} != {_posix(x.path) for x in second[0]} or {
-            _posix(x.path) for x in first[1]
-        } != {_posix(x.path) for x in second[1]}:
-            return False
-        files, dirs = second
-        requested: List[str] = []
-        for f in files:
-            try:
-                ok = self.sc.delete_file(f)
-            except Exception as e:
-                r.errors.append(f"残留文件删除异常 {f.name}: {e}")
-                return False
-            if not ok:
-                r.errors.append(f"残留文件删除失败: {f.path}")
-                return False
-            requested.append(_posix(f.path))
-        for sd in sorted(dirs, key=lambda x: -len(PurePosixPath(_posix(x.path)).parts)):
-            sp = _posix(sd.path)
-            try:
-                if self._list(sd):
-                    break  # 子目录仍有内容（含请求成功但未删除的文件），由下方复核报告
-                if not getattr(sd, "fileid", None) or not self.sc.delete_file(sd):
-                    r.errors.append(f"空壳子目录删除失败: {sp}")
-                    return False
-                if self._get_item(storage, sp) is not None:
-                    r.errors.append(f"复核发现子目录仍存在: {sp}")
-                    return False
-            except Exception as e:
-                r.errors.append(f"空壳子目录处理失败 {sp}: {e}")
-                return False
-            r.dirs_deleted.append(sp)
-        # 复核：逐个子树列表确认请求删除的文件已不存在
-        survivors = set()
+            return None
         try:
-            for dd in [d] + [x for x in dirs if _posix(x.path) not in set(r.dirs_deleted)]:
-                for it in self._list(dd):
-                    if _posix(it.path) in set(requested):
-                        survivors.add(_posix(it.path))
-        except Exception as e:
-            r.errors.append(f"残留文件清理后复核失败: {e}")
-            return False
-        for x in requested:
-            if x in survivors:
-                r.errors.append(f"复核发现残留文件仍存在: {x}")
-            else:
-                r.leftovers_deleted.append(x)
-        if survivors:
+            f1, d1 = self._scan_tree(d)
+            if self._video_paths(f1):
+                return None
+            f2, d2 = self._scan_tree(d)
+        except Exception:
+            return None
+        same = {_posix(x.path) for x in f1} == {_posix(x.path) for x in f2} and {
+            _posix(x.path) for x in d1
+        } == {_posix(x.path) for x in d2}
+        if self._video_paths(f2) or not same:
+            return None
+        return f2, d2
+
+    def _remove_tree(
+        self, storage: str, d: Any, files: List[Any], dirs: List[Any], r: CleanupResult
+    ) -> bool:
+        """
+        对已确认“无视频/strm”的目录发起一次递归删除（一次 API 调用，而不是逐文件删除，
+        避免触发 115 风控），再用存在性查询复核；成功后才记录删除的文件与目录。
+        """
+        dp = _posix(d.path)
+        if not getattr(d, "fileid", None):
+            r.dir_stop_reason = f"目录缺少标识，保留: {dp}"
             return False
         try:
-            return not self._list(d)
+            ok = self.sc.delete_file(d)
         except Exception as e:
-            r.errors.append(f"残留文件清理后复核失败: {e}")
+            ok = False
+            r.errors.append(f"目录删除异常 {dp}: {e}")
+        if not ok:
+            r.errors.append(f"目录删除失败: {dp}")
+            r.dir_stop_reason = "目录删除失败"
             return False
+        try:
+            if self._get_item(storage, dp) is not None:
+                r.errors.append(f"复核发现目录仍存在: {dp}")
+                return False
+        except Exception as e:
+            r.errors.append(f"目录删除后复核失败 {dp}: {e}")
+            return False
+        r.leftovers_deleted.extend(_posix(f.path) for f in files)
+        r.dirs_deleted.extend(_posix(x.path) for x in dirs)
+        r.dirs_deleted.append(dp)
+        return True
 
     def _cleanup_dirs(
         self, storage: str, plan: CleanupPlan, remaining: List[Any], r: CleanupResult
@@ -452,45 +442,22 @@ class P115Cleaner:
                 r.dir_stop_reason = "到达媒体库根"
                 return
             if listing:
-                if self._purge_leftovers(storage, cur, root, r):
-                    try:
-                        listing = self._list(cur)
-                    except Exception as e:
-                        r.dir_stop_reason = f"清理残留文件后复核失败，保留: {cur_path}: {e}"
-                        return
-                if r.errors:
-                    r.dir_stop_reason = f"残留文件清理失败: {cur_path}"
-                    return
-                if listing:
+                dead = self._dead_tree(cur, root)
+                if dead is None:
                     r.dir_stop_reason = f"目录非空保留: {cur_path}"
                     return
-            if not getattr(cur, "fileid", None):
-                r.dir_stop_reason = f"目录缺少标识，保留: {cur_path}"
-                return
-            try:  # 删除前最后一次独立确认真空
-                if self._list(cur):
-                    r.dir_stop_reason = f"目录非空保留(删前复核): {cur_path}"
+                if not self._remove_tree(storage, cur, dead[0], dead[1], r):
                     return
-            except Exception as e:
-                r.dir_stop_reason = f"删前复核失败，保留: {cur_path}: {e}"
-                return
-            try:
-                ok = self.sc.delete_file(cur)
-            except Exception as e:
-                ok = False
-                r.errors.append(f"目录删除异常 {cur_path}: {e}")
-            if not ok:
-                r.errors.append(f"目录删除失败: {cur_path}")
-                r.dir_stop_reason = "目录删除失败"
-                return
-            try:
-                if self._get_item(storage, cur_path) is not None:
-                    r.errors.append(f"复核发现目录仍存在: {cur_path}")
+            else:
+                try:  # 删除前最后一次独立确认真空
+                    if self._list(cur):
+                        r.dir_stop_reason = f"目录非空保留(删前复核): {cur_path}"
+                        return
+                except Exception as e:
+                    r.dir_stop_reason = f"删前复核失败，保留: {cur_path}: {e}"
                     return
-            except Exception as e:
-                r.errors.append(f"目录删除后复核失败 {cur_path}: {e}")
-                return
-            r.dirs_deleted.append(cur_path)
+                if not self._remove_tree(storage, cur, [], [], r):
+                    return
             parent_path = str(PurePosixPath(cur_path).parent)
             try:
                 parent = self._get_item(storage, parent_path)
@@ -503,14 +470,14 @@ class P115Cleaner:
                 return
             cur = parent
 
-    # ---- 目录级（季/剧集）：逐文件精确删除，不整目录删 ----
+    # ---- 目录级（季/剧集）：确认其中视频均属本次删除范围后整体删除，并逐级向上 ----
     def plan_dir(self, storage: str, dir_path: str, root: Optional[str]) -> DirPlan:
         p = DirPlan(dir_path=_posix(dir_path))
         if not path_is_canonical(dir_path) or (root and not path_is_canonical(root)):
             p.reason = f"路径不规范（含 .. 或相对路径），拒绝: {dir_path}"
             return p
-        if storage not in self.dir_cleanup_storages or not root:
-            p.reason = "目录级删除需要已验证的存储和媒体库根，拒绝"
+        if storage not in self.dir_cleanup_storages or not root or not self.purge_leftovers:
+            p.reason = "目录级删除需要已验证的存储、媒体库根且启用残留清理，拒绝"
             return p
         root_p = _posix(root)
         try:
@@ -519,7 +486,7 @@ class P115Cleaner:
             p.reason = f"目录不在媒体库根之下，拒绝: {p.dir_path}"
             return p
         if len(rel.parts) < MIN_DIR_DEPTH_BELOW_ROOT:
-            p.reason = f"目录层级过浅（需在根之下至少 {MIN_DIR_DEPTH_BELOW_ROOT} 级），拒绝: {p.dir_path}"
+            p.reason = f"目录即媒体库根或层级过浅，拒绝: {p.dir_path}"
             return p
         p.root = root_p
         try:
@@ -532,34 +499,14 @@ class P115Cleaner:
                 return p
             p.present = True
             p.dir_item = item
-            stack = [(item, 0)]
-            entries = 0
-            while stack:
-                cur, depth = stack.pop()
-                if depth > MAX_DIR_DEPTH:
-                    p.reason = f"目录嵌套过深，拒绝: {cur.path}"
-                    return p
-                p.dirs.append(cur)
-                for it in self._list(cur):
-                    entries += 1
-                    if entries > MAX_DIR_ENTRIES:
-                        p.reason = "目录条目过多，拒绝"
-                        return p
-                    t = getattr(it, "type", "")
-                    if t == "dir":
-                        stack.append((it, depth + 1))
-                    elif t == "file":
-                        ext = _ext_of(it.name)
-                        if ext in self.video_exts:
-                            p.videos += 1
-                            if p.videos > MAX_DIR_VIDEOS:
-                                p.reason = f"视频数量超过上限 {MAX_DIR_VIDEOS}，拒绝"
-                                return p
-                            p.files.append(it)
-                        elif ext in self.sub_exts:
-                            p.files.append(it)
+            p.files, p.dirs = self._scan_tree(item)
         except Exception as e:
             p.reason = f"前置查询失败: {e}"
+            return p
+        p.video_paths = self._video_paths(p.files)
+        p.videos = len(p.video_paths)
+        if p.videos > MAX_DIR_VIDEOS:
+            p.reason = f"视频数量超过上限 {MAX_DIR_VIDEOS}，拒绝"
             return p
         p.ok = True
         return p
@@ -574,83 +521,32 @@ class P115Cleaner:
             r.ok = True
             r.dir_stop_reason = "目录已不存在"
             return r
-        for f in plan.files:
-            try:
-                ok = self.sc.delete_file(f)
-            except Exception as e:
-                ok = False
-                r.errors.append(f"{f.name} 删除异常: {e}")
-            if ok:
-                r.delete_requested.append(_posix(f.path))
-            else:
-                r.errors.append(f"{f.name} 删除失败")
-        requested = set(r.delete_requested)
-        still = set()
-        # 复核：已请求删除的必须消失；出现计划外的视频/字幕（plan 后新增）则报告未完成
-        for d in plan.dirs:
-            dp = _posix(d.path)
-            try:
-                cur = self._list(d)
-            except Exception as e:
-                r.errors.append(f"删除后复核列表失败 {dp}: {e}")
-                continue
-            for it in cur:
-                ip = _posix(it.path)
-                if ip in requested:
-                    still.add(ip)
-                    r.errors.append(f"复核发现仍存在: {it.path}")
-                elif getattr(it, "type", "") == "file" and (
-                    _ext_of(it.name) in self.video_exts
-                    or _ext_of(it.name) in self.sub_exts
-                ):
-                    r.errors.append(f"出现计划外媒体/字幕，未清理: {it.path}")
-        r.files_deleted = [x for x in r.delete_requested if x not in still]
-        if r.errors:
-            r.dir_stop_reason = "存在失败项，不清理目录"
-            return r
-        target = _posix(plan.dir_path)
-        for d in sorted(plan.dirs, key=lambda x: -len(PurePosixPath(_posix(x.path)).parts)):
-            dp = _posix(d.path)
-            if dp == target:
-                continue
-            # 子目录：其下若已有被保留的子目录/文件则不删；以删子目录后的现状为准
-            try:
-                cur = self._list(d)
-            except Exception as e:
-                r.errors.append(f"子目录复核失败 {dp}: {e}")
-                return r
-            if cur and self._purge_leftovers(storage, d, plan.root, r):
-                try:
-                    cur = self._list(d)
-                except Exception as e:
-                    r.errors.append(f"清理残留文件后复核失败 {dp}: {e}")
-                    return r
-            if r.errors:
-                return r
-            if cur or not getattr(d, "fileid", None):
-                continue
-            try:
-                ok = self.sc.delete_file(d)
-            except Exception as e:
-                ok = False
-                r.errors.append(f"目录删除异常 {dp}: {e}")
-            if not ok:
-                r.errors.append(f"目录删除失败: {dp}")
-                return r
-            try:
-                if self._get_item(storage, dp) is not None:
-                    r.errors.append(f"复核发现目录仍存在: {dp}")
-                    return r
-            except Exception as e:
-                r.errors.append(f"目录删除后复核失败 {dp}: {e}")
-                return r
-            r.dirs_deleted.append(dp)
+        # 写入前二次扫描：视频/strm 集合必须与计划一致，新增视频不在本次删除授权内
         try:
-            remaining = self._list(plan.dir_item)
+            files2, dirs2 = self._scan_tree(plan.dir_item)
         except Exception as e:
-            r.errors.append(f"目标目录复核失败: {e}")
+            r.reason = f"写入前复核失败，零写入: {e}"
             return r
-        cp = CleanupPlan(parent_item=plan.dir_item, root=plan.root, cleanup_dirs=True)
+        if self._video_paths(files2) != plan.video_paths:
+            r.reason = "目录内视频/strm 在计划后发生变化，零写入"
+            return r
+        if not self._remove_tree(storage, plan.dir_item, [], dirs2, r):
+            r.reason = r.reason or "目录删除未完成"
+            return r
+        r.files_deleted = [_posix(f.path) for f in files2]
+        parent_path = str(PurePosixPath(plan.dir_path).parent)
+        try:
+            parent = self._get_item(storage, parent_path)
+            if parent is None:
+                r.dir_stop_reason = "上级目录查询为空，停止"
+                r.ok = not r.errors
+                return r
+            remaining = self._list(parent)
+        except Exception as e:
+            r.dir_stop_reason = f"上级目录查询失败，停止: {e}"
+            r.ok = not r.errors
+            return r
+        cp = CleanupPlan(parent_item=parent, root=plan.root, cleanup_dirs=True)
         self._cleanup_dirs(storage, cp, remaining, r)
         r.ok = not r.errors
         return r
