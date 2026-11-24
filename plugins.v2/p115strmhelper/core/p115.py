@@ -118,7 +118,7 @@ def iter_share_files_with_path(
         base_url: Optional[str] = None
 
     if isinstance(client, (str, PathLike)):
-        client = ShareP115Client(client, check_for_relogin=True)
+        client = ShareP115Client(client)
     speed_configs = {
         0: (0.25, 0.25, 0.75),
         1: (0.5, 0.5, 1.5),
@@ -392,7 +392,7 @@ def iter_life_behavior_once(
     :return: 迭代器，产生 115 生活操作事件日志数据字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     life_behavior_detail_cycle = cycle(
         [
             partial(client.life_behavior_detail, **request_kwargs),
