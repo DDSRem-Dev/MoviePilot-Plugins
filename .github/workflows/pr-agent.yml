@@ -31,14 +31,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           DEEPSEEK.KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           PRR_DESCRIBE_MODEL: deepseek/deepseek-v4-flash
-          PRR_DESCRIBE_REASONING_EFFORT: high
+          PRR_DESCRIBE_REASONING_EFFORT: medium
           PRR_AUTO_REVIEW_MODEL: deepseek/deepseek-v4-flash
-          PRR_AUTO_REVIEW_REASONING_EFFORT: high
+          PRR_AUTO_REVIEW_REASONING_EFFORT: medium
           PRR_MANUAL_REVIEW_MODEL: deepseek/deepseek-v4-flash
-          PRR_MANUAL_REVIEW_REASONING_EFFORT: high
+          PRR_MANUAL_REVIEW_REASONING_EFFORT: medium
           PRR_ASK_MODEL: deepseek/deepseek-v4-flash
-          PRR_ASK_REASONING_EFFORT: high
+          PRR_ASK_REASONING_EFFORT: medium
           PRR_PASSTHROUGH_MODEL: deepseek/deepseek-v4-flash
-          PRR_PASSTHROUGH_REASONING_EFFORT: high
+          PRR_PASSTHROUGH_REASONING_EFFORT: medium
           PRR_FALLBACK_MODELS: '["deepseek/deepseek-v4-flash"]'
+          config.max_output_tokens: '32768'
           config.response_language: zh-CN
