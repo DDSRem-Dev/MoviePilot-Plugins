@@ -93,9 +93,7 @@ class TestV3OpenSecuploadFinish(TestCase):
             def abort_multipart_upload(self, object_name, upload_id):
                 case.bucket.abort_multipart_upload(object_name, upload_id)
 
-            def complete_multipart_upload(
-                self, object_name, upload_id, parts, headers=None
-            ):
+            def complete_multipart_upload(self, object_name, upload_id, parts, headers=None):
                 raise AssertionError("命中秒传后不应完成分片上传")
 
         self.uploaded = SimpleNamespace(path="/movies/video.mkv")

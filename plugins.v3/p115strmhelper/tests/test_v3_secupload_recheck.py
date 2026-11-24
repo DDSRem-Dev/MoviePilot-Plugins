@@ -42,7 +42,9 @@ class TestV3SecuploadRecheck(TestCase):
             "check_response": lambda response: response,
             "UploadInfo": SimpleNamespace,
         }
-        self.core_class = _compile(root / "core/p115disk.py", namespace, "P115DiskCore")
+        self.core_class = _compile(
+            root / "core/p115disk.py", namespace, "P115DiskCore"
+        )
         self.open_class = _compile(
             root / "core/u115_open.py",
             {"configer": self.config, "logger": MagicMock()},
@@ -154,11 +156,15 @@ class TestV3SecuploadRecheck(TestCase):
         OpenAPI 复判请求异常或状态异常时返回未命中
         """
         self.open_helper._request_api.side_effect = RuntimeError("network")
-        self.assertFalse(self.open_helper._recheck_secupload("a", 1, "U_1_1", "s", "p"))
+        self.assertFalse(
+            self.open_helper._recheck_secupload("a", 1, "U_1_1", "s", "p")
+        )
 
         self.open_helper._request_api.side_effect = None
         self.open_helper._request_api.return_value = {"state": False}
-        self.assertFalse(self.open_helper._recheck_secupload("a", 1, "U_1_1", "s", "p"))
+        self.assertFalse(
+            self.open_helper._recheck_secupload("a", 1, "U_1_1", "s", "p")
+        )
 
     def test_p115open_recheck_rejects_non_dict_response(self) -> None:
         """
