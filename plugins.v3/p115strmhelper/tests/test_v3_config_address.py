@@ -170,3 +170,20 @@ class TestConfigAddress(TestCase):
             getter.get_share_strm_url("share", "code", "123", "a.mkv", "/a.mkv"),
             "https://mp.example/api/v1/plugin/P115StrmHelper/redirect_url?id=123",
         )
+
+    def test_directory_upload_rescan_settings_are_persisted(self) -> None:
+        """
+        目录上传漏传巡检配置可通过宿主配置模型保存
+        """
+        updates = {
+            "directory_upload_rescan_enabled": False,
+            "directory_upload_rescan_interval": 30,
+            "directory_upload_rescan_max_submit": 50,
+        }
+        self.assertTrue(self.config.update_config(updates))
+        self.assertFalse(self.config.directory_upload_rescan_enabled)
+        self.assertEqual(self.config.directory_upload_rescan_interval, 30)
+        self.assertEqual(self.config.directory_upload_rescan_max_submit, 50)
+        self.assertEqual(
+            self.config.get_config("directory_upload_rescan_enabled"), False
+        )

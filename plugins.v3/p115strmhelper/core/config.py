@@ -764,6 +764,21 @@ class ConfigManager(BaseModel):
     directory_upload_skip_bdmv_stream: bool = Field(
         default=True, description="跳过蓝光原盘 STREAM 目录"
     )
+    directory_upload_rescan_enabled: bool = Field(
+        default=True, description="启用目录上传漏传巡检"
+    )
+    directory_upload_rescan_interval: int = Field(
+        default=10,
+        ge=1,
+        le=1440,
+        description="目录上传漏传巡检间隔（分钟）",
+    )
+    directory_upload_rescan_max_submit: int = Field(
+        default=300,
+        ge=1,
+        le=10000,
+        description="目录上传漏传巡检单轮提交上限",
+    )
     directory_upload_path: Optional[List[Dict]] = Field(
         default=None, description="监控目录信息"
     )
