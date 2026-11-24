@@ -15,6 +15,12 @@ from .p115_api import P115Api
 from .p115_client import create_client, build_timeout_config
 
 
+try:
+    from app.schemas.file import FileItemQueryResult
+except ImportError:
+    FileItemQueryResult = None
+
+
 class P115Disk(_PluginBase):
     """
     115 网盘储存插件：更快更强的 115 网盘存储模块，支持文件列表、上传下载、快照等功能
@@ -453,6 +459,7 @@ class P115Disk(_PluginBase):
             "delete_file": self.delete_file,
             "rename_file": self.rename_file,
             "get_file_item": self.get_file_item,
+            "get_file_item_strict": self.get_file_item_strict,
             "get_parent_item": self.get_parent_item,
             "snapshot_storage": self.snapshot_storage,
             "storage_usage": self.storage_usage,
@@ -705,6 +712,25 @@ class P115Disk(_PluginBase):
             return None
 
         return self._p115_api.get_item(path)
+
+    def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
+        """
+        向宿主返回已完成的严格查询回执
+
+        :param storage (str): 存储类型
+        :param path (Path): 待查询路径
+
+        :return FileItemQueryResult: 确认存在或不存在的回执，非本存储返回 None
+
+        :raises RuntimeError: 存储未初始化或无法确认状态时传播错误
+        """
+        if storage != self._disk_name:
+            return None
+        if FileItemQueryResult is None:
+            raise RuntimeError("当前宿主不支持严格查询回执")
+        if not self._p115_api:
+            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
+        return FileItemQueryResult(item=self._p115_api.get_item_strict(path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
         """

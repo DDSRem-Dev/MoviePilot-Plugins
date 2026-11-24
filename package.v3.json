@@ -7,7 +7,7 @@
         "release": true,
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
-        "system_version": ">=3.0.0",
+        "system_version": ">=3.2.12",
         "level": 1,
         "history": {
             "v3.0.3": "修复速率限制器锁竞争问题",
@@ -24,7 +24,7 @@
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "release": true,
-        "system_version": ">=3.0.0",
+        "system_version": ">=3.2.12",
         "v3t": false,
         "level": 1,
         "history": {
@@ -70,7 +70,7 @@
         "release": true,
         "icon": "Cloudrive_A.png",
         "author": "DDSRem",
-        "system_version": ">=3.0.0",
+        "system_version": ">=3.2.12",
         "level": 1,
         "history": {
             "v3.0.1": "适配 MoviePilot V3 存储管理接口",

@@ -31,6 +31,12 @@ from .assistant import (
 from .clouddrive_api import CloudDriveApi
 
 
+try:
+    from app.schemas.file import FileItemQueryResult
+except ImportError:
+    FileItemQueryResult = None
+
+
 class CloudDriveDisk(_PluginBase):
     """
     CloudDrive2 储存插件
@@ -1384,6 +1390,7 @@ class CloudDriveDisk(_PluginBase):
             "delete_file": self.delete_file,
             "rename_file": self.rename_file,
             "get_file_item": self.get_file_item,
+            "get_file_item_strict": self.get_file_item_strict,
             "get_parent_item": self.get_parent_item,
             "snapshot_storage": self.snapshot_storage,
             "storage_usage": self.storage_usage,
@@ -1628,6 +1635,25 @@ class CloudDriveDisk(_PluginBase):
         if storage != self._disk_name or not self._clouddrive_api:
             return None
         return self._clouddrive_api.get_item(path)
+
+    def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
+        """
+        向宿主返回已完成的严格查询回执
+
+        :param storage (str): 存储类型
+        :param path (Path): 待查询路径
+
+        :return FileItemQueryResult: 确认存在或不存在的回执，非本存储返回 None
+
+        :raises RuntimeError: 存储未初始化或无法确认状态时传播错误
+        """
+        if storage != self._disk_name:
+            return None
+        if FileItemQueryResult is None:
+            raise RuntimeError("当前宿主不支持严格查询回执")
+        if not self._clouddrive_api:
+            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
+        return FileItemQueryResult(item=self._clouddrive_api.get_item_strict(path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
         """
