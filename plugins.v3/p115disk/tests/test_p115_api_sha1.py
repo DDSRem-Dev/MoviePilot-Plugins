@@ -73,13 +73,17 @@ class TestSha1(TestCase):
         """分块读取的 SHA1 与内存整块计算一致"""
         import hashlib
 
-        with patch.object(self.module.global_vars, "is_transfer_stopped", return_value=False):
+        with patch.object(
+            self.module.global_vars, "is_transfer_stopped", return_value=False
+        ):
             value = self.module.P115Api._calc_sha1(self.file)
         self.assertEqual(value, hashlib.sha1(self.file.read_bytes()).hexdigest())
 
     def test_calc_sha1_raises_when_stopped(self):
         """传输被取消时抛出 InterruptedError"""
-        with patch.object(self.module.global_vars, "is_transfer_stopped", return_value=True):
+        with patch.object(
+            self.module.global_vars, "is_transfer_stopped", return_value=True
+        ):
             with self.assertRaises(InterruptedError):
                 self.module.P115Api._calc_sha1(self.file)
 
@@ -87,7 +91,9 @@ class TestSha1(TestCase):
         """指定 size 时只计算前 N 字节"""
         import hashlib
 
-        with patch.object(self.module.global_vars, "is_transfer_stopped", return_value=False):
+        with patch.object(
+            self.module.global_vars, "is_transfer_stopped", return_value=False
+        ):
             value = self.module.P115Api._calc_sha1(self.file, size=1024)
         self.assertEqual(value, hashlib.sha1(self.file.read_bytes()[:1024]).hexdigest())
 
@@ -165,7 +171,10 @@ class TestSha1(TestCase):
             os.utime(self.file, ns=(same_second, same_second))
             second = api._sha1_with_cache(self.file)
 
-        if self.module.CTIME_TRACKS_CONTENT_CHANGE:
+        if not self.module.SHA1_CACHE_ENABLED:
+            self.assertEqual(second, "second")
+            self.assertEqual(calc.call_count, 2)
+        elif self.module.CTIME_TRACKS_CONTENT_CHANGE:
             self.assertEqual(second, "second")
             self.assertEqual(calc.call_count, 2)
         else:
@@ -191,24 +200,40 @@ class TestSha1(TestCase):
         if self.module.CTIME_TRACKS_CONTENT_CHANGE:
             self.assertIn(str(posix_stat.st_ctime_ns), posix_key)
 
-        with patch.object(
-            self.module, "CTIME_TRACKS_CONTENT_CHANGE", False
-        ), patch.object(
-            self.module.P115Api, "_calc_sha1", side_effect=["first", "second"]
-        ) as calc:
+        with (
+            patch.object(self.module, "CTIME_TRACKS_CONTENT_CHANGE", False),
+            patch.object(
+                self.module.P115Api, "_calc_sha1", side_effect=["first", "second"]
+            ) as calc,
+        ):
             self.assertEqual(api._sha1_with_cache(self.file), "first")
             self.file.write_bytes(b"b" * 1024)
             os.utime(self.file, ns=(same_second, same_second))
             reduced_stat = self.file.stat()
-            reduced_key = self.module.P115Api._sha1_cache_key(
-                self.file, reduced_stat
-            )
+            reduced_key = self.module.P115Api._sha1_cache_key(self.file, reduced_stat)
             result = api._sha1_with_cache(self.file)
 
         # 关闭 ctime 后键里不含 ctime 纳秒值
         self.assertNotIn(str(reduced_stat.st_ctime_ns), reduced_key)
-        self.assertEqual(result, "first")
-        self.assertEqual(calc.call_count, 1)
+        if self.module.SHA1_CACHE_ENABLED:
+            self.assertEqual(result, "first")
+            self.assertEqual(calc.call_count, 1)
+        else:
+            self.assertEqual(result, "second")
+            self.assertEqual(calc.call_count, 2)
+
+    def test_sha1_cache_is_disabled_when_file_identity_is_not_reliable(self):
+        """
+        文件身份元数据无法可靠反映内容变化的平台不得复用旧哈希
+        """
+        api = _build_api(self.module)
+        with (
+            patch.object(self.module, "SHA1_CACHE_ENABLED", False),
+            patch.object(api, "_calc_sha1", side_effect=["first", "second"]) as calc,
+        ):
+            self.assertEqual(api._sha1_with_cache(self.file), "first")
+            self.assertEqual(api._sha1_with_cache(self.file), "second")
+        self.assertEqual(calc.call_count, 2)
 
     def test_sha1_cache_key_includes_ctime_only_when_usable(self):
         """

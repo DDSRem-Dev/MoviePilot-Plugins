@@ -34,6 +34,7 @@ from .tools import RateLimiter, get_ios_ua_app
 # Windows 上 st_ctime 是创建时间，覆盖文件不会改变它，据其判断会得出「未变化」
 # 的错误结论，因此在那里不纳入 SHA1 缓存键。
 CTIME_TRACKS_CONTENT_CHANGE = os.name != "nt"
+SHA1_CACHE_ENABLED = os.name != "nt"
 
 
 def _build_download_path(fileitem: FileItem, base_path: Path) -> Optional[Path]:
@@ -121,9 +122,7 @@ class P115Api:
             for label, getter in (
                 (
                     "app",
-                    lambda: self.client.fs_dir_getid_app(
-                        path_str, **get_ios_ua_app()
-                    ),
+                    lambda: self.client.fs_dir_getid_app(path_str, **get_ios_ua_app()),
                 ),
                 (
                     "web",
@@ -147,9 +146,7 @@ class P115Api:
             except (TypeError, ValueError):
                 pid = -1
             if pid == 0:
-                resp = self.client.fs_makedirs_app(
-                    path_str, pid=0, **get_ios_ua_app()
-                )
+                resp = self.client.fs_makedirs_app(path_str, pid=0, **get_ios_ua_app())
                 check_response(resp)
                 pid = int(resp["cid"])
                 self._id_cache.add_cache(id=pid, directory=path_str)
@@ -992,8 +989,7 @@ class P115Api:
         if ctime_ns is None:
             ctime_ns = int(file_stat.st_ctime * 1_000_000_000)
         return (
-            f"{filepath.as_posix()}:{file_stat.st_size}:"
-            f"{mtime_ns}:{ctime_ns}:{inode}"
+            f"{filepath.as_posix()}:{file_stat.st_size}:{mtime_ns}:{ctime_ns}:{inode}"
         )
 
     def _get_cached_sha1(self, filepath: Path) -> Optional[str]:
@@ -1007,6 +1003,8 @@ class P115Api:
 
         :return str: 命中返回 SHA1，未命中返回 None
         """
+        if not SHA1_CACHE_ENABLED:
+            return None
         try:
             file_stat = filepath.stat()
         except OSError:
@@ -1026,6 +1024,8 @@ class P115Api:
         :param expected_key (str): 读取开始前的缓存键。给出时只有当前文件状态
             仍与该键一致才写入，避免把旧内容的哈希挂到新状态的键上
         """
+        if not SHA1_CACHE_ENABLED:
+            return
         try:
             file_stat = filepath.stat()
         except OSError:
