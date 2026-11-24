@@ -836,6 +836,14 @@ class ConfigManager(BaseModel):
         ge=0,
         description="115 上传秒传失败后跳过上传的文件大小阈值（大于此值的文件将跳过上传）",
     )
+    upload_module_recheck_secupload: bool = Field(
+        default=False, description="115 上传增强分片上传期间复判秒传"
+    )
+    upload_module_recheck_secupload_interval: int = Field(
+        default=5 * 60,
+        ge=0,
+        description="115 上传增强分片上传期间复判秒传的间隔（秒），0 表示使用默认值",
+    )
     upload_share_info: bool = Field(default=True, description="上传分享链接")
     upload_offline_info: bool = Field(default=True, description="上传离线下载链接")
     transfer_module_enhancement: bool = Field(default=False, description="115 整理增强")

@@ -214,6 +214,17 @@
                   </v-col>
                 </v-row>
                 <v-row>
+                  <v-col cols="12" md="4">
+                    <v-switch v-model="config.upload_module_recheck_secupload" label="分片上传期间复判秒传" color="info"
+                      density="compact"></v-switch>
+                  </v-col>
+                  <v-col cols="12" md="8" v-if="config.upload_module_recheck_secupload">
+                    <v-text-field v-model.number="config.upload_module_recheck_secupload_interval" label="分片上传期间复判秒传的间隔（单位秒）"
+                      type="number" hint="分片上传过程中每隔该时长复判一次秒传，命中后中止剩余分片并转秒传；最小 60 秒"
+                      persistent-hint density="compact"></v-text-field>
+                  </v-col>
+                </v-row>
+                <v-row>
                   <v-col cols="12" md="6">
                     <v-text-field v-model.number="config.upload_module_wait_time" label="秒传休眠等待时间（单位秒）" type="number"
                       hint="秒传休眠等待时间（单位秒）" persistent-hint density="compact"></v-text-field>
