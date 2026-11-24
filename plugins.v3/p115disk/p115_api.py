@@ -95,7 +95,7 @@ class P115Api:
         self._get_item_fail_records: Dict[str, Dict[str, float]] = {}
         self._get_item_blacklist: Dict[str, float] = {}
 
-        # 整文件 SHA1 缓存：键为 路径:大小:mtime，避免重试/秒传重复哈希大文件
+        # 整文件 SHA1 缓存：POSIX 使用文件状态键，Windows 为保证正确性关闭缓存
         self._sha1_cache: Dict[str, str] = {}
         self._sha1_cache_max = 64
         self._sha1_lock = RLock()
@@ -117,6 +117,7 @@ class P115Api:
                 return pid
             self._get_pid_by_path_rate_limiter.acquire()
             resp: Optional[Dict] = None
+            pid: Optional[int] = None
             api_errors: List[str] = []
             # app 接口优先，web 接口偶发 405，仅作为回退
             for label, getter in (
@@ -134,17 +135,21 @@ class P115Api:
                 try:
                     current = getter()
                     check_response(current)
+                    try:
+                        current_pid = int(current.get("id", -1))
+                    except (TypeError, ValueError):
+                        current_pid = -1
+                    if current_pid < 0:
+                        raise OSError("响应缺少有效目录ID")
                     resp = current
+                    pid = current_pid
                     break
                 except Exception as api_error:
                     api_errors.append(f"{label}: {api_error}")
             if resp is None:
                 raise OSError("; ".join(api_errors) or "获取文件夹ID失败")
-            # 115 返回的 id 是字符串，统一归一化为 int，保证 -1 判定与缓存键可靠
-            try:
-                pid = int(resp.get("id", -1))
-            except (TypeError, ValueError):
-                pid = -1
+            if pid is None:
+                raise OSError("获取文件夹ID失败：响应缺少目录ID")
             if pid == 0:
                 resp = self.client.fs_makedirs_app(path_str, pid=0, **get_ios_ua_app())
                 check_response(resp)
@@ -1037,7 +1042,7 @@ class P115Api:
             )
             return
         with self._sha1_lock:
-            if len(self._sha1_cache) > self._sha1_cache_max:
+            if len(self._sha1_cache) >= self._sha1_cache_max:
                 self._sha1_cache.clear()
             self._sha1_cache[key] = value
 

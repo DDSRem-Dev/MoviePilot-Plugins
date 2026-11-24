@@ -108,7 +108,7 @@ class TestSha1(TestCase):
 
         self.assertEqual(first, "deadbeef")
         self.assertEqual(second, "deadbeef")
-        self.assertEqual(calc.call_count, 1)
+        self.assertEqual(calc.call_count, 1 if self.module.SHA1_CACHE_ENABLED else 2)
 
     def test_sha1_cache_invalidated_on_change(self):
         """文件大小或 mtime 变化后缓存失效并重新计算"""
@@ -132,6 +132,25 @@ class TestSha1(TestCase):
         api._sha1_cache = {"a": "1", "b": "2", "c": "3"}
         api._store_cached_sha1(self.file, "value")
 
+        if self.module.SHA1_CACHE_ENABLED:
+            self.assertLessEqual(len(api._sha1_cache), 2)
+            self.assertEqual(api._get_cached_sha1(self.file), "value")
+        else:
+            self.assertEqual(len(api._sha1_cache), 3)
+            self.assertIsNone(api._get_cached_sha1(self.file))
+
+    def test_sha1_cache_does_not_exceed_limit_at_boundary(self):
+        """缓存达到上限后写入新条目时立即清理，避免超过容量边界"""
+        api = _build_api(self.module)
+        api._sha1_cache_max = 2
+        if not self.module.SHA1_CACHE_ENABLED:
+            api._sha1_cache = {"a": "1", "b": "2"}
+            api._store_cached_sha1(self.file, "value")
+            self.assertEqual(api._sha1_cache, {"a": "1", "b": "2"})
+            return
+
+        api._sha1_cache = {"a": "1", "b": "2"}
+        api._store_cached_sha1(self.file, "value")
         self.assertLessEqual(len(api._sha1_cache), 2)
         self.assertEqual(api._get_cached_sha1(self.file), "value")
 
@@ -292,6 +311,10 @@ class TestSha1(TestCase):
         api._store_cached_sha1(self.file, "value")
         api._sha1_cache["path:1:1:1:1"] = "extra"
 
-        self.assertGreater(len(api._sha1_cache), api._sha1_cache_max)
-        self.assertEqual(api._get_cached_sha1(self.file), "value")
-        self.assertIn("path:1:1:1:1", api._sha1_cache)
+        if self.module.SHA1_CACHE_ENABLED:
+            self.assertGreater(len(api._sha1_cache), api._sha1_cache_max)
+            self.assertEqual(api._get_cached_sha1(self.file), "value")
+            self.assertIn("path:1:1:1:1", api._sha1_cache)
+        else:
+            self.assertEqual(len(api._sha1_cache), 1)
+            self.assertIsNone(api._get_cached_sha1(self.file))

@@ -81,6 +81,18 @@ class TestGetPidByPath(TestCase):
         self.assertEqual(result, 456)
         api.client.fs_dir_getid.assert_called_once()
 
+    def test_falls_back_to_web_when_app_id_is_invalid(self):
+        """app 接口响应缺少有效目录 ID 时回退 web 接口"""
+        module = _load_api_module()
+        api = _build_api(module)
+        api.client.fs_dir_getid_app.return_value = {"state": True}
+        api.client.fs_dir_getid.return_value = {"state": True, "id": "654"}
+
+        result = api.get_pid_by_path(Path("/MoviePilot/媒体库/电视剧"))
+
+        self.assertEqual(result, 654)
+        api.client.fs_dir_getid.assert_called_once()
+
     def test_returns_minus_one_when_both_interfaces_fail(self):
         """两个接口都失败时返回 -1，交给上层判空"""
         module = _load_api_module()
