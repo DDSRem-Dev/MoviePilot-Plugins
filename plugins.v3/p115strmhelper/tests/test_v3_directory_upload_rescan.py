@@ -10,9 +10,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 
-def _compile_nodes(
-    path: Path, names: List[str], namespace: Dict[str, Any]
-) -> None:
+def _compile_nodes(path: Path, names: List[str], namespace: Dict[str, Any]) -> None:
     """
     按名称抽取模块顶层节点并注入依赖后执行
 
@@ -22,10 +20,7 @@ def _compile_nodes(
     wanted = [
         node
         for node in tree.body
-        if (
-            isinstance(node, (ast.ClassDef, ast.FunctionDef))
-            and node.name in names
-        )
+        if (isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names)
         or (
             isinstance(node, ast.Assign)
             and any(
@@ -247,16 +242,21 @@ class TestDirectoryUploadRescan(TestCase):
 
             rescan = self.rescan_cls()
             rescan._max_submit = lambda: 2
-            entries = [(str(library_a), str(library_a)), (str(library_b), str(library_b))]
+            entries = [
+                (str(library_a), str(library_a)),
+                (str(library_b), str(library_b)),
+            ]
 
             # 第一轮以 A 为起点，额度被 A 占满
             rescan._tick(None, rescan._rotate_entries(entries))
             first_round = list(self.submitted)
             # 第二轮以 B 为起点，B 的漏传文件必须被提交
             rescan._tick(None, rescan._rotate_entries(entries))
-            second_round = self.submitted[len(first_round):]
+            second_round = self.submitted[len(first_round) :]
 
-        self.assertTrue(all("/a/" in path for path, _ in first_round))
+        self.assertTrue(
+            all(Path(path).is_relative_to(library_a) for path, _ in first_round)
+        )
         self.assertEqual(len(first_round), 2)
         # 第二轮起点是 B，B 的漏传文件优先于 A 的剩余文件被提交
         self.assertEqual(Path(second_round[0][0]).name, "only.mkv")
@@ -356,6 +356,16 @@ class TestWorkerQueueSelfHeal(TestCase):
         self.assertTrue(queue._enqueue_task("recovered"))
         self.assertTrue(queue.stop(timeout=5))
         self.assertEqual(processed, ["recovered"])
+
+    def test_non_lazy_queue_still_requires_explicit_start(self) -> None:
+        """
+        从未启动的非惰性队列不会在入队时自动启动
+        """
+        processed = []
+        queue = self._queue(processed.append)
+        self.assertFalse(queue._enqueue_task("before-start"))
+        self.assertIsNone(queue._worker_thread)
+        self.assertEqual(processed, [])
 
     def test_enqueue_still_rejects_while_worker_is_draining(self) -> None:
         """

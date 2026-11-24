@@ -111,18 +111,27 @@ def _upload_key(file_path: Path, mon_path: str) -> Tuple[str, str]:
     return str(file_path.absolute()), str(Path(mon_path).absolute())
 
 
-def _is_directory_upload_ignored_path(path: Path) -> bool:
+def _is_directory_upload_ignored_path(
+    path: Path, mon_path: Optional[str] = None
+) -> bool:
     """
     判断目录上传是否应忽略指定路径
 
     :param path (Path): 文件或目录路径
+    :param mon_path (str): 监控根目录，提供时仅针对监控目录内相对路径判定
 
     :return bool: 应忽略时返回 True
     """
-    event_path = str(path)
+    target_path = path
+    if mon_path:
+        try:
+            target_path = Path("/") / path.relative_to(mon_path)
+        except ValueError:
+            target_path = path
+    event_path = target_path.as_posix()
     if (
-        event_path.find("/@Recycle/") != -1
-        or event_path.find("/#recycle/") != -1
+        "/@Recycle/" in f"{event_path}/"
+        or "/#recycle/" in f"{event_path}/"
         or event_path.find("/.") != -1
         or event_path.find("/@eaDir") != -1
     ):
@@ -888,9 +897,7 @@ class DirectoryUploadRescan:
         out_dir = Path(dest_strm) / PathUtils.sanitize_path_parts(rel).parent
         return out_dir / StrmGenerater.get_strm_filename(file_path)
 
-    def _rotate_entries(
-        self, entries: List[Tuple[str, str]]
-    ) -> List[Tuple[str, str]]:
+    def _rotate_entries(self, entries: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         """
         按轮转起点重排监控目录，并把起点推进一项
 
@@ -911,7 +918,9 @@ class DirectoryUploadRescan:
             return list(entries)
         return list(entries[index:]) + list(entries[:index])
 
-    def _collect_missing(self, entries: List[Tuple[str, str]], limit: int) -> List[Tuple[str, str]]:
+    def _collect_missing(
+        self, entries: List[Tuple[str, str]], limit: int
+    ) -> List[Tuple[str, str]]:
         """
         扫描监控目录，收集缺少对应 STRM 的上传候选文件
 
@@ -921,17 +930,21 @@ class DirectoryUploadRescan:
         :return List: (文件路径, 监控根目录) 列表
         """
         upload_extensions = _directory_upload_extensions("directory_upload_uploadext")
-        allowed_extensions = set(upload_extensions) if upload_extensions is not None else None
+        allowed_extensions = (
+            set(upload_extensions) if upload_extensions is not None else None
+        )
         missing: List[Tuple[str, str]] = []
         for mon_path, dest_strm in entries:
             if not Path(mon_path).is_dir():
                 continue
-            for current_dir, dir_names, file_names in os_walk(mon_path, followlinks=False):
+            for current_dir, dir_names, file_names in os_walk(
+                mon_path, followlinks=False
+            ):
                 current = Path(current_dir)
                 dir_names[:] = [
                     name
                     for name in dir_names
-                    if not _is_directory_upload_ignored_path(current / name)
+                    if not _is_directory_upload_ignored_path(current / name, mon_path)
                 ]
                 for name in file_names:
                     file_path = current / name
@@ -940,7 +953,7 @@ class DirectoryUploadRescan:
                         and file_path.suffix.lower() not in allowed_extensions
                     ):
                         continue
-                    if _is_directory_upload_ignored_path(file_path):
+                    if _is_directory_upload_ignored_path(file_path, mon_path):
                         continue
                     if not file_path.is_file():
                         continue
@@ -968,7 +981,9 @@ class DirectoryUploadRescan:
         submitted = 0
         for file_path, mon_path in missing[:limit]:
             try:
-                if directory_upload_stability_tracker.submit(client, file_path, mon_path):
+                if directory_upload_stability_tracker.submit(
+                    client, file_path, mon_path
+                ):
                     submitted += 1
             except Exception as e:
                 logger.error(

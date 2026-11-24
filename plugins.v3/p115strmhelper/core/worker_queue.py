@@ -95,7 +95,9 @@ class WorkerQueue:
                         )
                         return False
                     if queue is not None and queue.unfinished_tasks:
-                        logger.error(f"【{self._label}】worker 已退出但队列仍有未结算任务")
+                        logger.error(
+                            f"【{self._label}】worker 已退出但队列仍有未结算任务"
+                        )
                         return False
                     self._worker_thread = None
                     self._queue = None
@@ -106,11 +108,9 @@ class WorkerQueue:
 
     def _enqueue_task(self, task: Any, *, lazy_start: bool = False) -> bool:
         with self._lock:
+            recovered_stale_stop = False
             if self._stopping:
-                if (
-                    self._worker_thread is not None
-                    and self._worker_thread.is_alive()
-                ):
+                if self._worker_thread is not None and self._worker_thread.is_alive():
                     logger.warning(f"【{self._label}】队列正在停止，拒绝入队")
                     return False
                 if self._stop_in_progress:
@@ -125,16 +125,15 @@ class WorkerQueue:
                     logger.error(f"【{self._label}】旧队列仍有未结算任务，拒绝入队")
                     return False
                 # 停止超时留下的空队列：旧 worker 已退出，自愈重建，避免永久拒收
-                logger.warning(f"【{self._label}】检测到已停止的空队列，自动重建 worker")
+                logger.warning(
+                    f"【{self._label}】检测到已停止的空队列，自动重建 worker"
+                )
                 self._worker_thread = None
                 self._queue = None
                 self._stopping = False
+                recovered_stale_stop = True
             try:
-                if (
-                    lazy_start
-                    or self._worker_thread is None
-                    or not self._worker_thread.is_alive()
-                ):
+                if lazy_start or recovered_stale_stop:
                     self._start_locked()
                 if (
                     self._queue is None

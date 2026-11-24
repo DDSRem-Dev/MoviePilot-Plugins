@@ -34,6 +34,7 @@ class TestV3CheckinLifecycle(TestCase):
                 "ShareInteractiveGenStrmQueue",
                 "directory_upload_stability_tracker",
                 "directory_upload_queue",
+                "directory_upload_rescan",
                 "emby_mediainfo_queue",
                 "sync_del_webhook_queue",
                 "share_audit_download_queue",
@@ -139,8 +140,8 @@ class TestV3CheckinLifecycle(TestCase):
         """
         self.namespace[self.job_global].return_value = (False, "synthetic")
         observations = []
-        self.namespace["post_message"].side_effect = lambda **kwargs: observations.append(
-            self.service._stop_sync_operations(timeout=0)
+        self.namespace["post_message"].side_effect = lambda **kwargs: (
+            observations.append(self.service._stop_sync_operations(timeout=0))
         )
         self.assertIsNone(self.manual(self.plugin, self.event))
         self.assertEqual(observations, [False])

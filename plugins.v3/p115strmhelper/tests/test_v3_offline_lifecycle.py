@@ -32,6 +32,7 @@ class TestV3OfflineLifecycle(TestCase):
                 "ShareInteractiveGenStrmQueue",
                 "directory_upload_stability_tracker",
                 "directory_upload_queue",
+                "directory_upload_rescan",
                 "emby_mediainfo_queue",
                 "sync_del_webhook_queue",
                 "share_audit_download_queue",
@@ -53,7 +54,9 @@ class TestV3OfflineLifecycle(TestCase):
         path = self.root / "service/__init__.py"
         _method(path, "_track_sync_operation", self.namespace)
         self.cls = _compile(path, self.namespace, "ServiceHelper")
-        self.list_api = _method(self.root / "api.py", "offline_tasks_api", self.namespace)
+        self.list_api = _method(
+            self.root / "api.py", "offline_tasks_api", self.namespace
+        )
         self.add_api = _method(
             self.root / "api.py", "add_offline_task_api", self.namespace
         )
@@ -220,12 +223,17 @@ class TestV3OfflineLifecycle(TestCase):
         """
         self.service._sync_stopping = True
         helper = self.service.offlinehelper
-        for path, method in ((None, "add_urls_to_transfer"), ("/path", "add_urls_to_path")):
+        for path, method in (
+            (None, "add_urls_to_transfer"),
+            ("/path", "add_urls_to_path"),
+        ):
             with self.subTest(path=path):
                 helper.reset_mock()
                 boundary = getattr(helper, method)
                 boundary.return_value = (True, 1)
-                response = self.add_api(SimpleNamespace(links=["magnet:isolated"], path=path))
+                response = self.add_api(
+                    SimpleNamespace(links=["magnet:isolated"], path=path)
+                )
                 self.assertIn("1 个新任务已成功添加", response.msg)
                 if path:
                     boundary.assert_called_once_with(["magnet:isolated"], path)
