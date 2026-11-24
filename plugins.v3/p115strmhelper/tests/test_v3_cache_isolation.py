@@ -90,7 +90,7 @@ class TestV3CacheIsolation(IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.async_redis.aclose)
         helper = self.redis_module.RedisHelper()
         helper.client = self.redis
-        helper._connect = MagicMock()
+        helper._connect = MagicMock(return_value=self.redis)
         async_helper = self.redis_module.AsyncRedisHelper()
         async_helper.client = self.async_redis
         async_helper._connect = AsyncMock(return_value=self.async_redis)

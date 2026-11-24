@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
 from types import MethodType, SimpleNamespace
+from typing import overload
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -90,6 +91,7 @@ class TestV3U115Requests(TestCase):
             "RateStats": MagicMock(side_effect=lambda **kwargs: MagicMock()),
             "time": SimpleNamespace(time=lambda: self.now, sleep=self._sleep),
             "logger": MagicMock(),
+            "overload": overload,
         }
         no_login = _compile(host_path, host_namespace, "NoCheckInException")
         self.host_class = _compile(host_path, host_namespace, "U115Pan")
@@ -196,15 +198,31 @@ class TestV3U115Requests(TestCase):
 
     def test_rate_limit_uses_host_cooldown_and_bounded_retry(self) -> None:
         """
-        429 使用宿主统一冷却及重试预算，不再无限递归
+        429 使用宿主非阻塞共享冷却窗口，冷却期内短路返回且冷却结束后恢复请求
         """
-        self.responses = [Response(429), Response(429)]
+        self.responses = [
+            Response(429),
+            Response(200, json={"code": 0, "state": True, "data": []}),
+        ]
         result = self.helper._request_api("GET", "/open/ufile/files", retry_limit=1)
         self.assertIsNone(result)
-        self.assertEqual(len(self.requests), 2)
-        self.assertEqual(self.delays, [self.host.limit_sleep_seconds])
-        self.assertEqual(self.host._limit_until, self.now)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.delays, [])
+        self.assertEqual(
+            self.host._limit_until, self.now + self.host.limit_sleep_seconds
+        )
+        self.assertEqual(self.host._api_limiter.acquire.call_count, 1)
+
+        second = self.helper_class()
+        self.assertIsNone(second._request_api("GET", "/open/ufile/files"))
+        self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.host._api_limiter.acquire.call_count, 2)
+
+        self.now = self.host._limit_until
+        recovered = second._request_api("GET", "/open/ufile/files")
+        self.assertEqual(recovered, {"code": 0, "state": True, "data": []})
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.host._api_limiter.acquire.call_count, 3)
 
     def test_business_codes_are_accepted_only_by_explicit_callers(self) -> None:
         """

@@ -79,7 +79,7 @@ class TestV3TransferSize(TestCase):
                 item, key = self._item(recorded, actual, f"Example.S01E0{index}.mkv")
                 frozen = self.case.durable.snapshot_transfer_result(item)
                 self.case.outbox[self.case.types.EventType.TransferComplete.value](
-                    SimpleNamespace(payload=frozen)
+                    SimpleNamespace(event_key="test-outbox-event", payload=frozen)
                 )
                 record = self.store.load(key)
                 self.assertEqual(record["state"], "done")

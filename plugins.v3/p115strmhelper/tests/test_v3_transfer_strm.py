@@ -1,6 +1,10 @@
 import importlib
 import os
 import sys
+from contextlib import nullcontext
+from datetime import datetime, timezone
+from functools import partial
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
@@ -108,22 +112,52 @@ class TestV3TransferStrm(TestCase):
         self.events = importlib.import_module("app.sdk.events")
         self.assertIs(self.events.snapshot_event_data, snapshot)
         self.durable = importlib.import_module("app.application.chain.events")
-        self.outbox = _method(
-            host / "app/startup/composition/outbox.py",
-            "build_outbox_handlers",
-            {
-                "EventManager": lambda: SimpleNamespace(
-                    send_event_strict=self._dispatch
-                ),
-                "EventType": self.types.EventType,
-                "durable_event_topic": lambda event: event.value,
-                "restore_transfer_result": self.durable.restore_transfer_result,
-                "DOWNLOAD_NOTIFICATION_TOPIC": "download.notification",
-                "DOWNLOAD_MODULE_TOPIC": "download.module",
-                "DOWNLOAD_SUBTITLE_TOPIC": "download.subtitle",
-                "validate_durable_event_handlers": lambda handlers: None,
-            },
-        )()
+        outbox_contract = importlib.import_module("app.application.outbox")
+        outbox_path = host / "app/startup/composition/outbox.py"
+        outbox_namespace: Dict[str, Any] = {
+            "EventManager": lambda: SimpleNamespace(
+                broadcast_handler_ids=lambda _event_type: ("p115strmhelper",),
+                send_event_strict=self._dispatch,
+            ),
+            "EventType": self.types.EventType,
+            "DURABLE_EVENT_TOPICS": outbox_contract.DURABLE_EVENT_TOPICS,
+            "EVENT_HANDLER_TOPIC_PREFIX": outbox_contract.EVENT_HANDLER_TOPIC_PREFIX,
+            "OutboxIntent": outbox_contract.OutboxIntent,
+            "durable_event_topic": lambda event: event.value,
+            "restore_download_added": self.durable.restore_download_added,
+            "restore_transfer_result": self.durable.restore_transfer_result,
+            "DOWNLOAD_NOTIFICATION_TOPIC": outbox_contract.DOWNLOAD_NOTIFICATION_TOPIC,
+            "DOWNLOAD_MODULE_TOPIC": outbox_contract.DOWNLOAD_MODULE_TOPIC,
+            "DOWNLOAD_SUBTITLE_TOPIC": outbox_contract.DOWNLOAD_SUBTITLE_TOPIC,
+            "validate_durable_event_handlers": lambda handlers: None,
+            "correlation_scope": lambda _key: nullcontext(),
+            "SessionFactory": object(),
+            "datetime": datetime,
+            "timezone": timezone,
+            "partial": partial,
+            "sha256": sha256,
+        }
+        dispatch_handler = _method(
+            outbox_path, "dispatch_event_handler", outbox_namespace
+        )
+        outbox_namespace["SqlAlchemyOutboxDispatchStore"] = lambda _factory: (
+            SimpleNamespace(
+                stage_fanout=lambda _parent, intents, _now: [
+                    dispatch_handler(
+                        SimpleNamespace(
+                            topic=intent.topic,
+                            payload=intent.payload,
+                            event_key=intent.event_key,
+                        )
+                    )
+                    for intent in intents
+                ]
+            )
+        )
+        outbox_namespace["_stage_event_handlers"] = _method(
+            outbox_path, "_stage_event_handlers", outbox_namespace
+        )
+        self.outbox = _method(outbox_path, "build_outbox_handlers", outbox_namespace)()
         self.logger = MagicMock()
         module("app.sdk.logging", logger=self.logger)
         module("app.sdk.utilities", SystemUtils=MagicMock())
@@ -254,7 +288,10 @@ class TestV3TransferStrm(TestCase):
             mediainfodownloader=self.downloader,
         )
 
-    def _dispatch(self, event_type: Any, payload: Dict[str, Any]) -> None:
+    def _dispatch(
+        self, event_type: Any, payload: Dict[str, Any], *, handler_id: Any = None
+    ) -> None:
+        self.assertEqual(handler_id, "p115strmhelper")
         self.assertIsInstance(payload["transferinfo"], self.transfer_type)
         self.assertIsInstance(payload["mediainfo"], self.context.MediaInfo)
         self._run(payload, event_type)
@@ -271,7 +308,8 @@ class TestV3TransferStrm(TestCase):
             (self.types.EventType.AudioTransferComplete, "Example.S01E01.flac"),
         ):
             message = SimpleNamespace(
-                payload=self.durable.snapshot_transfer_result(self._item(filename))
+                event_key="test-outbox-event",
+                payload=self.durable.snapshot_transfer_result(self._item(filename)),
             )
             handler = self.outbox[event.value]
             with self.subTest(event=event):
@@ -531,7 +569,8 @@ class TestV3TransferStrm(TestCase):
                     update={"modify_time": 1791877143}
                 )
                 message = SimpleNamespace(
-                    payload=self.durable.snapshot_transfer_result(item)
+                    event_key="test-outbox-event",
+                    payload=self.durable.snapshot_transfer_result(item),
                 )
                 handler = self.outbox[self.types.EventType.TransferComplete.value]
                 handler(message)

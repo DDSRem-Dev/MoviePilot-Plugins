@@ -1,7 +1,11 @@
 import ast
 import asyncio
 import os
+import threading
+import time
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Lock
@@ -361,10 +365,51 @@ class TestV3ShareQueueLifecycle(TestCase):
         path = host / "app/runtime/extensions/plugin/lifecycle.py"
         if not path.exists():
             self.skipTest("需要 MOVIEPILOT_SOURCE 指向 V3 主程序")
+        gate_source = ast.parse(
+            (host / "app/runtime/extensions/plugin/gate.py").read_text()
+        )
+        gate_nodes = [
+            node
+            for node in gate_source.body
+            if isinstance(node, ast.ClassDef)
+            and node.name in ("_Operation", "PluginLifecycleGate")
+        ]
+        gate_namespace: Dict[str, Any] = {
+            "threading": threading,
+            "time": time,
+            "contextmanager": contextmanager,
+            "dataclass": dataclass,
+            "PluginMutationRejectedError": RuntimeError,
+            "PluginLifecycleActivity": SimpleNamespace,
+        }
+        exec(
+            compile(
+                ast.fix_missing_locations(
+                    ast.Module(
+                        body=[
+                            ast.ImportFrom(
+                                module="__future__",
+                                names=[ast.alias(name="annotations")],
+                                level=0,
+                            ),
+                            *gate_nodes,
+                        ],
+                        type_ignores=[],
+                    )
+                ),
+                str(host / "app/runtime/extensions/plugin/gate.py"),
+                "exec",
+            ),
+            gate_namespace,
+        )
         quiesce = _method(path, "_quiesce_hooks", {})
         plugin, namespace = self._plugin_stop()
         namespace["servicer"].stop.side_effect = [False, True]
-        lifecycle = SimpleNamespace(_quiesced_hooks={}, _logger=MagicMock())
+        lifecycle = SimpleNamespace(
+            _quiesced_hooks={},
+            _logger=MagicMock(),
+            _gate=gate_namespace["PluginLifecycleGate"](),
+        )
         self.assertIs(quiesce(lifecycle, {"P115StrmHelper": plugin}), False)
         self.assertNotIn("stop_service", lifecycle._quiesced_hooks["P115StrmHelper"])
         self.assertIs(quiesce(lifecycle, {"P115StrmHelper": plugin}), True)
