@@ -175,7 +175,7 @@ class TestDirectoryUploadRescan(TestCase):
             library = Path(tmpdir) / "library"
             library.mkdir()
             (library / "movie.mkv").write_text("v")
-            (library / "movie.strm").write_text("s")
+            (library / "generated.strm").write_text("s")
             self.config["directory_upload_uploadext"] = "*"
             rescan = self.rescan_cls()
             missing = rescan._collect_missing([(str(library), str(library))], 50)
