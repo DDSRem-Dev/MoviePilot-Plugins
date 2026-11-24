@@ -150,3 +150,17 @@ class TestV3OpenSecuploadFinish(TestCase):
         self.assertEqual(
             [endpoint for _, endpoint in self.requests].count("/open/upload/init"), 2
         )
+
+    def test_abort_failure_still_finishes_as_secupload(self) -> None:
+        """
+        中止分片失败时仅记录清理告警，仍按秒传成功收尾
+        """
+        self.bucket.abort_multipart_upload.side_effect = RuntimeError("abort failed")
+        target = SimpleNamespace(path="/movies", fileid="123")
+        result = self.helper.upload(target_dir=target, local_path=self.path)
+
+        self.assertEqual(result, self.uploaded)
+        self.assertEqual(self.progress[-1], 100)
+        self.bucket.abort_multipart_upload.assert_called_once()
+        self.bucket.complete_multipart_upload.assert_not_called()
+        self.bucket.upload_part.assert_called_once()

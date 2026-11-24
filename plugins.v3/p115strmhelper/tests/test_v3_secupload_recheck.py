@@ -112,6 +112,11 @@ class TestV3SecuploadRecheck(TestCase):
             self.core._recheck_secupload("video.mkv", 10, "sha1", 123, lambda _: "")
         )
 
+        self.client.upload_file_init.return_value = "error text"
+        self.assertFalse(
+            self.core._recheck_secupload("video.mkv", 10, "sha1", 123, lambda _: "")
+        )
+
     def test_p115open_recheck_hits_status_two(self) -> None:
         """
         OpenAPI 通道只在初始化返回 status 2 时判定命中
@@ -160,3 +165,22 @@ class TestV3SecuploadRecheck(TestCase):
         self.assertFalse(
             self.open_helper._recheck_secupload("a", 1, "U_1_1", "s", "p")
         )
+
+    def test_p115open_recheck_rejects_non_dict_response(self) -> None:
+        """
+        复判返回非 dict 结构时判定为未命中，不向分片上传抛异常
+        """
+        for payload in (
+            "error text",
+            ["state"],
+            200,
+            {"state": True, "data": "oops"},
+            {"state": True, "data": [{"status": 2}]},
+        ):
+            with self.subTest(payload=payload):
+                self.open_helper._request_api.return_value = payload
+                self.assertFalse(
+                    self.open_helper._recheck_secupload(
+                        "video.mkv", 10, "U_1_123", "sha1", "preid"
+                    )
+                )

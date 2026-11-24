@@ -579,8 +579,10 @@ class P115DiskCore:
                             try:
                                 bucket.abort_multipart_upload(object_name, upload_id)
                             except Exception as e:
-                                logger.warn(f"【P115Disk】中止分片上传失败: {e}")
-                                continue
+                                logger.warn(
+                                    f"【P115Disk】{target_name} 中止分片上传失败，"
+                                    f"遗留分片交由 OSS 过期清理: {e}"
+                                )
                             return finish_by_secupload(perf_counter() - start_time)
 
             # 完成上传

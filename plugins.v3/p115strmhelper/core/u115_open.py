@@ -129,9 +129,12 @@ class U115OpenHelper:
         except Exception as e:
             logger.warn(f"【P115Open】分片上传期间复判秒传失败: {e}")
             return False
-        if not resp or not resp.get("state"):
+        if not isinstance(resp, dict) or not resp.get("state"):
             return False
-        return (resp.get("data") or {}).get("status") == 2
+        data = resp.get("data")
+        if not isinstance(data, dict):
+            return False
+        return data.get("status") == 2
 
     @property
     def access_token(self) -> Optional[str]:
@@ -817,8 +820,10 @@ class U115OpenHelper:
                             try:
                                 bucket.abort_multipart_upload(object_name, upload_id)
                             except Exception as e:
-                                logger.warn(f"【P115Open】中止分片上传失败: {e}")
-                                continue
+                                logger.warn(
+                                    f"【P115Open】{target_name} 中止分片上传失败，"
+                                    f"遗留分片交由 OSS 过期清理: {e}"
+                                )
                             send_secupload_result(perf_counter() - start_time)
                             return U115OpenHelper._delay_get_item(target_path)
         except Exception as e:
