@@ -707,15 +707,11 @@ class P115Disk(_PluginBase):
         :param path (Path): 文件路径
 
         :return FileItem: 文件项，存储不匹配或不存在返回 None
-
-        :raises RuntimeError: 存储未初始化或查询失败时传播错误
         """
-        if storage != self._disk_name:
+        if storage != self._disk_name or not self._p115_api:
             return None
-        if not self._p115_api:
-            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
 
-        return self._p115_api.get_item_strict(path)
+        return self._p115_api.get_item(path)
 
     def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
         """
@@ -732,7 +728,9 @@ class P115Disk(_PluginBase):
             return None
         if FileItemQueryResult is None:
             raise RuntimeError("当前宿主不支持严格查询回执")
-        return FileItemQueryResult(item=self.get_file_item(storage, path))
+        if not self._p115_api:
+            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
+        return FileItemQueryResult(item=self._p115_api.get_item_strict(path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
         """

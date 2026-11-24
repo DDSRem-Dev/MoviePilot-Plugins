@@ -1631,14 +1631,10 @@ class CloudDriveDisk(_PluginBase):
         :param path (Path): 云端路径
 
         :return FileItem: FileItem；不存在或非本储存时返回 None
-
-        :raises RuntimeError: 存储未初始化或查询失败时传播错误
         """
-        if storage != self._disk_name:
+        if storage != self._disk_name or not self._clouddrive_api:
             return None
-        if not self._clouddrive_api:
-            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
-        return self._clouddrive_api.get_item_strict(path)
+        return self._clouddrive_api.get_item(path)
 
     def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
         """
@@ -1655,7 +1651,9 @@ class CloudDriveDisk(_PluginBase):
             return None
         if FileItemQueryResult is None:
             raise RuntimeError("当前宿主不支持严格查询回执")
-        return FileItemQueryResult(item=self.get_file_item(storage, path))
+        if not self._clouddrive_api:
+            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
+        return FileItemQueryResult(item=self._clouddrive_api.get_item_strict(path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
         """

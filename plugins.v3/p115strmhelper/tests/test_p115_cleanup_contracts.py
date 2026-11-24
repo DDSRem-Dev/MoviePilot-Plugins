@@ -54,10 +54,10 @@ class StorageProviderContracts(TestCase):
                 provider._disk_name = storage
                 api = Mock()
                 setattr(provider, attribute, api)
-                api.get_item_strict.side_effect = OSError("offline")
-                with self.assertRaises(OSError):
-                    provider.get_file_item(storage, Path("/media"))
-                api.get_item.assert_not_called()
+                api.get_item.return_value = None
+                self.assertIsNone(provider.get_file_item(storage, Path("/missing")))
+                api.get_item.assert_called_once_with(Path("/missing"))
+                api.get_item_strict.assert_not_called()
                 receipt_cls = _load_class(
                     source,
                     name,
@@ -66,28 +66,42 @@ class StorageProviderContracts(TestCase):
                 )
                 receipt_provider = object.__new__(receipt_cls)
                 receipt_provider._disk_name = storage
-                receipt_provider.get_file_item = provider.get_file_item
+                setattr(receipt_provider, attribute, api)
+                api.get_item.reset_mock()
+                api.get_item_strict.side_effect = OSError("offline")
                 with self.assertRaises(OSError):
                     receipt_provider.get_file_item_strict(storage, Path("/media"))
+                api.get_item.assert_not_called()
                 api.get_item_strict.side_effect = None
                 api.get_item_strict.return_value = None
-                self.assertIsNone(provider.get_file_item(storage, Path("/missing")))
                 receipt = receipt_provider.get_file_item_strict(
                     storage, Path("/missing")
                 )
                 self.assertIsNotNone(receipt)
                 self.assertIsNone(receipt.item)
+                item = SimpleNamespace(path="/media/Movie.mkv")
+                api.get_item_strict.return_value = item
+                self.assertIs(
+                    receipt_provider.get_file_item_strict(
+                        storage, Path(item.path)
+                    ).item,
+                    item,
+                )
+                api.get_item_strict.reset_mock()
                 self.assertIsNone(
                     receipt_provider.get_file_item_strict("unrelated", Path("/media"))
                 )
+                api.get_item_strict.assert_not_called()
                 self.assertIn(
                     '"get_file_item_strict": self.get_file_item_strict',
                     source.read_text(),
                 )
                 setattr(provider, attribute, None)
-                with self.assertRaises(RuntimeError):
-                    provider.get_file_item(storage, Path("/media"))
+                self.assertIsNone(provider.get_file_item(storage, Path("/media")))
                 self.assertIsNone(provider.get_file_item("unrelated", Path("/media")))
+                setattr(receipt_provider, attribute, None)
+                with self.assertRaises(RuntimeError):
+                    receipt_provider.get_file_item_strict(storage, Path("/media"))
 
 
 class SyncDeleteEntryContracts(TestCase):
