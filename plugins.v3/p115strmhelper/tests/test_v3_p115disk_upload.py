@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -58,6 +59,7 @@ class TestV3P115DiskUpload(TestCase):
             {
                 "IdPathCache": id_cache,
                 "ItemIdCache": item_cache,
+                "os": os,
                 "RLock": RLock,
                 "RateLimiter": limiter,
                 "hashes": hashes,
