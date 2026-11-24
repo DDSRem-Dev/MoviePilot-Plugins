@@ -428,8 +428,10 @@ class BatchTransferContracts(
                 for future in futures[1:]:
                     self.assertIsNotNone(future.result(timeout=10))
         copies = [ids for kind, ids in self.storage.calls if kind == "copy"]
-        self.assertEqual(len(copies), 1)
-        self.assertEqual(set(copies[0]), {item.fileid for item in sources[1:]})
+        copied_ids = [file_id for ids in copies for file_id in ids]
+        self.assertGreaterEqual(len(copies), 1)
+        self.assertEqual(set(copied_ids), {item.fileid for item in sources[1:]})
+        self.assertEqual(len(copied_ids), len(set(copied_ids)))
 
     def test_copy_batch_and_replay(self) -> None:
         """

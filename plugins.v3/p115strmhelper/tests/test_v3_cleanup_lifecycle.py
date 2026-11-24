@@ -33,6 +33,7 @@ class TestV3CleanupLifecycle(TestCase):
                 "ShareInteractiveGenStrmQueue",
                 "directory_upload_stability_tracker",
                 "directory_upload_queue",
+                "directory_upload_rescan",
                 "emby_mediainfo_queue",
                 "sync_del_webhook_queue",
                 "share_audit_download_queue",

@@ -10,7 +10,11 @@ from app.schemas import MessageType
 
 from ...core.config import configer
 from ...core.message import post_message
-from ...helper.hdhive.browser import HDHiveError, HDHivePlaywrightClient
+from ...helper.hdhive.browser import (
+    HDHiveError,
+    HDHivePlaywrightClient,
+    is_negative_checkin_result,
+)
 from ...utils.sentry import sentry_manager
 from .scheduler import _KEY_LAST_DONE
 
@@ -65,7 +69,10 @@ def run_hdhive_checkin_once(
         for attempt in range(1, _HDHIVE_CHECKIN_MAX_RETRIES + 1):
             ok, detail = client.checkin(gamble=gamble)
             if ok:
-                logger.info("【RE0 签到】%s 成功：%s", label, detail)
+                if is_negative_checkin_result(detail):
+                    logger.warning("【RE0 签到】%s 已完成但积分减少：%s", label, detail)
+                else:
+                    logger.info("【RE0 签到】%s 成功：%s", label, detail)
                 if manual:
                     tz = pytz_timezone(settings.TZ)
                     today_str = datetime.now(tz=tz).strftime("%Y-%m-%d")
@@ -90,9 +97,14 @@ def run_hdhive_checkin_once(
                 )
 
         if send_notify and configer.notify:
+            title = (
+                f"RE0 {label} 完成但积分减少"
+                if ok and is_negative_checkin_result(detail)
+                else f"RE0 {label} {'成功' if ok else '失败'}"
+            )
             post_message(
                 mtype=MessageType.Plugin,
-                title=f"RE0 {label} {'成功' if ok else '失败'}",
+                title=title,
                 text="\n" + detail + "\n",
             )
         return ok, detail

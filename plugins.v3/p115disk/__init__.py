@@ -493,10 +493,17 @@ class P115Disk(_PluginBase):
                     "message": "插件未启用或未初始化",
                     "data": None,
                 }
+            usage = self._p115_api.usage()
+            if usage is None:
+                return {
+                    "success": False,
+                    "message": "无法获取 115 存储容量，请检查 Cookie 是否有效并重新登录",
+                    "data": None,
+                }
             return {
                 "success": True,
                 "message": "",
-                "data": self._p115_api.usage().model_dump(),
+                "data": usage.model_dump(),
             }
         return {
             "success": False,

@@ -114,6 +114,18 @@ class TestV3StrmEventLifecycle(TestCase):
         self.assertEqual(self.runtime.errors, [])
         self.assertTrue(self.service._stop_sync_operations(timeout=0))
 
+    def test_partial_full_sync_reports_scan_failure(self) -> None:
+        """
+        局部全量失败时通知包含可读原因且不会宣称已完成
+        """
+        helper = self.namespace["FullSyncStrmHelper"].return_value
+        helper.generate_strm_files.return_value = False
+        helper.scan_error = "清理目录缓存并重试 1 次后仍缺少目录信息，请检查网盘目录"
+        self.callbacks["p115_strm"](self._event("p115_strm"))
+        notification = self.namespace["post_message"].call_args.kwargs
+        self.assertIn("未完成", notification["title"])
+        self.assertIn(helper.scan_error, notification["text"])
+
     def test_transfer_exception_propagates_and_releases_registration(self) -> None:
         """
         整理完成异常继续上抛供严格投递重试，不被生命周期登记吞掉

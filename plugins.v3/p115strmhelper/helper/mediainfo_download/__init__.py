@@ -23,6 +23,7 @@ from p115client import check_response
 from p115client.const import TYPE_TO_SUFFIXES
 from p115client.tool.iter_nodes import iter_nodes
 from p115client.tool.iterdir import iter_files, iter_files_skim
+from p115client.type import P115URL
 from p115client.util import reduce_image_url_layers
 from p115pickcode import pickcode_to_id
 from zstandard import ZstdCompressor, ZstdDecompressor
@@ -162,7 +163,7 @@ class MediaInfoDownloader:
                 pickcode, app="android", user_agent=configer.get_user_agent()
             )
             check_response(resp)
-            data = resp["data"]
+            data = dict(resp["data"], headers=resp.get("headers") or {})
             data["file_name"] = unquote(urlsplit(data["url"]).path.rpartition("/")[-1])
         except Exception as e:
             logger.error(f"【媒体信息文件下载】{pickcode} 获取下载链接异常: {e}")
@@ -240,6 +241,21 @@ class MediaInfoDownloader:
             else:
                 yield item
 
+    def _get_download_headers(
+        self, download_url: str, hide_cookies: bool = False
+    ) -> Dict[str, str]:
+        headers = {key.lower(): value for key, value in self.headers.items()}
+        if hide_cookies:
+            headers.pop("cookie", None)
+        if isinstance(download_url, (P115URL, Url)):
+            headers.update(
+                {
+                    key.lower(): value
+                    for key, value in (download_url.get("headers") or {}).items()
+                }
+            )
+        return headers
+
     def save_mediainfo_file(
         self, file_path: Path, file_name: str, download_url: str
     ) -> bool:
@@ -252,7 +268,7 @@ class MediaInfoDownloader:
                 "GET",
                 download_url,
                 timeout=30,
-                headers=self.headers,
+                headers=self._get_download_headers(download_url),
                 follow_redirects=True,
             ) as response:
                 response.raise_for_status()
@@ -283,7 +299,7 @@ class MediaInfoDownloader:
         :param file_path (Path): 文件路径
         :param file_name (str): 文件名称
         :param download_url (str): 下载地址，为空则直接记失败并返回
-        :param hide_cookies (bool): 是否使用 Cookie 下载，默认 False
+        :param hide_cookies (bool): 是否隐藏账号 Cookie，保留直链专用鉴权头，默认 False
         :param sha1 (str): 文件 115 网盘 sha1，如果设置则会返回数据压缩信息
 
         :return Tuple: 成功且需要 OOF 上传时返回元组，否则返回 None（含失败与 403 中止）
@@ -297,10 +313,10 @@ class MediaInfoDownloader:
             for attempt in range(max_retries):
                 file_content_buffer = bytearray()
                 try:
-                    request_headers = self.headers.copy()
-                    request_headers["Connection"] = "close"
-                    if hide_cookies:
-                        request_headers.pop("Cookie")
+                    request_headers = self._get_download_headers(
+                        download_url, hide_cookies=hide_cookies
+                    )
+                    request_headers["connection"] = "close"
 
                     async with client.stream(
                         "GET", download_url, timeout=30, headers=request_headers
@@ -614,7 +630,8 @@ class MediaInfoDownloader:
                             if attr["size"] < 1024 * 1024 * 115:
                                 url = self.client.download_url(
                                     attr["pickcode"],
-                                    use_web_api=True,
+                                    app="web",
+                                    method="GET",
                                     user_agent=configer.get_user_agent(),
                                 )
                         else:
@@ -729,7 +746,7 @@ class MediaInfoDownloader:
                 for batch in batched(resp.items(), self.max_workers):
                     share_batch = [
                         {
-                            "url": value.geturl(),
+                            "url": value,
                             "path": sha1_to_path.get(value["sha1"]),
                             "sha1": value["sha1"],
                         }
@@ -776,7 +793,7 @@ class MediaInfoDownloader:
                 resp = self.client.download_urls(
                     ",".join(pcs), user_agent=configer.get_user_agent()
                 )
-                data_map = {key: value.geturl() for key, value in resp.items()}
+                data_map = resp
                 for batch in batched(item_list, self.max_workers):
                     batch_list = list(batch)
                     if self.stop_all_flag:

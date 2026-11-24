@@ -1268,10 +1268,15 @@ class P115StrmHelper(_PluginBase):
         userid = self._get_event_userid(event_data)
 
         ok, text = run_hdhive_checkin_once(manual=True, send_notify=False)
+        title = (
+            "RE0 手动签到完成但积分减少"
+            if ok and text.startswith("签到完成但积分减少：")
+            else "RE0 手动签到" + ("成功" if ok else "失败")
+        )
         post_message(
             channel=event.event_data.get("channel"),
             source=event.event_data.get("source"),
-            title="RE0 手动签到" + ("成功" if ok else "失败"),
+            title=title,
             text="\n" + text + "\n",
             userid=userid,
         )

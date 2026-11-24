@@ -28,6 +28,7 @@ from p115client.tool.attr import normalize_attr, get_id
 from ..core.cache import idpathcacher
 from ..db_manager.oper import FileDbHelper
 from ..utils.limiter import ApiEndpointCooldown
+from .p115_client import _inject_timeout
 
 
 class ShareP115Client(P115Client):
@@ -118,7 +119,7 @@ def iter_share_files_with_path(
         base_url: Optional[str] = None
 
     if isinstance(client, (str, PathLike)):
-        client = ShareP115Client(client, check_for_relogin=True)
+        client = ShareP115Client(client)
     speed_configs = {
         0: (0.25, 0.25, 0.75),
         1: (0.5, 0.5, 1.5),
@@ -300,14 +301,15 @@ def get_pid_by_path(
             return pid
     kwargs = configer.get_ios_ua_app(app=False)
     if request_timeout is not None:
-        kwargs["extensions"] = {
-            "timeout": {
+        _inject_timeout(
+            kwargs,
+            {
                 "connect": min(request_timeout, 30),
                 "pool": min(request_timeout, 15),
                 "read": request_timeout,
                 "write": request_timeout,
-            }
-        }
+            },
+        )
     resp = client.fs_dir_getid(path, **kwargs)
     check_response(resp)
     pid = resp.get("id", -1)
@@ -392,7 +394,7 @@ def iter_life_behavior_once(
     :return: 迭代器，产生 115 生活操作事件日志数据字典
     """
     if isinstance(client, (str, PathLike)):
-        client = P115Client(client, check_for_relogin=True)
+        client = P115Client(client)
     life_behavior_detail_cycle = cycle(
         [
             partial(client.life_behavior_detail, **request_kwargs),

@@ -168,7 +168,7 @@ class P115FuseOperations(Operations):
             raise ValueError("client 参数不能为 None，请提供 P115Client 实例或 cookie")
 
         if not isinstance(client, P115Client):
-            client = P115Client(client, check_for_relogin=True)
+            client = P115Client(client)
         self.client = client
         self.uid = uid
         self.gid = gid
@@ -260,7 +260,7 @@ class P115FuseOperations(Operations):
         :param flags (int): 打开标志
         :return int: 文件句柄 ID
         """
-        file = self.fs.open(path, mode="rb", **configer.get_ios_ua_app(app=False))
+        file = self.fs.open(path, mode="rb")
         fh = self._get_id()
         self._opened[fh] = file
         return fh

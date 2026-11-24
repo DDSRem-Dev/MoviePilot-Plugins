@@ -111,6 +111,9 @@ jobs:
           python -m pip install -r MoviePilot/requirements.txt
           python -m pip install --force-reinstall --no-deps "$NATIVE_WHEELS_DIR"/*.whl
           python -m pip install --find-links plugins.v2/p115strmhelper/wheels -r plugins.v2/p115strmhelper/requirements.txt pytest
+          python -m pip install --force-reinstall --no-deps \
+            plugins.v2/p115strmhelper/wheels/p115client-0.0.9.7.8.3-py3-none-any.whl \
+            plugins.v2/p115strmhelper/wheels/python_httpfile-0.0.6.3-py3-none-any.whl
 
       - name: Verify freshly built native imports
         shell: bash

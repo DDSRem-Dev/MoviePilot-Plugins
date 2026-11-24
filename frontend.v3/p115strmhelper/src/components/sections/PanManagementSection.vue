@@ -437,6 +437,26 @@
             </v-col>
           </v-row>
 
+          <v-row>
+            <v-col cols="12" md="4">
+              <v-switch v-model="config.directory_upload_rescan_enabled" label="启用漏传巡检"
+                hint="周期扫描缺少 STRM 的上传文件，自动补交上传队列" persistent-hint
+                color="info" density="compact" hide-details="auto"></v-switch>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field v-model.number="config.directory_upload_rescan_interval"
+                label="巡检间隔（分钟）" type="number" min="1" max="1440"
+                hint="首次启动后约 2 分钟开始巡检，之后按此间隔执行" persistent-hint
+                density="compact" variant="outlined" hide-details="auto"></v-text-field>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field v-model.number="config.directory_upload_rescan_max_submit"
+                label="单轮提交上限" type="number" min="1" max="10000"
+                hint="限制单轮补交任务数量，避免集中占用上传队列" persistent-hint
+                density="compact" variant="outlined" hide-details="auto"></v-text-field>
+            </v-col>
+          </v-row>
+
           <v-divider class="my-3"></v-divider>
           <div class="text-subtitle-2 mb-2">路径配置:</div>
 

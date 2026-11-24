@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from platform import machine as _machine
+from re import IGNORECASE
 from re import compile as re_compile
 from re import fullmatch
 from shutil import rmtree
@@ -85,9 +86,16 @@ USER_MENU_SELECTOR = (
     'button[aria-label="打开用户菜单"], button[aria-label="Open user menu"]'
 )
 CHECKIN_BUTTON_SELECTORS = {
-    False: 'button:has(path[d^="M11.5 21h-5.5"])',
-    True: 'button:has(path[d^="M3 3m0 2a2 2 0 0 1 2 -2h14"])',
+    False: 'button:has(path[d^="M11.5 21h-5.5"]):visible',
+    True: 'button:has(path[d^="M3 3m0 2a2 2 0 0 1 2 -2h14"]):visible',
 }
+
+_CHECKIN_NEGATIVE_REWARD_PREFIX = "签到完成但积分减少："
+_CHECKIN_NEGATIVE_REWARD_PATTERNS = (
+    re_compile(r"(?:获得|奖励)\s*[-−]\s*\d+\s*(?:积分|points?)", IGNORECASE),
+    re_compile(r"(?:扣除|减少|损失)\s*[-+＋−]?\s*\d+\s*(?:积分|points?)", IGNORECASE),
+    re_compile(r"(?:lost|deducted|decreased)\s+\d+\s+points?", IGNORECASE),
+)
 
 INSTALL_RESULT_OBSERVER_JS = """
 () => {
@@ -181,6 +189,8 @@ def parse_checkin_result(text: str, status: str = "") -> Optional[Tuple[bool, st
         )
     ):
         return False, clean
+    if any(pattern.search(clean) for pattern in _CHECKIN_NEGATIVE_REWARD_PATTERNS):
+        return True, f"{_CHECKIN_NEGATIVE_REWARD_PREFIX}{clean}"
     if status == "success" or any(
         word in lowered
         for word in (
@@ -191,6 +201,17 @@ def parse_checkin_result(text: str, status: str = "") -> Optional[Tuple[bool, st
     ):
         return True, clean
     return None
+
+
+def is_negative_checkin_result(detail: str) -> bool:
+    """
+    判断签到结果是否表示已完成但积分减少
+
+    :param detail (str): 签到结果文案
+
+    :return bool: 是扣分完成结果返回 True
+    """
+    return detail.startswith(_CHECKIN_NEGATIVE_REWARD_PREFIX)
 
 
 def _click_home_dialog_button(page: Any, button: Any, debug: Any) -> None:
@@ -317,6 +338,21 @@ def run_checkin(page: Any, gamble: bool, debug: Any) -> Tuple[bool, str]:
     page.locator(USER_MENU_SELECTOR).first.click(timeout=10000)
     button = page.locator(CHECKIN_BUTTON_SELECTORS[gamble]).first
     button.wait_for(state="visible", timeout=10000)
+    try:
+        count = page.locator(CHECKIN_BUTTON_SELECTORS[gamble]).count()
+        if isinstance(count, int):
+            debug.log(f"签到按钮可见候选数量: {count}")
+        target = button.evaluate(
+            """el => ({
+                ariaLabel: el.getAttribute('aria-label') || '',
+                text: (el.innerText || '').trim(),
+                path: el.querySelector('path')?.getAttribute('d') || '',
+            })"""
+        )
+        if isinstance(target, dict):
+            debug.log(f"签到按钮目标: {target}")
+    except Exception as e:
+        debug.log(f"签到按钮目标信息读取失败: {e}")
     page.evaluate(INSTALL_RESULT_OBSERVER_JS)
     try:
         # 站点校验 isTrusted，必须由浏览器真实点击以提交 Server Action

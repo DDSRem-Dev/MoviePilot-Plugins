@@ -733,9 +733,10 @@ class P115Api:
             logger.error(f"【P115Disk】获取文件详情失败: {fileitem.name}")
             return None
 
-        download_url = self.client.download_url(
+        download_info = self.client.download_url(
             detail.pickcode, user_agent=settings.USER_AGENT
-        ).geturl()
+        )
+        download_url = download_info.geturl() if download_info else None
         if not download_url:
             logger.error(f"【P115Disk】下载链接为空: {fileitem.name}")
             return None
@@ -750,9 +751,14 @@ class P115Api:
         progress_callback = transfer_process(Path(fileitem.path).as_posix())
 
         try:
-            with stream(
-                "GET", download_url, headers={"user-agent": settings.USER_AGENT}
-            ) as r:
+            headers = {"user-agent": settings.USER_AGENT}
+            headers.update(
+                {
+                    key.lower(): value
+                    for key, value in (download_info.get("headers") or {}).items()
+                }
+            )
+            with stream("GET", download_url, headers=headers) as r:
                 r.raise_for_status()
                 downloaded_size = 0
 

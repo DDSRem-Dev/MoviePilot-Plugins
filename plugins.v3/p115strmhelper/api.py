@@ -379,7 +379,7 @@ class Api:
                 }
 
             # 获取空间信息
-            space_info_resp = _temp_client.fs_index_info(payload=0)
+            space_info_resp = _temp_client.fs_index_info(0)
             if space_info_resp.get("state"):
                 data = space_info_resp.get("data", {}).get("space_info", {})
                 storage_details_dict = {
