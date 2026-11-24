@@ -41,19 +41,11 @@ class FakeChain:
     def _item(self, p):
         if p in self.files:
             return SimpleNamespace(
-                storage="u115",
-                type="file",
-                path=p,
-                name=PurePosixPath(p).name,
-                fileid=p,
+                storage="u115", type="file", path=p, name=PurePosixPath(p).name, fileid=p
             )
         if p in self.dirs:
             return SimpleNamespace(
-                storage="u115",
-                type="dir",
-                path=p + "/",
-                name=PurePosixPath(p).name,
-                fileid=p,
+                storage="u115", type="dir", path=p + "/", name=PurePosixPath(p).name, fileid=p
             )
         return None
 
@@ -113,9 +105,7 @@ class SubtitleBoundary(TestCase):
 
 class DeleteGroup(TestCase):
     def test_movie_all_removed_dir_removed_stop_at_root(self):
-        c = FakeChain(
-            [f"{M}/Movie.mkv", f"{M}/Movie.zh-CN.ass", f"{M}/Movie.zh-TW.forced.srt"]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Movie.zh-CN.ass", f"{M}/Movie.zh-TW.forced.srt"])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok, r)
         self.assertEqual(c.files, set())
@@ -130,30 +120,19 @@ class DeleteGroup(TestCase):
         self.assertIn(ROOT, c.dirs)
 
     def test_nfo_and_images_purged_when_no_video_left(self):
-        c = FakeChain(
-            [f"{M}/Movie.mkv", f"{M}/Movie.nfo", f"{M}/poster.jpg", f"{M}/Movie.en.srt"]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Movie.nfo", f"{M}/poster.jpg", f"{M}/Movie.en.srt"])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok, r)
         self.assertEqual(c.files, set())
-        self.assertEqual(
-            sorted(r.leftovers_deleted), [f"{M}/Movie.nfo", f"{M}/poster.jpg"]
-        )
+        self.assertEqual(sorted(r.leftovers_deleted), [f"{M}/Movie.nfo", f"{M}/poster.jpg"])
         self.assertIn(M, r.dirs_deleted)
         self.assertIn(ROOT, c.dirs)
 
     def test_any_leftover_file_purged_when_no_video_left(self):
-        c = FakeChain(
-            [
-                f"{M}/Movie.mkv",
-                f"{M}/Movie.nfo",
-                f"{M}/notes.txt",
-                f"{M}/theme.mp3",
-                f"{M}/noext",
-                f"{M}/Other.zh.ass",
-                f"{M}/x/y/z.bin",
-            ]
-        )
+        c = FakeChain([
+            f"{M}/Movie.mkv", f"{M}/Movie.nfo", f"{M}/notes.txt", f"{M}/theme.mp3",
+            f"{M}/noext", f"{M}/Other.zh.ass", f"{M}/x/y/z.bin",
+        ])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok, r)
         self.assertEqual(c.files, set())
@@ -168,19 +147,10 @@ class DeleteGroup(TestCase):
         self.assertEqual(c.files, {f"{M}/Movie.nfo", f"{M}/Movie - alt.strm"})
 
     def test_other_video_keeps_sidecars(self):
-        c = FakeChain(
-            [
-                f"{M}/Movie.mkv",
-                f"{M}/Movie - 4K.mkv",
-                f"{M}/Movie.nfo",
-                f"{M}/poster.jpg",
-            ]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Movie - 4K.mkv", f"{M}/Movie.nfo", f"{M}/poster.jpg"])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok)
-        self.assertEqual(
-            c.files, {f"{M}/Movie - 4K.mkv", f"{M}/Movie.nfo", f"{M}/poster.jpg"}
-        )
+        self.assertEqual(c.files, {f"{M}/Movie - 4K.mkv", f"{M}/Movie.nfo", f"{M}/poster.jpg"})
 
     def test_video_in_subdir_keeps_sidecars(self):
         c = FakeChain([f"{M}/Movie.mkv", f"{M}/Movie.nfo", f"{M}/Extras/bts.mkv"])
@@ -211,9 +181,7 @@ class DeleteGroup(TestCase):
         self.assertIn(M, c.dirs)
 
     def test_subdir_with_video_keeps_everything(self):
-        c = FakeChain(
-            [f"{M}/Movie.mkv", f"{M}/Extras/readme.txt", f"{M}/Extras/bts.mp4"]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Extras/readme.txt", f"{M}/Extras/bts.mp4"])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok)
         self.assertEqual(c.files, {f"{M}/Extras/readme.txt", f"{M}/Extras/bts.mp4"})
@@ -226,16 +194,11 @@ class DeleteGroup(TestCase):
 
     def test_e01_vs_e010_and_other_episodes_kept(self):
         d = S
-        c = FakeChain(
-            [
-                f"{d}/Show.S01E01.mkv",
-                f"{d}/Show.S01E01.zh-CN.ass",
-                f"{d}/Show.S01E010.mkv",
-                f"{d}/Show.S01E010.zh-CN.ass",
-                f"{d}/Show.S01E02.mkv",
-                f"{d}/Show.S01E02.ass",
-            ]
-        )
+        c = FakeChain([
+            f"{d}/Show.S01E01.mkv", f"{d}/Show.S01E01.zh-CN.ass",
+            f"{d}/Show.S01E010.mkv", f"{d}/Show.S01E010.zh-CN.ass",
+            f"{d}/Show.S01E02.mkv", f"{d}/Show.S01E02.ass",
+        ])
         r = cleaner(c).delete_video_group("u115", f"{d}/Show.S01E01.mkv", ROOT)
         self.assertTrue(r.ok)
         self.assertEqual(r.subtitles_deleted, ["Show.S01E01.zh-CN.ass"])
@@ -255,14 +218,7 @@ class DeleteGroup(TestCase):
         self.assertNotIn(M, c.dirs)
 
     def test_version_suffix_subtitle_claimed_by_longer_stem_video(self):
-        c = FakeChain(
-            [
-                f"{M}/Movie.mkv",
-                f"{M}/Movie - 4K.mkv",
-                f"{M}/Movie - 4K.zh.ass",
-                f"{M}/Movie.zh.ass",
-            ]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Movie - 4K.mkv", f"{M}/Movie - 4K.zh.ass", f"{M}/Movie.zh.ass"])
         r = cleaner(c).delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertEqual(r.subtitles_deleted, ["Movie.zh.ass"])
         self.assertIn(f"{M}/Movie - 4K.zh.ass", c.files)
@@ -312,9 +268,7 @@ class DeleteGroup(TestCase):
 
     def test_refuses_non_video_and_dir_targets(self):
         c = FakeChain([f"{M}/Movie.ass", f"{M}/Movie.mkv"])
-        self.assertFalse(
-            cleaner(c).delete_video_group("u115", f"{M}/Movie.ass", ROOT).ok
-        )
+        self.assertFalse(cleaner(c).delete_video_group("u115", f"{M}/Movie.ass", ROOT).ok)
         self.assertFalse(cleaner(c).delete_video_group("u115", M, ROOT).ok)
         self.assertEqual(c.deleted, [])
 
@@ -348,23 +302,16 @@ class SelectSuffix(TestCase):
         items = self._items(["X.ass", "X.mkv", "X.nfo"])
         self.assertEqual(mod.select_video_suffix(items, "X", VIDEO, SUB, AUDIO), "mkv")
         self.assertEqual(
-            mod.select_video_suffix(list(reversed(items)), "X", VIDEO, SUB, AUDIO),
-            "mkv",
+            mod.select_video_suffix(list(reversed(items)), "X", VIDEO, SUB, AUDIO), "mkv"
         )
 
     def test_no_video_none(self):
-        self.assertIsNone(
-            mod.select_video_suffix(self._items(["X.ass"]), "X", VIDEO, SUB, AUDIO)
-        )
-        self.assertIsNone(
-            mod.select_video_suffix(self._items(["Y.mkv"]), "X", VIDEO, SUB, AUDIO)
-        )
+        self.assertIsNone(mod.select_video_suffix(self._items(["X.ass"]), "X", VIDEO, SUB, AUDIO))
+        self.assertIsNone(mod.select_video_suffix(self._items(["Y.mkv"]), "X", VIDEO, SUB, AUDIO))
 
     def test_ambiguous_none(self):
         self.assertIsNone(
-            mod.select_video_suffix(
-                self._items(["X.mkv", "X.mp4"]), "X", VIDEO, SUB, AUDIO
-            )
+            mod.select_video_suffix(self._items(["X.mkv", "X.mp4"]), "X", VIDEO, SUB, AUDIO)
         )
 
     def test_list_failure_none(self):
@@ -394,14 +341,7 @@ class Hardening(TestCase):
         self.assertIn(M, r.dirs_deleted)
 
     def test_prefix_stem_other_episode_not_deleted(self):
-        c = FakeChain(
-            [
-                f"{S}/A.S01E01.mkv",
-                f"{S}/A.S01E01.ass",
-                f"{S}/A.S01E011.mkv",
-                f"{S}/A.S01E011.ass",
-            ]
-        )
+        c = FakeChain([f"{S}/A.S01E01.mkv", f"{S}/A.S01E01.ass", f"{S}/A.S01E011.mkv", f"{S}/A.S01E011.ass"])
         r = cleaner(c).delete_video_group("u115", f"{S}/A.S01E01.mkv", ROOT)
         self.assertTrue(r.ok)
         self.assertEqual(c.files, {f"{S}/A.S01E011.mkv", f"{S}/A.S01E011.ass"})
@@ -455,16 +395,12 @@ def dgroup(c, path, allow=True, root=ROOT):
 
 class DirMode(TestCase):
     def tv(self):
-        return FakeChain(
-            [
-                f"{SHOW}/Season 1/S01E01.mkv",
-                f"{SHOW}/Season 1/S01E01.zh-CN.ass",
-                f"{SHOW}/Season 1/S01E02.mkv",
-                f"{SHOW}/Season 2/S02E01.mkv",
-                f"{SHOW}/Season 2/S02E01.zh-TW.forced.ass",
-                f"{SHOW}/Season 2/Extras/bonus.mkv",
-            ]
-        )
+        return FakeChain([
+            f"{SHOW}/Season 1/S01E01.mkv", f"{SHOW}/Season 1/S01E01.zh-CN.ass",
+            f"{SHOW}/Season 1/S01E02.mkv",
+            f"{SHOW}/Season 2/S02E01.mkv", f"{SHOW}/Season 2/S02E01.zh-TW.forced.ass",
+            f"{SHOW}/Season 2/Extras/bonus.mkv",
+        ])
 
     def test_season_deletes_only_that_season_and_vacuums(self):
         c = self.tv()
@@ -577,9 +513,7 @@ class Review(TestCase):
         c = FakeChain([f"{M}/Movie.mkv"])
         for p in (ROOT + "/TV/..", ROOT + "/../outside/Show", "relative/Show"):
             self.assertFalse(dgroup(c, p).ok, p)
-        self.assertFalse(
-            cleaner(c).delete_group("u115", f"{M}/../Movie (2020)/Movie.mkv", ROOT).ok
-        )
+        self.assertFalse(cleaner(c).delete_group("u115", f"{M}/../Movie (2020)/Movie.mkv", ROOT).ok)
         self.assertEqual(c.deleted, [])
 
     def test_new_media_after_plan_is_reported(self):
@@ -598,13 +532,8 @@ class Review(TestCase):
         self.assertTrue(f("Season", True))
         self.assertTrue(f("Series", True))
         cases = (
-            ("Movie", True),
-            ("Episode", True),
-            ("Season", False),
-            ("Season", None),
-            ("Series", "true"),
-            (None, True),
-            ("", True),
+            ("Movie", True), ("Episode", True), ("Season", False),
+            ("Season", None), ("Series", "true"), (None, True), ("", True),
         )
         for t, fol in cases:
             self.assertFalse(f(t, fol), (t, fol))
@@ -654,9 +583,7 @@ class PurgeHardening(TestCase):
 
     def test_sub_audio_not_blocking_but_deleted(self):
         # .sup/.mka/.mp3 不属于视频：无视频时随残留清理
-        c = FakeChain(
-            [f"{M}/Movie.mkv", f"{M}/Other.sup", f"{M}/Other.mka", f"{M}/theme.MP3"]
-        )
+        c = FakeChain([f"{M}/Movie.mkv", f"{M}/Other.sup", f"{M}/Other.mka", f"{M}/theme.MP3"])
         cl = mod.P115Cleaner(c, VIDEO + [".mp3"], SUB + [".sup"], AUDIO + [".mp3"])
         r = cl.delete_video_group("u115", f"{M}/Movie.mkv", ROOT)
         self.assertTrue(r.ok, r)
@@ -674,13 +601,7 @@ class PurgeHardening(TestCase):
         self.assertEqual(c2.files, {f"{o}/a.nfo"})
 
     def test_execute_dir_subdir_late_video_not_purged(self):
-        c = FakeChain(
-            [
-                f"{SHOW}/Season 1/a.mkv",
-                f"{SHOW}/Season 1/p.jpg",
-                f"{SHOW}/Season 2/b.mkv",
-            ]
-        )
+        c = FakeChain([f"{SHOW}/Season 1/a.mkv", f"{SHOW}/Season 1/p.jpg", f"{SHOW}/Season 2/b.mkv"])
         r = dgroup(c, f"{SHOW}/Season 1")
         self.assertTrue(r.ok, r)
         self.assertIn(f"{SHOW}/Season 2/b.mkv", c.files)
@@ -694,20 +615,9 @@ class VideoLibraryOnly(TestCase):
 
     def test_rejected_types(self):
         rejected = (
-            "Audio",
-            "MusicAlbum",
-            "MusicArtist",
-            "Photo",
-            "PhotoAlbum",
-            "Book",
-            "AudioBook",
-            "BoxSet",
-            "Folder",
-            "CollectionFolder",
-            "Playlist",
-            "",
-            None,
-            "movie",
+            "Audio", "MusicAlbum", "MusicArtist", "Photo", "PhotoAlbum", "Book",
+            "AudioBook", "BoxSet", "Folder", "CollectionFolder", "Playlist",
+            "", None, "movie",
         )
         for t in rejected:
             self.assertFalse(mod.is_video_library_item(t), t)
@@ -793,22 +703,14 @@ class OneCallDirDelete(TestCase):
         self.assertEqual(c.files, set())
 
     def test_library_root_survives_when_last_title_removed(self):
-        c = FakeChain(
-            [f"{ROOT}/Only (2020)/Season 1/a.mkv", f"{ROOT}/Only (2020)/tvshow.nfo"]
-        )
+        c = FakeChain([f"{ROOT}/Only (2020)/Season 1/a.mkv", f"{ROOT}/Only (2020)/tvshow.nfo"])
         r = dgroup(c, f"{ROOT}/Only (2020)")
         self.assertTrue(r.ok, r)
         self.assertIn(ROOT, c.dirs)
         self.assertEqual(r.dir_stop_reason, "到达媒体库根")
 
     def test_flat_library_title_directly_under_root(self):
-        c = FakeChain(
-            [
-                f"{ROOT}/Title (2020)/e1.mkv",
-                f"{ROOT}/Title (2020)/poster.jpg",
-                f"{ROOT}/Other/e1.mkv",
-            ]
-        )
+        c = FakeChain([f"{ROOT}/Title (2020)/e1.mkv", f"{ROOT}/Title (2020)/poster.jpg", f"{ROOT}/Other/e1.mkv"])
         r = cleaner(c).delete_video_group("u115", f"{ROOT}/Title (2020)/e1.mkv", ROOT)
         self.assertTrue(r.ok, r)
         self.assertNotIn(f"{ROOT}/Title (2020)", c.dirs)
@@ -816,13 +718,7 @@ class OneCallDirDelete(TestCase):
 
     def test_special_character_names(self):
         t = f"{ROOT}/Tom & Jerry's #1 (2020) {{tmdb-1}} [1080p]"
-        c = FakeChain(
-            [
-                f"{t}/Season 1/a b#c.mkv",
-                f"{t}/Season 1/a b#c.zh-CN.ass",
-                f"{t}/tvshow.nfo",
-            ]
-        )
+        c = FakeChain([f"{t}/Season 1/a b#c.mkv", f"{t}/Season 1/a b#c.zh-CN.ass", f"{t}/tvshow.nfo"])
         r = dgroup(c, t)
         self.assertTrue(r.ok, r)
         self.assertEqual(c.files, set())
@@ -835,13 +731,9 @@ class OneCallDirDelete(TestCase):
         self.assertIn(M, c.dirs)
 
     def make(self):
-        return FakeChain(
-            [
-                f"{SHOW}/Season 1/a.mkv",
-                f"{SHOW}/Season 1/a.zh-CN.ass",
-                f"{SHOW}/tvshow.nfo",
-            ]
-        )
+        return FakeChain([
+            f"{SHOW}/Season 1/a.mkv", f"{SHOW}/Season 1/a.zh-CN.ass", f"{SHOW}/tvshow.nfo",
+        ])
 
 
 class Review2(TestCase):
