@@ -23,6 +23,13 @@ from clouddrive2_client import CloudDriveClient
 # 115/CD2：移动或「从含撇号的旧名改到其它名」时不稳定；先脱敏的是**源侧末段名/路径**
 # 最终目标名 `new_name` 仍可含 ASCII 撇号（改为带撇号的展示名通常可用），本模块不禁止
 APOSTROPHE_ESCAPE = "[Jw==]"
+_RPC_RETRY_ATTEMPTS = 3
+_RPC_RETRY_DELAYS = (0.25, 0.75, 1.5)
+_TRANSIENT_RPC_CODES = {
+    StatusCode.CANCELLED,
+    StatusCode.DEADLINE_EXCEEDED,
+    StatusCode.UNAVAILABLE,
+}
 
 
 def _build_download_path(fileitem: FileItem, base_path: Path) -> Optional[Path]:
@@ -145,6 +152,7 @@ class CloudDriveApi:
         disk_name: str,
         download_base: Optional[str] = None,
         upload_mode: Literal["remote_upload", "direct_write"] = "direct_write",
+        client_factory: Optional[Callable[[], CloudDriveClient]] = None,
     ) -> None:
         """
         初始化 CloudDrive API 封装
@@ -153,13 +161,87 @@ class CloudDriveApi:
         :param disk_name (str): 储存名称，与注册的 storage 一致
         :param download_base (str): 下载 URL 基地址
         :param upload_mode (str): 上传模式
+        :param client_factory (Callable): 创建并认证新客户端的工厂
         """
         self.client = client
         self._disk_name = disk_name
         self._download_base = (download_base or "http://127.0.0.1:19798").rstrip("/")
         self._upload_mode = upload_mode
+        self._client_factory = client_factory
         self.transtype = {"move": "移动", "copy": "复制"}
+        self._client_lock = RLock()
         self._folder_lock = RLock()
+        self._mutation_lock = RLock()
+
+    @staticmethod
+    def _is_transient_rpc_error(error: Exception) -> bool:
+        """
+        判断异常是否属于可通过重连恢复的 gRPC 通道错误
+
+        :param error (Exception): RPC 异常
+
+        :return bool: 属于瞬时通道错误返回 True
+        """
+        if not isinstance(error, RpcError):
+            return False
+        try:
+            code = error.code()
+        except Exception:
+            return False
+        if code in _TRANSIENT_RPC_CODES:
+            return True
+        details = str(error).lower()
+        return code == StatusCode.UNKNOWN and any(
+            marker in details for marker in ("socket closed", "channel closed")
+        )
+
+    def _reconnect_client(self, failed_client: CloudDriveClient) -> bool:
+        """
+        在通道失活时创建并认证新客户端，并原子替换当前客户端
+
+        :param failed_client (CloudDriveClient): 触发重连的旧客户端
+
+        :return bool: 重连成功返回 True
+        """
+        if self._client_factory is None:
+            return False
+        try:
+            new_client = self._client_factory()
+        except Exception as error:
+            logger.warning("【CloudDrive】重建 gRPC 客户端失败: %s", error)
+            return False
+
+        old_client: Optional[CloudDriveClient] = None
+        with self._client_lock:
+            if self.client is failed_client:
+                old_client = failed_client
+                self.client = new_client
+            else:
+                new_client.close()
+                return True
+        if old_client is not None:
+            try:
+                old_client.close()
+            except Exception as error:
+                logger.debug("【CloudDrive】关闭失活客户端失败: %s", error)
+        logger.info("【CloudDrive】已重建 gRPC 客户端通道")
+        return True
+
+    @staticmethod
+    def _path_with_name(parent: str, name: str, is_dir: bool = False) -> str:
+        """
+        构造指定父目录和末段名称的远端路径
+
+        :param parent (str): 父目录路径
+        :param name (str): 末段名称
+        :param is_dir (bool): 是否为目录
+
+        :return str: 远端完整路径
+        """
+        path = _posix_join_parent_name(parent, name)
+        if is_dir and not path.endswith("/"):
+            return f"{path}/"
+        return path
 
     def list(self, fileitem: FileItem) -> Optional[List[FileItem]]:
         """
@@ -258,19 +340,28 @@ class CloudDriveApi:
         path_str = path.as_posix()
         if not path_str or path_str == ".":
             path_str = "/"
+        cloud_file = self._find_cloud_file(self.client, path_str)
+        if not cloud_file or not cloud_file.id:
+            return None
+        return _cloudfile_to_fileitem(cloud_file, self._disk_name)
+
+    @staticmethod
+    def _find_cloud_file(client: CloudDriveClient, path_str: str) -> Any:
+        """
+        通过路径查询 CloudDrive 文件，并兼容详情接口回退
+
+        :param client (CloudDriveClient): CloudDrive 客户端
+        :param path_str (str): 远端路径
+
+        :return Any: CloudDrive 文件对象，确认不存在时返回 None
+        """
         try:
-            cloud_file = self.client.find_file_by_path(path_str)
-            logger.info("【CloudDrive】查找文件成功 %s: %s", path_str, cloud_file)
+            cloud_file = client.find_file_by_path(path_str)
         except RpcError as e:
             if not isinstance(e, Call) or e.code() != StatusCode.NOT_FOUND:
                 raise
             try:
-                cloud_file = self.client.get_file_detail_properties(path_str)
-                logger.info(
-                    "【CloudDrive】获取文件详情成功 %s: %s",
-                    path_str,
-                    cloud_file,
-                )
+                cloud_file = client.get_file_detail_properties(path_str)
             except RpcError as detail_error:
                 if (
                     isinstance(detail_error, Call)
@@ -278,9 +369,7 @@ class CloudDriveApi:
                 ):
                     return None
                 raise
-        if not cloud_file or not cloud_file.id:
-            return None
-        return _cloudfile_to_fileitem(cloud_file, self._disk_name)
+        return cloud_file
 
     def get_parent(self, fileitem: FileItem) -> Optional[FileItem]:
         """
@@ -466,6 +555,7 @@ class CloudDriveApi:
         self,
         parent_str: str,
         new_basename: str,
+        expected_fileid: Optional[str] = None,
         max_attempts: int = 8,
         delay_s: float = 0.25,
     ) -> bool:
@@ -474,74 +564,116 @@ class CloudDriveApi:
 
         :param parent_str (str): 父目录绝对路径
         :param new_basename (str): 重命名后的末段名
+        :param expected_fileid (str): 期望的文件 ID
         :param max_attempts (int): 最大尝试次数（115 偶发延迟或 RPC 报错后实际已成功）
         :param delay_s (float): 两次尝试间隔秒数
 
         :return bool: 子项中存在同名则 True
         """
 
-        parent_norm = (parent_str or "/").rstrip("/") or "/"
+        target_path = _posix_join_parent_name(parent_str, new_basename)
         for attempt in range(max_attempts):
             try:
-                sub = self.client.get_sub_files(parent_norm, force_refresh=True)
-                for f in sub:
-                    if (f.name or "") == new_basename:
-                        return True
-            except Exception:
-                pass
+                cloud_file = self._find_cloud_file(self.client, target_path)
+                if cloud_file and (
+                    not expected_fileid or cloud_file.id == expected_fileid
+                ):
+                    return True
+                if cloud_file and expected_fileid:
+                    logger.warning(
+                        "【CloudDrive】重命名目标路径存在其它文件: %s",
+                        target_path,
+                    )
+                    return False
+            except Exception as error:
+                if self._is_transient_rpc_error(error):
+                    failed_client = self.client
+                    self._reconnect_client(failed_client)
+                else:
+                    logger.debug("【CloudDrive】重命名结果校验失败: %s", error)
             if attempt < max_attempts - 1:
-                sleep(delay_s)
+                sleep(delay_s * (2 ** min(attempt, 2)))
         return False
 
-    def _rename_with_verify(self, source_path: str, new_basename: str) -> bool:
+    def _rename_with_verify(
+        self,
+        source_path: str,
+        new_basename: str,
+        expected_fileid: Optional[str] = None,
+    ) -> bool:
         """
         重命名并在 API 返回失败时校验路径是否已更新（115/CD2 偶发假失败）
 
         :param source_path (str): 当前完整路径
         :param new_basename (str): 新名称（仅末段）
+        :param expected_fileid (str): 期望的文件 ID
 
         :return bool: 成功返回 True
         """
-
-        result: Any = None
-        err: Optional[Exception] = None
-        try:
-            result = self.client.rename_file(source_path, new_basename)
-        except Exception as e:
-            err = e
-            logger.debug("【CloudDrive】重命名调用异常（将尝试校验）: %s", e)
-
-        ok_api = bool(result and result.success)
-        if ok_api:
-            return True
 
         parent = Path(source_path.rstrip("/")).parent
         parent_str = parent.as_posix()
         if parent_str in ("", "."):
             parent_str = "/"
+        for attempt in range(_RPC_RETRY_ATTEMPTS):
+            client = self.client
+            result: Any = None
+            error: Optional[Exception] = None
+            try:
+                result = client.rename_file(source_path, new_basename)
+            except Exception as exc:
+                error = exc
+                if not self._is_transient_rpc_error(exc):
+                    logger.error(
+                        "【CloudDrive】重命名失败 %s -> %s: %s",
+                        source_path,
+                        new_basename,
+                        exc,
+                    )
+                    return False
+                logger.warning(
+                    "【CloudDrive】重命名通道异常，第 %s/%s 次尝试: %s -> %s: %s",
+                    attempt + 1,
+                    _RPC_RETRY_ATTEMPTS,
+                    source_path,
+                    new_basename,
+                    exc,
+                )
 
-        if self._verify_rename_succeeded(parent_str, new_basename):
-            logger.warning(
-                "【CloudDrive】重命名 RPC 未返回成功但已校验到目标文件存在，视为成功: %s -> %s",
-                source_path,
+            if result is not None and result.success:
+                return True
+            if self._verify_rename_succeeded(
+                parent_str,
                 new_basename,
-            )
-            return True
+                expected_fileid=expected_fileid,
+                max_attempts=8 if error is not None else 3,
+            ):
+                logger.warning(
+                    "【CloudDrive】重命名 RPC 未返回成功但已校验到目标文件存在，视为成功: %s -> %s",
+                    source_path,
+                    new_basename,
+                )
+                return True
 
-        if err:
-            logger.error(
-                "【CloudDrive】重命名失败 %s -> %s: %s",
-                source_path,
-                new_basename,
-                err,
-            )
-        else:
-            logger.error(
-                "【CloudDrive】重命名失败 %s -> %s: %s",
-                source_path,
-                new_basename,
-                getattr(result, "errorMessage", "") if result else "",
-            )
+            if error is None:
+                logger.error(
+                    "【CloudDrive】重命名失败 %s -> %s: %s",
+                    source_path,
+                    new_basename,
+                    getattr(result, "errorMessage", "") if result else "",
+                )
+                return False
+            if attempt >= _RPC_RETRY_ATTEMPTS - 1:
+                break
+            if self.client is client:
+                self._reconnect_client(client)
+            sleep(_RPC_RETRY_DELAYS[attempt])
+
+        logger.error(
+            "【CloudDrive】重命名在重连后仍未确认成功 %s -> %s",
+            source_path,
+            new_basename,
+        )
         return False
 
     def rename(self, fileitem: FileItem, name: str) -> bool:
@@ -556,38 +688,218 @@ class CloudDriveApi:
 
         :return bool: 重命名成功返回 True，失败返回 False
         """
-        if name == fileitem.name:
-            return True
+        with self._mutation_lock:
+            if name == fileitem.name:
+                return True
 
-        raw_path = (fileitem.path or "/").rstrip("/") or "/"
-        p = Path(raw_path)
-        parent_dir = p.parent.as_posix() or "/"
-        if parent_dir == ".":
-            parent_dir = "/"
-        old_name = fileitem.name or p.name
-        is_dir = fileitem.type == "dir"
-        current_path = fileitem.path or _posix_join_parent_name(parent_dir, old_name)
+            raw_path = (fileitem.path or "/").rstrip("/") or "/"
+            p = Path(raw_path)
+            parent_dir = p.parent.as_posix() or "/"
+            if parent_dir == ".":
+                parent_dir = "/"
+            old_name = fileitem.name or p.name
+            is_dir = fileitem.type == "dir"
+            fileid = fileitem.fileid or None
+            current_path = fileitem.path or _posix_join_parent_name(
+                parent_dir, old_name
+            )
 
-        if "'" not in old_name:
-            return self._rename_with_verify(current_path, name)
+            if "'" not in old_name:
+                return self._rename_with_verify(
+                    current_path,
+                    name,
+                    expected_fileid=fileid,
+                )
 
-        intermediate = self._disambiguate_safe_name(
-            parent_dir, escape_apostrophe_in_name(old_name)
-        )
-        if not self._rename_with_verify(current_path, intermediate):
-            return False
-        if intermediate == name:
-            return True
-        mid_path = self._path_after_rename(parent_dir, intermediate, is_dir)
-        # 第二步：源路径已不含撇号；目标名仍可含撇号（策略只约束源侧末段名）
-        if not self._rename_with_verify(mid_path, name):
-            logger.warning(
-                "【CloudDrive】两步重命名第二步失败，对象已保留脱敏末段名且未自动回滚: %s（期望改为 %s）",
+            intermediate = self._disambiguate_safe_name(
+                parent_dir, escape_apostrophe_in_name(old_name)
+            )
+            if not self._rename_with_verify(
+                current_path,
                 intermediate,
+                expected_fileid=fileid,
+            ):
+                return False
+            if intermediate == name:
+                return True
+            mid_path = self._path_after_rename(parent_dir, intermediate, is_dir)
+            # 第二步：源路径已不含撇号；目标名仍可含撇号（策略只约束源侧末段名）
+            if not self._rename_with_verify(
+                mid_path,
                 name,
+                expected_fileid=fileid,
+            ):
+                restored = self._rename_with_verify(
+                    mid_path,
+                    old_name,
+                    expected_fileid=fileid,
+                )
+                logger.warning(
+                    "【CloudDrive】两步重命名第二步失败，回滚%s: %s（期望改为 %s）",
+                    "成功" if restored else "失败",
+                    intermediate,
+                    name,
+                )
+                return False
+            return True
+
+    def _inspect_path_state(
+        self,
+        path: str,
+        expected_fileid: Optional[str] = None,
+        max_attempts: int = 3,
+    ) -> Literal["present", "absent", "unknown", "conflict"]:
+        """
+        查询路径状态并区分不存在、未知和身份冲突
+
+        :param path (str): 需要查询的远端路径
+        :param expected_fileid (str): 期望的文件 ID
+        :param max_attempts (int): 最大查询次数
+
+        :return Literal: 路径状态
+        """
+        saw_absent = False
+        saw_unknown = False
+        for attempt in range(max_attempts):
+            client = self.client
+            try:
+                cloud_file = self._find_cloud_file(client, path)
+            except Exception as error:
+                saw_unknown = True
+                if self._is_transient_rpc_error(error):
+                    if self.client is client:
+                        self._reconnect_client(client)
+                else:
+                    logger.debug("【CloudDrive】路径状态查询失败 %s: %s", path, error)
+                if attempt < max_attempts - 1:
+                    sleep(_RPC_RETRY_DELAYS[min(attempt, len(_RPC_RETRY_DELAYS) - 1)])
+                continue
+            if not cloud_file or not cloud_file.id:
+                saw_absent = True
+            elif expected_fileid and cloud_file.id != expected_fileid:
+                return "conflict"
+            else:
+                return "present"
+            if attempt < max_attempts - 1:
+                sleep(_RPC_RETRY_DELAYS[min(attempt, len(_RPC_RETRY_DELAYS) - 1)])
+        return "unknown" if saw_unknown else "absent" if saw_absent else "unknown"
+
+    def _move_file_with_retry(
+        self,
+        source_path: str,
+        dest_path: str,
+        expected_fileid: Optional[str] = None,
+    ) -> bool:
+        """
+        执行移动并在通道异常后按路径状态安全恢复
+
+        :param source_path (str): 当前源路径
+        :param dest_path (str): 目标目录路径
+        :param expected_fileid (str): 期望的文件 ID
+
+        :return bool: 确认移动成功返回 True
+        """
+        working_name = Path(source_path.rstrip("/")).name
+        target_path = _posix_join_parent_name(dest_path, working_name)
+        for attempt in range(_RPC_RETRY_ATTEMPTS):
+            client = self.client
+            try:
+                result = client.move_file([source_path], dest_path)
+            except Exception as error:
+                if not self._is_transient_rpc_error(error):
+                    logger.error(
+                        "【CloudDrive】移动失败 %s -> %s: %s",
+                        source_path,
+                        dest_path,
+                        error,
+                    )
+                    return False
+                target_state = self._inspect_path_state(
+                    target_path,
+                    expected_fileid=expected_fileid,
+                )
+                if target_state == "present":
+                    return True
+                source_state = self._inspect_path_state(
+                    source_path,
+                    expected_fileid=expected_fileid,
+                )
+                if target_state == "conflict" or source_state == "conflict":
+                    return False
+                if source_state != "present" or target_state != "absent":
+                    logger.error(
+                        "【CloudDrive】移动通道异常后状态未知 %s -> %s: %s",
+                        source_path,
+                        dest_path,
+                        error,
+                    )
+                    return False
+                if attempt >= _RPC_RETRY_ATTEMPTS - 1:
+                    break
+                if self.client is client:
+                    self._reconnect_client(client)
+                sleep(_RPC_RETRY_DELAYS[attempt])
+                continue
+
+            if result and result.success:
+                return True
+            target_state = self._inspect_path_state(
+                target_path,
+                expected_fileid=expected_fileid,
+            )
+            if target_state == "present":
+                logger.warning(
+                    "【CloudDrive】移动 RPC 未返回成功但已校验到目标文件存在，视为成功: %s -> %s",
+                    source_path,
+                    target_path,
+                )
+                return True
+            logger.error(
+                "【CloudDrive】移动失败 %s -> %s: %s",
+                source_path,
+                dest_path,
+                getattr(result, "errorMessage", "") if result else "",
             )
             return False
-        return True
+        return False
+
+    def _rollback_move(
+        self,
+        working_path: str,
+        source_parent: str,
+        original_name: str,
+        is_dir: bool,
+        expected_fileid: Optional[str],
+    ) -> bool:
+        """
+        将移动后未完成改名的对象回滚到源目录
+
+        :param working_path (str): 目标目录中的中间路径
+        :param source_parent (str): 源父目录
+        :param original_name (str): 原始名称
+        :param is_dir (bool): 是否为目录
+        :param expected_fileid (str): 期望的文件 ID
+
+        :return bool: 回滚并恢复原名称返回 True
+        """
+        if self._inspect_path_state(working_path, expected_fileid) != "present":
+            return False
+        if not self._move_file_with_retry(
+            working_path,
+            source_parent,
+            expected_fileid=expected_fileid,
+        ):
+            return False
+        restored_path = self._path_with_name(
+            source_parent, Path(working_path.rstrip("/")).name, is_dir
+        )
+        if Path(working_path.rstrip("/")).name == original_name:
+            return True
+        return self._rename_with_verify(
+            restored_path,
+            original_name,
+            expected_fileid=expected_fileid,
+        )
 
     def move(self, fileitem: FileItem, path: Path, new_name: str) -> bool:
         """
@@ -602,72 +914,83 @@ class CloudDriveApi:
 
         :return bool: 成功返回 True，失败返回 False
         """
-        dest_path = (
-            Path(path).as_posix().rstrip("/") if path is not None else "/"
-        ) or "/"
+        with self._mutation_lock:
+            dest_path = (
+                Path(path).as_posix().rstrip("/") if path is not None else "/"
+            ) or "/"
 
-        raw_path = (fileitem.path or "/").rstrip("/") or "/"
-        p = Path(raw_path)
-        parent_dir = p.parent.as_posix() or "/"
-        if parent_dir == ".":
-            parent_dir = "/"
-        current_name = fileitem.name or p.name
-        is_dir = fileitem.type == "dir"
-        current_path = fileitem.path or _posix_join_parent_name(
-            parent_dir, current_name
-        )
-
-        working_name = current_name
-        escaped_applied = False
-        if "'" in current_name:
-            safe = self._disambiguate_safe_name(
-                parent_dir, escape_apostrophe_in_name(current_name)
+            raw_path = (fileitem.path or "/").rstrip("/") or "/"
+            p = Path(raw_path)
+            parent_dir = p.parent.as_posix() or "/"
+            if parent_dir == ".":
+                parent_dir = "/"
+            current_name = fileitem.name or p.name
+            is_dir = fileitem.type == "dir"
+            fileid = fileitem.fileid or None
+            current_path = fileitem.path or _posix_join_parent_name(
+                parent_dir, current_name
             )
-            if not self._rename_with_verify(current_path, safe):
-                return False
-            escaped_applied = True
-            working_name = safe
-            current_path = self._path_after_rename(parent_dir, safe, is_dir)
 
-        try:
-            result = self.client.move_file([current_path], dest_path)
-            if not result or not result.success:
-                if escaped_applied:
-                    logger.warning(
-                        "【CloudDrive】移动失败，源侧已脱敏的对象未移动且未回滚，当前末段: %s",
-                        working_name,
-                    )
-                logger.error(
-                    "【CloudDrive】移动失败 %s -> %s: %s",
+            working_name = current_name
+            escaped_applied = False
+            if "'" in current_name:
+                safe = self._disambiguate_safe_name(
+                    parent_dir, escape_apostrophe_in_name(current_name)
+                )
+                if not self._rename_with_verify(
                     current_path,
-                    dest_path,
-                    getattr(result, "errorMessage", "") if result else "",
-                )
-                return False
-            if working_name != new_name:
-                new_path = _posix_join_parent_name(dest_path, working_name)
-                if is_dir and not new_path.endswith("/"):
-                    new_path = new_path + "/"
-                if not self._rename_with_verify(new_path, new_name):
-                    if escaped_applied:
-                        logger.warning(
-                            "【CloudDrive】移动后重命名失败，目标目录中仍为脱敏末段名且未回滚: %s（期望 %s）",
-                            working_name,
-                            new_name,
-                        )
+                    safe,
+                    expected_fileid=fileid,
+                ):
                     return False
-            return True
-        except Exception as e:
-            if escaped_applied:
-                logger.warning(
-                    "【CloudDrive】移动异常，源侧已脱敏的对象未移动且未回滚，当前末段: %s",
-                    working_name,
-                )
-            logger.error(
-                "【CloudDrive】移动失败 %s -> %s: %s",
+                escaped_applied = True
+                working_name = safe
+                current_path = self._path_after_rename(parent_dir, safe, is_dir)
+
+            if not self._move_file_with_retry(
                 current_path,
                 dest_path,
-                e,
+                expected_fileid=fileid,
+            ):
+                if (
+                    escaped_applied
+                    and self._inspect_path_state(current_path, expected_fileid=fileid)
+                    == "present"
+                ):
+                    restored = self._rename_with_verify(
+                        current_path,
+                        current_name,
+                        expected_fileid=fileid,
+                    )
+                    logger.warning(
+                        "【CloudDrive】移动失败，源侧脱敏名称回滚%s: %s",
+                        "成功" if restored else "失败",
+                        working_name,
+                    )
+                return False
+            if working_name == new_name:
+                return True
+
+            new_path = self._path_with_name(dest_path, working_name, is_dir)
+            if self._rename_with_verify(
+                new_path,
+                new_name,
+                expected_fileid=fileid,
+            ):
+                return True
+
+            rolled_back = self._rollback_move(
+                new_path,
+                parent_dir,
+                current_name,
+                is_dir,
+                fileid,
+            )
+            logger.warning(
+                "【CloudDrive】移动后重命名失败，回滚%s: %s -> %s",
+                "成功" if rolled_back else "失败",
+                new_path,
+                new_name,
             )
             return False
 

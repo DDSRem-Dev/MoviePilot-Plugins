@@ -73,6 +73,36 @@ class CloudDriveDisk(_PluginBase):
         """
         super().__init__()
 
+    def _create_client(self) -> CloudDriveClient:
+        """
+        创建并认证 CloudDrive gRPC 客户端
+
+        :return CloudDriveClient: 已认证的客户端
+
+        :raises RuntimeError: 客户端认证失败
+        """
+        address = f"{self._host}:{self._port}"
+        client = CloudDriveClient(
+            address,
+            options=[
+                ("grpc.keepalive_time_ms", 30000),
+                ("grpc.keepalive_timeout_ms", 10000),
+                ("grpc.keepalive_permit_without_calls", True),
+                ("grpc.http2.max_pings_without_data", 0),
+            ],
+        )
+        try:
+            if not client.authenticate(self._username, self._password):
+                raise RuntimeError("认证失败，请检查用户名与密码")
+        except Exception:
+            try:
+                client.close()
+            except Exception:
+                pass
+            raise
+        self._client = client
+        return client
+
     def init_plugin(self, config: Optional[Dict] = None) -> None:
         """
         初始化插件
@@ -116,22 +146,8 @@ class CloudDriveDisk(_PluginBase):
             logger.warning("【CloudDrive】未配置用户名或密码，储存模块将不可用")
             return
 
-        address = f"{self._host}:{self._port}"
         try:
-            self._client = CloudDriveClient(
-                address,
-                options=[
-                    ("grpc.keepalive_time_ms", 30000),
-                    ("grpc.keepalive_timeout_ms", 10000),
-                    ("grpc.keepalive_permit_without_calls", True),
-                    ("grpc.http2.max_pings_without_data", 0),
-                ],
-            )
-            if not self._client.authenticate(self._username, self._password):
-                logger.error("【CloudDrive】认证失败，请检查用户名与密码")
-                self._client.close()
-                self._client = None
-                return
+            self._client = self._create_client()
             if self._enabled:
                 download_base = f"http://{self._host}:{self._port}"
                 self._clouddrive_api = CloudDriveApi(
@@ -139,6 +155,7 @@ class CloudDriveDisk(_PluginBase):
                     disk_name=self._disk_name,
                     download_base=download_base,
                     upload_mode=self._upload_mode,
+                    client_factory=self._create_client,
                 )
         except Exception as e:
             logger.error("【CloudDrive】客户端创建失败: %s", e)
