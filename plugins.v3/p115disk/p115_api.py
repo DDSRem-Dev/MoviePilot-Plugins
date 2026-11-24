@@ -1613,7 +1613,8 @@ class P115Api:
                 available=int(resp["data"]["space_info"]["all_total"]["size"])
                 - int(resp["data"]["space_info"]["all_use"]["size"]),
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("【P115Disk】获取存储使用情况失败：%s", e, exc_info=True)
             return None
 
     def support_transtype(self) -> dict:
