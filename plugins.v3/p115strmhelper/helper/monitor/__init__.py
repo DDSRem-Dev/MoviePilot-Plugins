@@ -948,6 +948,8 @@ class DirectoryUploadRescan:
                 ]
                 for name in file_names:
                     file_path = current / name
+                    if file_path.suffix.lower() == ".strm":
+                        continue
                     if (
                         allowed_extensions is not None
                         and file_path.suffix.lower() not in allowed_extensions

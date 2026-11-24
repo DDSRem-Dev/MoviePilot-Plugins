@@ -163,6 +163,25 @@ class TestDirectoryUploadRescan(TestCase):
         self.assertEqual(found, {"ep1.mkv"})
         self.assertEqual({mon for _, mon in missing}, {str(library)})
 
+    def test_collect_missing_skips_strm_when_upload_extensions_are_wildcard(
+        self,
+    ) -> None:
+        """
+        通配符上传配置下，已生成的 STRM 不得再次成为上传候选
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            library = Path(tmpdir) / "library"
+            library.mkdir()
+            (library / "movie.mkv").write_text("v")
+            (library / "movie.strm").write_text("s")
+            self.config["directory_upload_uploadext"] = "*"
+            rescan = self.rescan_cls()
+            missing = rescan._collect_missing([(str(library), str(library))], 50)
+
+        self.assertEqual([Path(path).name for path, _ in missing], ["movie.mkv"])
+
     def test_collect_missing_respects_limit(self) -> None:
         """
         达到单轮上限即停止收集
