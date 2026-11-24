@@ -33,7 +33,9 @@ MAX_SUBTITLE_TAGS = 3
 # 根本身永远不删；根下的片名目录/中间分类目录按同一规则处理
 MIN_PURGE_DEPTH_BELOW_ROOT = 1
 # 目录级（季/剧集）删除的边界
-MIN_DIR_DEPTH_BELOW_ROOT = 1  # 目录必须严格位于媒体库根之下（映射根应为 Emby 媒体库根目录）
+MIN_DIR_DEPTH_BELOW_ROOT = (
+    1  # 目录必须严格位于媒体库根之下（映射根应为 Emby 媒体库根目录）
+)
 MAX_DIR_DEPTH = 6
 MAX_DIR_ENTRIES = 10000
 MAX_DIR_VIDEOS = 2000
@@ -138,7 +140,9 @@ class CleanupResult:
     errors: List[str] = field(default_factory=list)
     mode: str = "file"
     files_deleted: List[str] = field(default_factory=list)  # 复核确认已不存在
-    leftovers_deleted: List[str] = field(default_factory=list)  # 视频/strm 全无后清理的其余文件
+    leftovers_deleted: List[str] = field(
+        default_factory=list
+    )  # 视频/strm 全无后清理的其余文件
 
 
 @dataclass
@@ -166,7 +170,11 @@ class P115Cleaner:
         video_exts: Iterable[str],
         sub_exts: Iterable[str],
         audio_exts: Iterable[str] = (),
-        dir_cleanup_storages: Iterable[str] = ("u115",),
+        dir_cleanup_storages: Iterable[str] = (
+            "u115",
+            "115网盘Plus",
+            "CloudDrive储存",
+        ),
         purge_leftovers: bool = True,
     ) -> None:
         self.purge_leftovers = purge_leftovers
@@ -176,7 +184,9 @@ class P115Cleaner:
         self.sub_exts = _norm_exts(sub_exts)
         self.audio_exts = _norm_exts(audio_exts)
         # strm 始终视为视频（本地 strm 或 115 上的 strm 都不能被残留清理误当杂项）
-        self.video_exts = (_norm_exts(video_exts) | {"strm"}) - self.sub_exts - self.audio_exts
+        self.video_exts = (
+            (_norm_exts(video_exts) | {"strm"}) - self.sub_exts - self.audio_exts
+        )
 
     # ---- 底层查询（失败一律抛出，由上层视为失败） ----
     def _get_item(self, storage: str, path: str) -> Optional[Any]:
@@ -364,7 +374,8 @@ class P115Cleaner:
                 raise ValueError(f"目录嵌套过深: {cur.path}")
             listing = self._list(cur)
             if stop_on_video and any(
-                getattr(it, "type", "") == "file" and _ext_of(it.name) in self.video_exts
+                getattr(it, "type", "") == "file"
+                and _ext_of(it.name) in self.video_exts
                 for it in listing
             ):
                 return None
@@ -385,13 +396,18 @@ class P115Cleaner:
     def _video_paths(self, files: List[Any]) -> Set[str]:
         return {_posix(f.path) for f in files if _ext_of(f.name) in self.video_exts}
 
-    def _dead_tree(self, d: Any, root: Optional[str]) -> Optional[Tuple[List[Any], List[Any]]]:
+    def _dead_tree(
+        self, d: Any, root: Optional[str]
+    ) -> Optional[Tuple[List[Any], List[Any]]]:
         """
         子树内已没有任何视频/strm（扩展名取 MoviePilot 媒体扩展名，已含 strm）时返回
         (其余文件, 子目录)，否则 None。写入前连续两次扫描且结果一致；列表失败、超限、
         层级不足（目录即媒体库根）均返回 None。
         """
-        if not self.purge_leftovers or self._depth_below_root(d.path, root) < MIN_PURGE_DEPTH_BELOW_ROOT:
+        if (
+            not self.purge_leftovers
+            or self._depth_below_root(d.path, root) < MIN_PURGE_DEPTH_BELOW_ROOT
+        ):
             return None
         try:
             first = self._scan_tree(d, stop_on_video=True)
@@ -489,7 +505,11 @@ class P115Cleaner:
         if not path_is_canonical(dir_path) or (root and not path_is_canonical(root)):
             p.reason = f"路径不规范（含 .. 或相对路径），拒绝: {dir_path}"
             return p
-        if storage not in self.dir_cleanup_storages or not root or not self.purge_leftovers:
+        if (
+            storage not in self.dir_cleanup_storages
+            or not root
+            or not self.purge_leftovers
+        ):
             p.reason = "目录级删除需要已验证的存储、媒体库根且启用残留清理，拒绝"
             return p
         root_p = _posix(root)
