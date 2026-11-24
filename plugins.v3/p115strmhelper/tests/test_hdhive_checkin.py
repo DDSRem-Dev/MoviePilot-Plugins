@@ -33,9 +33,24 @@ class TestRE0CheckinResult(TestCase):
         """
         for text in ("签到成功，获得 8 积分", "运气不佳，本次扣除 5 积分"):
             with self.subTest(text=text):
-                self.assertEqual(
-                    checkin.parse_checkin_result(text, "success"), (True, text)
-                )
+                result = checkin.parse_checkin_result(text, "success")
+                self.assertIsNotNone(result)
+                self.assertTrue(result[0])
+                if "扣除" in text:
+                    self.assertTrue(checkin.is_negative_checkin_result(result[1]))
+                else:
+                    self.assertEqual(result, (True, text))
+
+    def test_daily_negative_reward_is_completed_with_warning(self) -> None:
+        """
+        普通签到返回负积分时标记为完成但扣分
+        """
+        result = checkin.parse_checkin_result("签到成功，获得 -3 积分", "success")
+        self.assertEqual(
+            result,
+            (True, "签到完成但积分减少：签到成功，获得 -3 积分"),
+        )
+        self.assertTrue(checkin.is_negative_checkin_result(result[1]))
 
     def test_errors_are_not_reported_as_success(self) -> None:
         """
