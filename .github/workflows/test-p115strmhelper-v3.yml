@@ -152,6 +152,10 @@ jobs:
         run: >-
           "$VENV_PYTHON" plugins.v3/p115strmhelper/tests/integration/test_host_loading.py -v
 
+      - name: Run sync deletion safety and storage provider contracts
+        run: >-
+          "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_p115_cleanup*.py' -v
+
       - name: Run original increment regressions
         run: >-
           "$VENV_PYTHON" -m unittest discover -s plugins.v3/p115strmhelper/tests -p 'test_increment_*.py' -v

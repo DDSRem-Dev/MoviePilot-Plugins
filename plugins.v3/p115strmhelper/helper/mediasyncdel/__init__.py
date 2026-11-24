@@ -550,15 +550,13 @@ class MediaSyncDelHelper:
             )
             if not file_dir_fileitem:
                 return None
-            # 同主干的旁挂文件（nfo/srt/jpg 等）同样满足主干相同，
-            # 必须按媒体后缀筛选，否则会把字幕或封面的后缀当成媒体后缀
-            candidates = self.__match_stem_candidates(file_dir_fileitem, file_basename)
-            if len(candidates) == 1:
-                return self.__resolve_media_extension(candidates[0]) or None
-            if len(candidates) > 1:
-                logger.warning(
-                    f"【同步删除】同主干存在多个媒体文件，无法安全确定后缀：{file_path}"
-                )
+            return select_video_suffix(
+                self.storagechain.list_files(file_dir_fileitem),
+                file_basename,
+                settings.RMT_MEDIAEXT or _FALLBACK_MEDIA_EXTENSIONS,
+                settings.RMT_SUBEXT or [],
+                settings.RMT_AUDIOEXT or [],
+            )
         except Exception as e:
             logger.error(f"【同步删除】获取115网盘媒体后缀失败: {e}")
         return None
@@ -844,7 +842,7 @@ class MediaSyncDelHelper:
     def __make_p115_cleaner(self) -> P115Cleaner:
         return P115Cleaner(
             self.storagechain,
-            video_exts=settings.RMT_MEDIAEXT or [],
+            video_exts=settings.RMT_MEDIAEXT or _FALLBACK_MEDIA_EXTENSIONS,
             sub_exts=settings.RMT_SUBEXT or [],
             audio_exts=settings.RMT_AUDIOEXT or [],
         )
@@ -858,7 +856,7 @@ class MediaSyncDelHelper:
         allow_dir: bool = False,
     ) -> bool:
         """
-        删除 115 网盘视频及其外挂字幕；子树内已无视频/strm 时清理其余残留文件，
+        删除 115 网盘视频及其外挂字幕；子树内已无视频/strm 时清理已识别的刮削文件，
         并在目录变空后逐级向上删除空目录（止于媒体库根，根本身不删）。Season/Series
         目录事件（allow_dir）在双扫描确认后对目录发起一次递归删除并复核（避免逐文件
         数千次调用触发风控）；路径映射第三段必须是 Emby 媒体库根目录（一库一映射）。
@@ -870,7 +868,9 @@ class MediaSyncDelHelper:
         :param file_path (str): 视频文件的 115 路径（精确路径）
         :param media_name (str): 媒体名称
         :param library_root (str): 115 媒体库根，空目录清理止于此（不含）
-        :return: 是否完整成功（已删除或本就不存在，且复核通过）
+        :param allow_dir (bool): 是否为明确的季或剧集目录事件
+
+        :return bool: 目标已删除或本就不存在，且复核通过
         """
         try:
             if storage not in {"u115", "115网盘Plus", "CloudDrive储存"}:
@@ -944,11 +944,14 @@ class MediaSyncDelHelper:
         json_object = getattr(event_data, "json_object", {})
 
         # 仅限视频库：音乐/照片/图书/合集等条目不做同步删除
-        _raw_type = (
-            json_object.get("Item", {}).get("Type")
-            if isinstance(json_object, dict)
-            else None
-        )
+        json_object = json_object if isinstance(json_object, dict) else {}
+        item = json_object.get("Item")
+        item = item if isinstance(item, dict) else {}
+        json_object = {**json_object, "Item": item}
+        _raw_type = item.get("Type")
+        if _raw_type is None:
+            # MOV/TV 是宿主归一化类型，不能证明原条目属于视频库
+            _raw_type = media_type if is_video_library_item(media_type) else None
         if not is_video_library_item(_raw_type):
             logger.warn(
                 f"【同步删除】{media_name} 条目类型 {_raw_type} 不属于视频库，跳过"
@@ -1190,10 +1193,11 @@ class MediaSyncDelHelper:
             )
             for transferhis in transfer_history:
                 title = transferhis.title
-                if title not in media_name:
+                if not title or title not in (media_name or ""):
                     logger.warn(
                         f"【同步删除】当前转移记录 {transferhis.id} {title} {transferhis.media_source}:{transferhis.media_id} 与删除媒体 {media_name} 不符，防误删，暂不自动删除"
                     )
+                    error_cnt += 1
                     continue
                 image = transferhis.image or image
                 year = transferhis.year
@@ -1249,7 +1253,10 @@ class MediaSyncDelHelper:
                                     else:
                                         stop_torrent_hashs += handle_torrent_hashs
                             except Exception as e:
-                                logger.error(f"【同步删除】删除种子失败：{str(e)}")
+                                error_cnt += 1
+                                logger.error(
+                                    f"【同步删除】删除种子失败：{str(e)}", exc_info=True
+                                )
 
         if error_cnt:
             logger.error(f"【同步删除】同步删除 {msg} 未完整完成，失败 {error_cnt} 项")

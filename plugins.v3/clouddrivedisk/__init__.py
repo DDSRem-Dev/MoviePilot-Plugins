@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from clouddrive2_client import CloudDriveClient
 from pytz import timezone
 
+from app.schemas.file import FileItemQueryResult
 from app.sdk.plugin import _PluginBase
 from app.schemas import (
     FileItem,
@@ -1384,6 +1385,7 @@ class CloudDriveDisk(_PluginBase):
             "delete_file": self.delete_file,
             "rename_file": self.rename_file,
             "get_file_item": self.get_file_item,
+            "get_file_item_strict": self.get_file_item_strict,
             "get_parent_item": self.get_parent_item,
             "snapshot_storage": self.snapshot_storage,
             "storage_usage": self.storage_usage,
@@ -1624,10 +1626,31 @@ class CloudDriveDisk(_PluginBase):
         :param path (Path): 云端路径
 
         :return FileItem: FileItem；不存在或非本储存时返回 None
+
+        :raises RuntimeError: 存储未初始化或查询失败时传播错误
         """
-        if storage != self._disk_name or not self._clouddrive_api:
+        if storage != self._disk_name:
             return None
-        return self._clouddrive_api.get_item(path)
+        if not self._clouddrive_api:
+            raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
+        return self._clouddrive_api.get_item_strict(path)
+
+    def get_file_item_strict(
+        self, storage: str, path: Path
+    ) -> Optional[FileItemQueryResult]:
+        """
+        向宿主返回已完成的严格查询回执
+
+        :param storage (str): 存储类型
+        :param path (Path): 待查询路径
+
+        :return FileItemQueryResult: 确认存在或不存在的回执，非本存储返回 None
+
+        :raises RuntimeError: 存储未初始化或无法确认状态时传播错误
+        """
+        if storage != self._disk_name:
+            return None
+        return FileItemQueryResult(item=self.get_file_item(storage, path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
         """

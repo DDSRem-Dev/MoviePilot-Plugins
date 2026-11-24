@@ -106,30 +106,45 @@ class TestMediaSyncDelHelper(TestCase):
 
     def test_delete_p115_files_uses_stem_fallback(self):
         """
-        网盘文件与 Emby 容器后缀不一致时，仍能删除真实文件
+        网盘文件与 Emby 容器后缀不一致时，精确删除并复核真实文件
         """
         module = _load_mediasyncdel_module()
         helper = object.__new__(module.MediaSyncDelHelper)
-        helper.storagechain = Mock()
-        real_item = SimpleNamespace(
-            type="file",
-            basename="(48)",
-            path="/MoviePilot/媒体库/demo/(48).mov",
+        video = "/MoviePilot/媒体库/demo/(48).mov"
+        parent = SimpleNamespace(
+            storage="115网盘Plus",
+            type="dir",
+            fileid="parent",
+            name="demo",
+            path="/MoviePilot/媒体库/demo/",
         )
-        # 第一次按期望路径查文件返回 None，第二次查父目录成功
-        helper.storagechain.get_file_item.side_effect = [None, object()]
-        helper.storagechain.list_files.return_value = [real_item]
-
+        real_item = SimpleNamespace(
+            storage="115网盘Plus",
+            type="file",
+            fileid="video",
+            name="(48).mov",
+            basename="(48)",
+            path=video,
+        )
+        files = {video: real_item}
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item_strict.side_effect = lambda storage, path: (
+            parent if str(path) == parent.path.rstrip("/") else files.get(str(path))
+        )
+        helper.storagechain.list_files.side_effect = lambda item: list(files.values())
+        helper.storagechain.delete_file.side_effect = lambda item: bool(
+            files.pop(item.path, None)
+        )
         with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]):
-            helper._MediaSyncDelHelper__delete_p115_files(
+            result = helper._MediaSyncDelHelper__delete_p115_files(
                 storage="115网盘Plus",
                 file_path="/MoviePilot/媒体库/demo/(48).mp4",
                 media_name="(48)",
             )
-
-        helper.storagechain.delete_media_file.assert_called_once_with(
-            fileitem=real_item
-        )
+        self.assertTrue(result)
+        self.assertEqual(files, {})
+        helper.storagechain.delete_file.assert_called_once_with(real_item)
+        helper.storagechain.delete_media_file.assert_not_called()
 
     def test_match_file_by_stem_skips_sidecar_files(self):
         """
