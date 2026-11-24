@@ -3,7 +3,6 @@ from typing import Any, List, Dict, Tuple, Optional
 
 from p115client.const import ID_TO_DIRNODE_CACHE
 
-from app.schemas.file import FileItemQueryResult
 from app.sdk.plugin import _PluginBase
 from app.schemas import FileItem, Response, StorageOperSelectionEventData, StorageUsage
 from app.schemas.exception import StorageQueryError
@@ -14,6 +13,12 @@ from app.sdk.services import StorageHelper
 
 from .p115_api import P115Api
 from .p115_client import create_client, build_timeout_config
+
+
+try:
+    from app.schemas.file import FileItemQueryResult
+except ImportError:
+    FileItemQueryResult = None
 
 
 class P115Disk(_PluginBase):
@@ -31,7 +36,7 @@ class P115Disk(_PluginBase):
         "refs/heads/v2/src/assets/images/misc/u115.png"
     )
     # 插件版本
-    plugin_version = "3.0.4"
+    plugin_version = "3.0.3"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -712,9 +717,7 @@ class P115Disk(_PluginBase):
 
         return self._p115_api.get_item_strict(path)
 
-    def get_file_item_strict(
-        self, storage: str, path: Path
-    ) -> Optional[FileItemQueryResult]:
+    def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
         """
         向宿主返回已完成的严格查询回执
 
@@ -727,6 +730,8 @@ class P115Disk(_PluginBase):
         """
         if storage != self._disk_name:
             return None
+        if FileItemQueryResult is None:
+            raise RuntimeError("当前宿主不支持严格查询回执")
         return FileItemQueryResult(item=self.get_file_item(storage, path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:

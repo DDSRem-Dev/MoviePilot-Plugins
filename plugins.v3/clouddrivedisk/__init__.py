@@ -7,7 +7,6 @@ from apscheduler.triggers.cron import CronTrigger
 from clouddrive2_client import CloudDriveClient
 from pytz import timezone
 
-from app.schemas.file import FileItemQueryResult
 from app.sdk.plugin import _PluginBase
 from app.schemas import (
     FileItem,
@@ -30,6 +29,12 @@ from .assistant import (
     restart_cd2,
 )
 from .clouddrive_api import CloudDriveApi
+
+
+try:
+    from app.schemas.file import FileItemQueryResult
+except ImportError:
+    FileItemQueryResult = None
 
 
 class CloudDriveDisk(_PluginBase):
@@ -1635,9 +1640,7 @@ class CloudDriveDisk(_PluginBase):
             raise RuntimeError("存储尚未初始化，无法确认文件是否存在")
         return self._clouddrive_api.get_item_strict(path)
 
-    def get_file_item_strict(
-        self, storage: str, path: Path
-    ) -> Optional[FileItemQueryResult]:
+    def get_file_item_strict(self, storage: str, path: Path) -> Optional[Any]:
         """
         向宿主返回已完成的严格查询回执
 
@@ -1650,6 +1653,8 @@ class CloudDriveDisk(_PluginBase):
         """
         if storage != self._disk_name:
             return None
+        if FileItemQueryResult is None:
+            raise RuntimeError("当前宿主不支持严格查询回执")
         return FileItemQueryResult(item=self.get_file_item(storage, path))
 
     def get_parent_item(self, fileitem: FileItem) -> Optional[FileItem]:
