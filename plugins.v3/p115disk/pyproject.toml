@@ -3,5 +3,5 @@ name = "moviepilot-plugin-p115disk"
 dynamic = ["version"]
 requires-python = ">=3.12"
 dependencies = [
-    "p115client==0.0.9.7.2",
+    "p115client==0.0.9.7.8.3",
 ]
