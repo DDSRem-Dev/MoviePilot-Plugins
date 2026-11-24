@@ -2079,8 +2079,9 @@ class P123StrmHelper(_PluginBase):
                 )
                 if status:
                     logger.info("【监控整理STRM生成】刷新媒体服务器目录替换中...")
-                    strm_target_path = strm_target_path.replace(
-                        moviepilot_path, mediaserver_path
+                    relative_path = Path(strm_target_path).relative_to(moviepilot_path)
+                    strm_target_path = str(
+                        Path(mediaserver_path) / relative_path
                     ).replace("\\", "/")
                     logger.info(
                         f"【监控整理STRM生成】刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
