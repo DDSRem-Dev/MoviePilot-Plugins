@@ -43,7 +43,7 @@ class RenameDictUtils:
     }
 
     _DTS_PROFILE_PATTERNS: Tuple[Tuple[str, str], ...] = (
-        (r"DTS[\s\-:]*X\b", "DTS:X"),
+        (r"DTS[\s\-:]*X\b", "DTS-X"),
         (r"DTS[\s\-]*HD[\s\-]*MA", "DTS-HD MA"),
         (r"DTS[\s\-]*HD[\s\-]*(?:HR|HRA|HIGH[\s\-]*RES)", "DTS-HD HR"),
         (r"DTS[\s\-]*ES", "DTS-ES"),

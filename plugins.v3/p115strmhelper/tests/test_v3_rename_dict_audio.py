@@ -160,7 +160,7 @@ class TestV3RenameDictAudio(TestCase):
             ),
             (
                 {"profile": "DTS:X", "channels": 8, "channel_layout": "7.1"},
-                "DTS:X 7.1",
+                "DTS-X 7.1",
             ),
             (
                 {"profile": "DTS-ES", "channels": 6, "channel_layout": "5.1(side)"},
