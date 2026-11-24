@@ -167,10 +167,10 @@ class P115Cleaner:
         sub_exts: Iterable[str],
         audio_exts: Iterable[str] = (),
         dir_cleanup_storages: Iterable[str] = (
-        "u115",
-        "115网盘Plus",
-        "CloudDrive储存",
-    ),,
+            "u115",
+            "115网盘Plus",
+            "CloudDrive储存",
+        ),
         purge_leftovers: bool = True,
     ) -> None:
         self.purge_leftovers = purge_leftovers
