@@ -74,7 +74,6 @@ class FFprobeNamingSupplement(_PluginBase):
     _AUDIO_PROFILE_KEYS: Tuple[str, ...] = (
         "profile",
         "Profile",
-        "codec_long_name",
         "codec_tag_string",
         "CodecTag",
     )
@@ -604,7 +603,7 @@ class FFprobeNamingSupplement(_PluginBase):
         """
         拼接音轨中可携带编码档位的字段，用于还原 DTS 家族的具体 profile
 
-        同时兼容 ffprobe 流结构（profile、codec_long_name、tags）与
+        同时兼容 ffprobe 流结构（profile、codec_tag_string、tags）与
         Emby MediaStream 结构（Profile、Title、DisplayTitle）
 
         :param audio_s (Dict): ffprobe 或 Emby 的单路音频流字典

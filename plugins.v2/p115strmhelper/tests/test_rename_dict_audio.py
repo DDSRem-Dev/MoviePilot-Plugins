@@ -117,11 +117,11 @@ class TestRenameDictAudio(TestCase):
 
     def test_plain_dts_stays_plain(self) -> None:
         """
-        普通 DTS 音轨不被提升档位
+        普通 DTS 音轨在 ffprobe 固定 codec_long_name 下不被误标为 DTS-HD MA
         """
         audio = _ffprobe_audio(
             codec_name="dts",
-            codec_long_name="DTS",
+            codec_long_name="DTS (DTS-HD MA)",
             profile="DTS",
             channels=6,
             channel_layout="5.1(side)",
@@ -151,16 +151,41 @@ class TestRenameDictAudio(TestCase):
 
     def test_dts_profile_variants(self) -> None:
         """
-        DTS-HD HR、DTS:X、DTS-ES 各自保留独立档位
+        DTS-HD HR、DTS:X、DTS-ES、DTS 96-24、DTS Express 不受固定 codec_long_name 干扰
         """
         cases = [
-            ({"profile": "DTS-HD HRA", "channels": 8, "channel_layout": "7.1"}, "DTS-HD HR 7.1"),
-            ({"profile": "DTS:X", "channels": 8, "channel_layout": "7.1"}, "DTS:X 7.1"),
-            ({"profile": "DTS-ES", "channels": 6, "channel_layout": "5.1(side)"}, "DTS-ES 5.1"),
-            ({"profile": "DTS 96/24", "channels": 6, "channel_layout": "5.1(side)"}, "DTS 96-24 5.1"),
+            (
+                {"profile": "DTS-HD HRA", "channels": 8, "channel_layout": "7.1"},
+                "DTS-HD HR 7.1",
+            ),
+            (
+                {"profile": "DTS:X", "channels": 8, "channel_layout": "7.1"},
+                "DTS:X 7.1",
+            ),
+            (
+                {"profile": "DTS-ES", "channels": 6, "channel_layout": "5.1(side)"},
+                "DTS-ES 5.1",
+            ),
+            (
+                {"profile": "DTS 96/24", "channels": 6, "channel_layout": "5.1(side)"},
+                "DTS 96-24 5.1",
+            ),
+            (
+                {
+                    "profile": "DTS Express",
+                    "channels": 2,
+                    "channel_layout": "stereo",
+                },
+                "DTS Express 2.0",
+            ),
         ]
         for audio_extra, expected in cases:
-            audio = _ffprobe_audio(codec_name="dts", tags={}, **audio_extra)
+            audio = _ffprobe_audio(
+                codec_name="dts",
+                codec_long_name="DTS (DTS-HD MA)",
+                tags={},
+                **audio_extra,
+            )
             fields = self.utils._probe_to_rename_fields(
                 {"streams": [_FFPROBE_VIDEO, audio]}
             )
@@ -170,7 +195,14 @@ class TestRenameDictAudio(TestCase):
         """
         96/24 这类档位不能把路径分隔符带进文件名
         """
-        profiles = ["DTS", "DTS-HD HRA", "DTS-HD MA", "DTS:X", "DTS 96/24", "DTS Express"]
+        profiles = [
+            "DTS",
+            "DTS-HD HRA",
+            "DTS-HD MA",
+            "DTS:X",
+            "DTS 96/24",
+            "DTS Express",
+        ]
         for profile in profiles:
             label = self.utils._format_audio_codec_label(
                 "dts", "5.1(side)", 6, audio_s={"profile": profile}
