@@ -817,9 +817,8 @@ class U115OpenHelper:
                             try:
                                 bucket.abort_multipart_upload(object_name, upload_id)
                             except Exception as e:
-                                logger.warn(
-                                    f"【P115Open】中止分片上传失败: {e}"
-                                )
+                                logger.warn(f"【P115Open】中止分片上传失败: {e}")
+                                continue
                             send_secupload_result(perf_counter() - start_time)
                             return U115OpenHelper._delay_get_item(target_path)
         except Exception as e:
