@@ -221,7 +221,7 @@ class TestMediaSyncDelHelper(TestCase):
                 file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
             )
 
-        self.assertIs(result, mkv_item)
+        self.assertIsNone(result)
 
     def test_match_file_by_stem_prefers_requested_extension(self):
         """
@@ -253,6 +253,36 @@ class TestMediaSyncDelHelper(TestCase):
 
         self.assertIs(result, mp4_item)
 
+    def test_match_file_by_stem_rejects_duplicate_requested_extensions(self):
+        """
+        同主干存在多个相同上报后缀时拒绝猜测删除目标
+        """
+        module = _load_mediasyncdel_module()
+        helper = object.__new__(module.MediaSyncDelHelper)
+        helper.storagechain = Mock()
+        helper.storagechain.get_file_item.return_value = object()
+        first_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="mp4",
+            path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+        )
+        second_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="MP4",
+            path="/MoviePilot/媒体库/demo/Movie (2020).MP4",
+        )
+        helper.storagechain.list_files.return_value = [first_item, second_item]
+
+        with patch.object(module.settings, "RMT_MEDIAEXT", [".mp4"]):
+            result = helper._MediaSyncDelHelper__match_file_by_stem(
+                storage="115网盘Plus",
+                file_path="/MoviePilot/媒体库/demo/Movie (2020).mp4",
+            )
+
+        self.assertIsNone(result)
+
     def test_match_file_by_stem_falls_back_to_sidecar_filter_without_mediaext(self):
         """
         未配置 RMT_MEDIAEXT 时退回排除已知旁挂后缀，仍不会误删字幕
@@ -267,13 +297,19 @@ class TestMediaSyncDelHelper(TestCase):
             extension="srt",
             path="/MoviePilot/媒体库/demo/Movie (2020).srt",
         )
+        strm_item = SimpleNamespace(
+            type="file",
+            basename="Movie (2020)",
+            extension="strm",
+            path="/MoviePilot/媒体库/demo/Movie (2020).strm",
+        )
         mov_item = SimpleNamespace(
             type="file",
             basename="Movie (2020)",
             extension="mov",
             path="/MoviePilot/媒体库/demo/Movie (2020).mov",
         )
-        helper.storagechain.list_files.return_value = [srt_item, mov_item]
+        helper.storagechain.list_files.return_value = [srt_item, strm_item, mov_item]
 
         with patch.object(module.settings, "RMT_MEDIAEXT", []):
             result = helper._MediaSyncDelHelper__match_file_by_stem(
@@ -305,16 +341,19 @@ class TestMediaSyncDelHelper(TestCase):
         )
         helper.storagechain.list_files.return_value = [nfo_item, mov_item]
 
-        with patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]), patch.object(
-            module.PathUtils,
-            "get_p115_media_path",
-            return_value=(
-                "",
-                [
-                    "/媒体库/电影/Movie (2020)",
-                    "x",
-                    "/MoviePilot/媒体库/电影/Movie (2020)",
-                ],
+        with (
+            patch.object(module.settings, "RMT_MEDIAEXT", [".mkv", ".mp4", ".mov"]),
+            patch.object(
+                module.PathUtils,
+                "get_p115_media_path",
+                return_value=(
+                    "",
+                    [
+                        "/媒体库/电影/Movie (2020)",
+                        "x",
+                        "/MoviePilot/媒体库/电影/Movie (2020)",
+                    ],
+                ),
             ),
         ):
             result = helper._MediaSyncDelHelper__get_p115_media_suffix(

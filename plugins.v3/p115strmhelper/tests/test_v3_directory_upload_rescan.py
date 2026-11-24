@@ -1,5 +1,4 @@
 import ast
-import sys
 from pathlib import Path
 from queue import Queue
 from re import search as re_search, IGNORECASE
@@ -182,6 +181,25 @@ class TestDirectoryUploadRescan(TestCase):
 
         self.assertEqual([Path(path).name for path, _ in missing], ["movie.mkv"])
 
+    def test_collect_missing_stops_between_walk_entries(self) -> None:
+        """
+        停止事件触发后不继续收集巡检任务
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            library = Path(tmpdir) / "library"
+            library.mkdir()
+            (library / "movie.mkv").write_text("v")
+            stop_event = Event()
+            stop_event.set()
+            rescan = self.rescan_cls()
+            missing = rescan._collect_missing(
+                [(str(library), str(library))], 50, stop_event
+            )
+
+        self.assertEqual(missing, [])
+
     def test_collect_missing_respects_limit(self) -> None:
         """
         达到单轮上限即停止收集
@@ -296,6 +314,22 @@ class TestDirectoryUploadRescan(TestCase):
 
         self.assertEqual(self.submitted, [])
         self.assertFalse(self.logger.warning.called)
+
+    def test_upload_entries_skip_paths_without_remote_destination(self) -> None:
+        """
+        没有远端上传目录的配置不进入漏传巡检
+        """
+        self.config["directory_upload_path"] = [
+            {"src": "/media/missing", "dest_strm": "/strm/missing"},
+            {
+                "src": "/media/valid",
+                "dest_remote": "/remote/valid",
+                "dest_strm": "/strm/valid",
+            },
+        ]
+        entries = self.rescan_cls._upload_entries()
+
+        self.assertEqual(entries, [("/media/valid", "/strm/valid")])
 
     def test_start_and_stop_are_idempotent(self) -> None:
         """

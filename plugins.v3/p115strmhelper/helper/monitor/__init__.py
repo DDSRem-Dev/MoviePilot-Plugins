@@ -862,7 +862,7 @@ class DirectoryUploadRescan:
         """
         读取目录上传配置中可用于巡检的（监控目录, STRM 输出目录）组合
 
-        未配置 STRM 输出目录的监控项不参与巡检，因为没有可校验的 STRM 产物
+        未配置远端上传目录或 STRM 输出目录的监控项不参与巡检
 
         :return List: (监控目录, STRM 输出目录) 列表
         """
@@ -871,8 +871,9 @@ class DirectoryUploadRescan:
             if not item:
                 continue
             src = str(item.get("src") or "").strip()
+            dest_remote = str(item.get("dest_remote") or "").strip()
             dest_strm = str(item.get("dest_strm") or "").strip()
-            if not src or not dest_strm:
+            if not src or not dest_remote or not dest_strm:
                 continue
             entries.append((src, dest_strm))
         return entries
@@ -919,13 +920,17 @@ class DirectoryUploadRescan:
         return list(entries[index:]) + list(entries[:index])
 
     def _collect_missing(
-        self, entries: List[Tuple[str, str]], limit: int
+        self,
+        entries: List[Tuple[str, str]],
+        limit: int,
+        stop_event: Optional[Event] = None,
     ) -> List[Tuple[str, str]]:
         """
         扫描监控目录，收集缺少对应 STRM 的上传候选文件
 
         :param entries (List): (监控目录, STRM 输出目录) 列表
         :param limit (int): 最多收集的文件数量
+        :param stop_event (Event): 停止事件
 
         :return List: (文件路径, 监控根目录) 列表
         """
@@ -935,11 +940,15 @@ class DirectoryUploadRescan:
         )
         missing: List[Tuple[str, str]] = []
         for mon_path, dest_strm in entries:
+            if stop_event is not None and stop_event.is_set():
+                return missing
             if not Path(mon_path).is_dir():
                 continue
             for current_dir, dir_names, file_names in os_walk(
                 mon_path, followlinks=False
             ):
+                if stop_event is not None and stop_event.is_set():
+                    return missing
                 current = Path(current_dir)
                 dir_names[:] = [
                     name
@@ -947,6 +956,8 @@ class DirectoryUploadRescan:
                     if not _is_directory_upload_ignored_path(current / name, mon_path)
                 ]
                 for name in file_names:
+                    if stop_event is not None and stop_event.is_set():
+                        return missing
                     file_path = current / name
                     if file_path.suffix.lower() == ".strm":
                         continue
@@ -967,21 +978,31 @@ class DirectoryUploadRescan:
                         return missing
         return missing
 
-    def _tick(self, client: P115Client, entries: List[Tuple[str, str]]) -> None:
+    def _tick(
+        self,
+        client: P115Client,
+        entries: List[Tuple[str, str]],
+        stop_event: Optional[Event] = None,
+    ) -> None:
         """
         执行一轮漏传巡检并按上限提交
 
         :param client (P115Client): 115 客户端
         :param entries (List): (监控目录, STRM 输出目录) 列表
+        :param stop_event (Event): 停止事件
         """
+        if stop_event is not None and stop_event.is_set():
+            return
         limit = self._max_submit()
-        missing = self._collect_missing(entries, limit + 1)
+        missing = self._collect_missing(entries, limit + 1, stop_event)
         if not missing:
             logger.debug("【目录上传】漏传巡检：未发现缺少 STRM 的本地文件")
             return
         overflow = len(missing) > limit
         submitted = 0
         for file_path, mon_path in missing[:limit]:
+            if stop_event is not None and stop_event.is_set():
+                return
             try:
                 if directory_upload_stability_tracker.submit(
                     client, file_path, mon_path
@@ -1012,7 +1033,7 @@ class DirectoryUploadRescan:
         while not stop_event.is_set():
             try:
                 if self._config_bool("directory_upload_rescan_enabled", True):
-                    self._tick(client, self._rotate_entries(entries))
+                    self._tick(client, self._rotate_entries(entries), stop_event)
             except Exception as e:
                 logger.error(f"【目录上传】漏传巡检异常: {e}", exc_info=True)
             if stop_event.wait(self._interval_seconds()):

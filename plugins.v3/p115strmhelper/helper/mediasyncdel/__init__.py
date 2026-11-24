@@ -64,6 +64,34 @@ _NON_MEDIA_SIDECAR_EXTENSIONS = frozenset(
         "part",
         "tmp",
         "bak",
+        "strm",
+    }
+)
+
+_FALLBACK_MEDIA_EXTENSIONS = frozenset(
+    {
+        "mp4",
+        "mkv",
+        "ts",
+        "iso",
+        "rmvb",
+        "avi",
+        "mov",
+        "mpeg",
+        "mpg",
+        "wmv",
+        "3gp",
+        "asf",
+        "m4v",
+        "flv",
+        "m2ts",
+        "tp",
+        "f4v",
+        "mts",
+        "vob",
+        "webm",
+        "ogm",
+        "mxf",
     }
 )
 
@@ -516,11 +544,13 @@ class MediaSyncDelHelper:
                 return None
             # 同主干的旁挂文件（nfo/srt/jpg 等）同样满足主干相同，
             # 必须按媒体后缀筛选，否则会把字幕或封面的后缀当成媒体后缀
-            candidates = self.__match_stem_candidates(
-                file_dir_fileitem, file_basename
-            )
-            if candidates:
+            candidates = self.__match_stem_candidates(file_dir_fileitem, file_basename)
+            if len(candidates) == 1:
                 return self.__resolve_media_extension(candidates[0]) or None
+            if len(candidates) > 1:
+                logger.warning(
+                    f"【同步删除】同主干存在多个媒体文件，无法安全确定后缀：{file_path}"
+                )
         except Exception as e:
             logger.error(f"【同步删除】获取115网盘媒体后缀失败: {e}")
         return None
@@ -713,7 +743,7 @@ class MediaSyncDelHelper:
         否则后续删除会命中字幕、元数据或封面，而真正的视频仍留在网盘。
 
         排序保证结果确定：同名后缀优先，其次按 RMT_MEDIAEXT 的偏好顺序，
-        最后按路径字典序，避免依赖列目录返回顺序。
+        最后按路径字典序；删除调用在无法唯一确认时拒绝扩大删除范围。
 
         :param parent_item (Any): 父目录文件项
         :param stem (str): 文件名主干
@@ -736,8 +766,11 @@ class MediaSyncDelHelper:
                     continue
                 order = media_extensions.index(extension)
             else:
-                # 未配置媒体后缀时无法正面确认，退回排除已知旁挂后缀
-                if not extension or extension in _NON_MEDIA_SIDECAR_EXTENSIONS:
+                if (
+                    not extension
+                    or extension in _NON_MEDIA_SIDECAR_EXTENSIONS
+                    or extension not in _FALLBACK_MEDIA_EXTENSIONS
+                ):
                     logger.debug(
                         f"【同步删除】跳过同名非媒体文件：{item.path}（后缀 {extension or '未知'}）"
                     )
@@ -775,11 +808,26 @@ class MediaSyncDelHelper:
             if not candidates:
                 return None
             if len(candidates) > 1:
+                candidate_count = len(candidates)
+                preferred = path.suffix.lstrip(".").lower()
+                preferred_candidates = [
+                    candidate
+                    for candidate in candidates
+                    if self.__resolve_media_extension(candidate) == preferred
+                ]
+                if len(preferred_candidates) != 1:
+                    logger.warning(
+                        f"【同步删除】同主干存在多个媒体文件，无法安全确定删除目标：{file_path}"
+                    )
+                    return None
+                candidates = preferred_candidates
                 logger.info(
-                    f"【同步删除】同名同主干媒体文件 {len(candidates)} 个，"
-                    f"按后缀优先级选择：{candidates[0].path}"
+                    f"【同步删除】同名同主干媒体文件 {candidate_count} 个，"
+                    f"按上报后缀选择：{candidates[0].path}"
                 )
-            logger.info(f"【同步删除】按文件名主干匹配到网盘真实文件：{candidates[0].path}")
+            logger.info(
+                f"【同步删除】按文件名主干匹配到网盘真实文件：{candidates[0].path}"
+            )
             return candidates[0]
         except Exception as e:
             logger.warn(f"【同步删除】按文件名主干匹配网盘文件失败：{e}")

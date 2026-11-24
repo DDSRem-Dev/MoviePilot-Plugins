@@ -58,7 +58,7 @@ class MonitorStrmHelper:
             rel = local_file_path.relative_to(mon_path)
             out_dir = Path(dest_strm) / PathUtils.sanitize_path_parts(rel).parent
             out_dir.mkdir(parents=True, exist_ok=True)
-            strm_name = StrmGenerater.get_strm_filename(Path(uploaded_file_item.name))
+            strm_name = StrmGenerater.get_strm_filename(local_file_path)
             strm_path = out_dir / strm_name
 
             with open(strm_path, "w", encoding="utf-8") as f:
