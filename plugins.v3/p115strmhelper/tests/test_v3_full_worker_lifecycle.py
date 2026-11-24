@@ -13,6 +13,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 import test_v3_sync_lifecycle as sync_fixture
+from test_v3_full_scan_retry import FullScanIterator
 from test_v3_worker_queue import _compile
 
 
@@ -44,15 +45,31 @@ class TestV3FullWorkerLifecycle(TestCase):
             full_sync_batch_num=1,
         )
         self.namespace = dict(
-            Any=Any, Dict=Dict, List=List, Optional=Optional, Set=Set, Tuple=Tuple,
-            Path=Path, Thread=self._thread, ThreadPoolExecutor=ThreadPoolExecutor,
-            as_completed=as_completed, dumps=lambda item: json_dumps(item).encode(),
-            Queue=Queue, Empty=Empty, batched=batched, perf_counter=perf_counter,
-            configer=self.config, logger=MagicMock(), P115Client=object,
-            MediaInfoDownloader=object, CBase64=MagicMock(),
-            StrmExecHistoryManager=MagicMock(), sentry_manager=MagicMock(),
+            Any=Any,
+            Dict=Dict,
+            List=List,
+            Optional=Optional,
+            Set=Set,
+            Tuple=Tuple,
+            Path=Path,
+            Thread=self._thread,
+            ThreadPoolExecutor=ThreadPoolExecutor,
+            as_completed=as_completed,
+            dumps=lambda item: json_dumps(item).encode(),
+            Queue=Queue,
+            Empty=Empty,
+            batched=batched,
+            perf_counter=perf_counter,
+            configer=self.config,
+            logger=MagicMock(),
+            P115Client=object,
+            MediaInfoDownloader=object,
+            CBase64=MagicMock(),
+            StrmExecHistoryManager=MagicMock(),
+            sentry_manager=MagicMock(),
             get_pid_by_path=MagicMock(return_value=1),
             iter_files_skim=MagicMock(return_value=iter(())),
+            FullScanIterator=FullScanIterator,
             ProcessResult=namedtuple(
                 "ProcessResult", ["status", "path", "message", "data", "path_entry"]
             ),
@@ -64,9 +81,15 @@ class TestV3FullWorkerLifecycle(TestCase):
         )
         self.helper = object.__new__(cls)
         for name in (
-            "total_count", "elapsed_time", "total_db_write_count", "strm_count",
-            "mediainfo_count", "strm_fail_count", "mediainfo_fail_count",
-            "remove_unless_strm_count", "strm_cleanup_deferred_count",
+            "total_count",
+            "elapsed_time",
+            "total_db_write_count",
+            "strm_count",
+            "mediainfo_count",
+            "strm_fail_count",
+            "mediainfo_fail_count",
+            "remove_unless_strm_count",
+            "strm_cleanup_deferred_count",
         ):
             setattr(self.helper, name, 0)
         self.helper.strm_exec_history_kind = None
@@ -85,8 +108,8 @@ class TestV3FullWorkerLifecycle(TestCase):
         self.helper.write_queue = Queue()
         self.helper.result_queue = Queue()
         self.fixture.namespace["FullSyncStrmHelper"] = lambda **kwargs: self.helper
-        self.fixture.namespace["configer"].get_config.side_effect = (
-            lambda key: False if key == "notify" else f"{self.temporary.name}#/media"
+        self.fixture.namespace["configer"].get_config.side_effect = lambda key: (
+            False if key == "notify" else f"{self.temporary.name}#/media"
         )
         self.config.get_ios_ua_app = lambda: {}
         self.config.get_config = lambda key: getattr(self.config, key)
@@ -164,11 +187,15 @@ class TestV3FullWorkerLifecycle(TestCase):
             raise RuntimeError("隔离迭代失败")
 
         def submit(owner: Any, *args: Any) -> Any:
-            owner.write_queue.put((Path(self.temporary.name) / "a.strm", "url", "a.mkv"))
+            owner.write_queue.put(
+                (Path(self.temporary.name) / "a.strm", "url", "a.mkv")
+            )
             return self.namespace["ProcessResult"]("submitted", None, None, None, None)
 
         self.namespace["iter_files_skim"] = iterate
-        self.helper._FullSyncStrmHelper__process_single_item = MethodType(submit, self.helper)
+        self.helper._FullSyncStrmHelper__process_single_item = MethodType(
+            submit, self.helper
+        )
         self.helper._FullSyncStrmHelper__flush_write_buffer = self._block
         self._assert_waits()
 

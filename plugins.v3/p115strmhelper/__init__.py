@@ -1203,7 +1203,7 @@ class P115StrmHelper(_PluginBase):
                 title=i18n.translate("p115_strm_start_sync", paths=args),
                 userid=userid,
             )
-            strm_helper.generate_strm_files(
+            scan_result = strm_helper.generate_strm_files(
                 full_sync_strm_paths=paths,
             )
             (
@@ -1225,11 +1225,19 @@ class P115StrmHelper(_PluginBase):
                 text += f"🗑️ 清理无效STRM文件 {remove_unless_strm_count} 个"
             if strm_cleanup_deferred_count != 0:
                 text += f"\n⏳ 待二次确认清理无效 STRM {strm_cleanup_deferred_count} 个"
+            if scan_result is False:
+                text += "\n⚠️ " + (
+                    strm_helper.scan_error or "扫描未完成，请查看插件日志"
+                )
             post_message(
                 channel=event.event_data.get("channel"),
                 source=event.event_data.get("source"),
                 userid=userid,
-                title=i18n.translate("full_sync_done_title"),
+                title=(
+                    "⚠️【115网盘】全量 STRM 同步未完成"
+                    if scan_result is False
+                    else i18n.translate("full_sync_done_title")
+                ),
                 text=text,
             )
 
