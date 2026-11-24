@@ -62,6 +62,29 @@ class FFprobeNamingSupplement(_PluginBase):
         "vorbis": "Vorbis",
     }
 
+    _DTS_PROFILE_PATTERNS: Tuple[Tuple[str, str], ...] = (
+        (r"DTS[\s\-:]*X\b", "DTS-X"),
+        (r"DTS[\s\-]*HD[\s\-]*MA", "DTS-HD MA"),
+        (r"DTS[\s\-]*HD[\s\-]*(?:HR|HRA|HIGH[\s\-]*RES)", "DTS-HD HR"),
+        (r"DTS[\s\-]*ES", "DTS-ES"),
+        (r"DTS[\s\-]*96\s*/\s*24", "DTS 96-24"),
+        (r"DTS[\s\-]*EXPRESS", "DTS Express"),
+    )
+
+    _AUDIO_PROFILE_KEYS: Tuple[str, ...] = (
+        "profile",
+        "Profile",
+        "codec_tag_string",
+        "CodecTag",
+    )
+
+    _AUDIO_TITLE_KEYS: Tuple[str, ...] = (
+        "title",
+        "Title",
+        "DisplayTitle",
+        "display_title",
+    )
+
     _HEIGHT_SNAP_TIERS: Tuple[Tuple[int, int], ...] = (
         (4320, 48),
         (2880, 48),
@@ -576,10 +599,54 @@ class FFprobeNamingSupplement(_PluginBase):
         return cls._VIDEO_CODEC_MAP.get(key, codec_name.upper())
 
     @classmethod
-    def _map_audio_codec(cls, codec_name: Optional[str]) -> Optional[str]:
+    def _audio_profile_hint(cls, audio_s: Optional[Dict[str, Any]]) -> str:
+        """
+        拼接音轨中可携带编码档位的字段，用于还原 DTS 家族的具体 profile
+
+        同时兼容 ffprobe 流结构（profile、codec_tag_string、tags）与
+        Emby MediaStream 结构（Profile、Title、DisplayTitle）
+
+        :param audio_s (Dict): ffprobe 或 Emby 的单路音频流字典
+
+        :return str: 大写的档位检索串，无可用字段时为空字符串
+        """
+        if not isinstance(audio_s, dict):
+            return ""
+        parts: List[str] = []
+        for key in cls._AUDIO_PROFILE_KEYS + cls._AUDIO_TITLE_KEYS:
+            value = audio_s.get(key)
+            if value:
+                parts.append(str(value))
+        tags = audio_s.get("tags")
+        if isinstance(tags, dict):
+            parts.extend(str(value) for value in tags.values() if value)
+        return " ".join(parts).upper()
+
+    @classmethod
+    def _map_audio_codec(
+        cls,
+        codec_name: Optional[str],
+        audio_s: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """
+        将 ffprobe 或 Emby 的音频编码名映射为命名用标签
+
+        DTS 家族的档位只出现在 profile 等元数据字段中，codec_name 恒为 dts，
+        因此映射时结合音轨元数据还原 DTS-HD MA、DTS-HD HR、DTS:X 等档位
+
+        :param codec_name (str): 音频编码名，如 dts、truehd
+        :param audio_s (Dict): 单路音频流字典，用于识别 DTS 档位
+
+        :return str: 命名用编码名，无编码名时返回 None
+        """
         if not codec_name:
             return None
         key = codec_name.lower().strip()
+        if key in ("dts", "dca"):
+            hint = cls._audio_profile_hint(audio_s)
+            for pattern, label in cls._DTS_PROFILE_PATTERNS:
+                if re_search(pattern, hint):
+                    return label
         return cls._AUDIO_CODEC_MAP.get(key, codec_name.upper())
 
     @classmethod
@@ -664,13 +731,22 @@ class FFprobeNamingSupplement(_PluginBase):
         channels: Optional[Any],
         *,
         dolby_atmos: bool = False,
+        audio_s: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         编码名、可选 Dolby Atmos、声道标签（均空格分隔），用于 rename_dict audioCodec
 
         含 Atmos 时顺序为「基带编码 Dolby Atmos 声道」，如 Dolby TrueHD Dolby Atmos 7.1
+
+        :param codec_name (str): 音频编码名
+        :param channel_layout (str): 声道布局
+        :param channels (Any): 声道数量
+        :param dolby_atmos (bool): 是否含 Dolby Atmos
+        :param audio_s (Dict): 单路音频流字典，用于识别 DTS 档位
+
+        :return str: 命名用音频标签，无编码名时返回 None
         """
-        ac = cls._map_audio_codec(codec_name)
+        ac = cls._map_audio_codec(codec_name, audio_s)
         if not ac:
             return None
         tag = cls._normalize_audio_channel_tag(channel_layout, channels)
@@ -845,6 +921,7 @@ class FFprobeNamingSupplement(_PluginBase):
                 audio_s.get("channel_layout"),
                 audio_s.get("channels"),
                 dolby_atmos=atmos,
+                audio_s=audio_s,
             )
             if ac:
                 out["audioCodec"] = ac
