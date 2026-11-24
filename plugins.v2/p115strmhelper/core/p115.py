@@ -28,6 +28,7 @@ from p115client.tool.attr import normalize_attr, get_id
 from ..core.cache import idpathcacher
 from ..db_manager.oper import FileDbHelper
 from ..utils.limiter import ApiEndpointCooldown
+from .p115_client import _inject_timeout
 
 
 class ShareP115Client(P115Client):
@@ -300,14 +301,15 @@ def get_pid_by_path(
             return pid
     kwargs = configer.get_ios_ua_app(app=False)
     if request_timeout is not None:
-        kwargs["extensions"] = {
-            "timeout": {
+        _inject_timeout(
+            kwargs,
+            {
                 "connect": min(request_timeout, 30),
                 "pool": min(request_timeout, 15),
                 "read": request_timeout,
                 "write": request_timeout,
-            }
-        }
+            },
+        )
     resp = client.fs_dir_getid(path, **kwargs)
     check_response(resp)
     pid = resp.get("id", -1)

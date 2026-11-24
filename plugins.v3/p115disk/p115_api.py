@@ -880,9 +880,14 @@ class P115Api:
         progress_callback = transfer_process(Path(fileitem.path).as_posix())
 
         try:
-            with stream(
-                "GET", download_url, headers={"user-agent": settings.USER_AGENT}
-            ) as r:
+            headers = {"user-agent": settings.USER_AGENT}
+            headers.update(
+                {
+                    key.lower(): value
+                    for key, value in (download_info.get("headers") or {}).items()
+                }
+            )
+            with stream("GET", download_url, headers=headers) as r:
                 r.raise_for_status()
                 downloaded_size = 0
 

@@ -1015,7 +1015,13 @@ class BackupStrmHelper:
             download_url = client.download_url(
                 pickcode, user_agent=configer.get_user_agent()
             )
-            headers = {"User-Agent": configer.get_user_agent()}
+            headers = {"user-agent": configer.get_user_agent()}
+            headers.update(
+                {
+                    key.lower(): value
+                    for key, value in (download_url.get("headers") or {}).items()
+                }
+            )
             with HttpxClient(headers=headers, follow_redirects=True) as hc:
                 with hc.stream("GET", str(download_url)) as resp:
                     resp.raise_for_status()
