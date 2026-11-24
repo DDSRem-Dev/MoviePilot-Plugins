@@ -33,7 +33,7 @@ jobs:
           PRR_DESCRIBE_MODEL: deepseek/deepseek-v4-flash
           PRR_DESCRIBE_REASONING_EFFORT: medium
           PRR_AUTO_REVIEW_MODEL: deepseek/deepseek-v4-flash
-          PRR_AUTO_REVIEW_REASONING_EFFORT: medium
+          PRR_AUTO_REVIEW_REASONING_EFFORT: low
           PRR_MANUAL_REVIEW_MODEL: deepseek/deepseek-v4-flash
           PRR_MANUAL_REVIEW_REASONING_EFFORT: medium
           PRR_ASK_MODEL: deepseek/deepseek-v4-flash
@@ -41,5 +41,6 @@ jobs:
           PRR_PASSTHROUGH_MODEL: deepseek/deepseek-v4-flash
           PRR_PASSTHROUGH_REASONING_EFFORT: medium
           PRR_FALLBACK_MODELS: '["deepseek/deepseek-v4-flash"]'
+          config.custom_model_max_tokens: '128000'
           config.max_output_tokens: '32768'
           config.response_language: zh-CN
