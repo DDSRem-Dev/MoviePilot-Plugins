@@ -25,7 +25,7 @@ class FFprobeNamingSupplement(_PluginBase):
         "整理重命名时调用 ffprobe，统一补全视频及关联字幕、音轨的媒体参数，支持 STRM "
     )
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/refs/heads/main/icons/ffmpeg.png"
-    plugin_version = "0.2.0"
+    plugin_version = "0.2.1"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "ffprobenamingsupplement_"

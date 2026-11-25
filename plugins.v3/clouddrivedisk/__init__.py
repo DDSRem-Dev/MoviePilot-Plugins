@@ -45,7 +45,7 @@ class CloudDriveDisk(_PluginBase):
     plugin_name = "CloudDrive2储存"
     plugin_desc = "使存储支持 CloudDrive2，grpc 原生 API 操作。"
     plugin_icon = "Cloudrive_A.png"
-    plugin_version = "3.0.1"
+    plugin_version = "3.0.2"
     plugin_author = "DDSRem"
     author_url = "https://github.com/DDSRem"
     plugin_config_prefix = "clouddrivedisk_"
