@@ -1,1068 +1,1578 @@
 <template>
-  <v-card-text class="pa-0">
-    <!-- 子标签页 -->
-    <v-tabs v-model="strmSubTab" color="primary" class="sub-category-tabs" slider-color="primary">
-      <v-tab value="tab-transfer" class="sub-tab">
-        <v-icon size="small" start>mdi-file-move-outline</v-icon>监控MP整理
-      </v-tab>
-      <v-tab value="tab-sync" class="sub-tab">
-        <v-icon size="small" start>mdi-sync</v-icon>全量同步
-      </v-tab>
-      <v-tab value="tab-increment-sync" class="sub-tab">
-        <v-icon size="small" start>mdi-book-sync</v-icon>增量同步
-      </v-tab>
-      <v-tab value="tab-life" class="sub-tab">
-        <v-icon size="small" start>mdi-calendar-heart</v-icon>监控115生活事件
-      </v-tab>
-      <v-tab value="tab-api-strm" class="sub-tab">
-        <v-icon size="small" start>mdi-api</v-icon>API STRM生成
-      </v-tab>
-    </v-tabs>
-    <v-divider></v-divider>
-    <v-window v-model="strmSubTab" :touch="false" class="tab-window">
-      <v-window-item value="tab-transfer">
-        <v-card-text>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption mb-2">监控MoviePilot整理入库事件，自动在本地对应目录生成STRM文件。</div>
-          </v-alert>
-          <TransferPostprocessRecovery />
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_enabled" label="启用" color="info"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_scrape_metadata_enabled" label="STRM自动刮削"
-                color="primary"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_clouddrive2_enabled" label="CloudDrive2储存监控"
-                color="info"></v-switch>
-            </v-col>
-          </v-row>
+  <div class="p115-section-stack">
+    <!-- Top Segmented Control for 5 STRM Sub-Modules -->
+    <div class="p115-subnav-bar">
+      <AppleSegmentedControl v-model="strmSubTab" :items="subTabItems" />
+    </div>
 
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.transfer_monitor_media_server_refresh_enabled" label="媒体服务器刷新"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-text-field v-model.number="config.transfer_monitor_media_server_refresh_delay" label="媒体库延迟刷新(秒)"
-                type="number" min="0" density="compact" hint="0 表示不延迟，立即刷新" persistent-hint></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.transfer_monitor_emby_mediainfo_enabled" label="Emby 媒体信息提取"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select v-model="config.transfer_monitor_mediaservers" label="媒体服务器" :items="mediaservers" multiple
-                chips closable-chips></v-select>
-            </v-col>
-          </v-row>
+    <!-- ===================================================================
+         1. 监控 MP 整理 (tab-transfer)
+         =================================================================== -->
+    <div v-if="strmSubTab === 'tab-transfer'" class="p115-section-stack">
+      <div class="p115-callout p115-callout--info">
+        <v-icon size="18" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+        <div>
+          <strong>功能说明：</strong>监控 MoviePilot 整理入库事件，自动在本地对应目录生成 STRM 文件。
+        </div>
+      </div>
 
-          <v-row v-if="config.transfer_monitor_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled">
-            <v-col cols="12">
-              <v-alert type="warning" variant="tonal" density="compact" icon="mdi-alert-circle-outline">
-                <div class="text-caption">
-                  此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
+      <TransferPostprocessRecovery />
 
-          <!-- Transfer Monitor Exclude Paths -->
-          <v-row v-if="config.transfer_monitor_scrape_metadata_enabled" class="mt-2 mb-2">
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(item, index) in transferExcludePaths" :key="`transfer-exclude-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <v-text-field v-model="item.path" label="刮削排除目录" density="compact" variant="outlined" readonly
-                    hide-details class="flex-grow-1 mr-2">
-                  </v-text-field>
-                  <v-btn icon size="small" color="error" class="ml-2"
-                    @click="removeExcludePathEntry(index, 'transfer_exclude')" :disabled="!item.path">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-folder-plus-outline" variant="tonal" class="mt-1 align-self-start"
-                  @click="openExcludeDirSelector('transfer_monitor_scrape_metadata_exclude_paths')">
-                  添加刮削排除目录
-                </v-btn>
-              </div>
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-caption">此处添加的本地目录，在STRM文件生成后将不会自动触发刮削。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
+      <AppleSettingsGroup
+        title="核心监控与刮削联动"
+        subtitle="实时响应 MoviePilot 入库事件"
+        icon="mdi-file-move-outline"
+      >
+        <AppleSettingsRow
+          title="启用监控 MP 整理"
+          description="开启后监听整理完成事件并在本地映射目录自动生成 STRM"
+        >
+          <v-switch v-model="config.transfer_monitor_enabled" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
 
-          <v-row>
-            <v-col cols="12">
-              <v-alert type="warning" variant="tonal" density="compact" icon="mdi-recycle">
-                <div class="text-body-2 mb-1"><strong>重新整理清理：</strong></div>
-                <div class="text-caption">当整理方式为「移动」且源路径已在媒体库内时（即重新整理场景），自动清理源路径对应的旧失效 STRM 文件。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_remove_stale_strm" label="清理失效STRM" color="error"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_remove_stale_strm_dir" label="清理无效STRM目录" color="error"
-                :disabled="!config.transfer_monitor_remove_stale_strm"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.transfer_monitor_remove_stale_strm_file" label="清理无效STRM关联媒体信息文件" color="error"
-                :disabled="!config.transfer_monitor_remove_stale_strm"></v-switch>
-            </v-col>
-          </v-row>
-
-          <v-row v-if="config.transfer_monitor_clouddrive2_enabled">
-            <v-col cols="12">
-              <v-alert type="info" variant="tonal" density="compact" icon="mdi-information">
-                <div class="text-caption">仅 CloudDrive2 储存的路径需要填写「CD2 挂载前缀」，该前缀会与该行的网盘媒体库目录拼接成最终路径。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
-          <v-row v-if="hasCd2ConfigWhenDisabled">
-            <v-col cols="12">
-              <v-alert type="warning" variant="tonal" density="compact" icon="mdi-alert-circle-outline">
-                <div class="text-caption">CloudDrive2 储存监控已关闭，但「监控MP整理」目录配置中仍存在 CD2 挂载前缀，请检查配置。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in transferPaths" :key="`transfer-${index}`"
-                  class="mb-2 d-flex align-center flex-wrap">
-                  <div class="path-selector flex-grow-1 mr-2" style="min-width: 140px;">
-                    <v-text-field v-model="pair.local" label="本地STRM目录" density="compact" append-icon="mdi-folder"
-                      @click:append="openDirSelector(index, 'local', 'transfer')"></v-text-field>
-                  </div>
-                  <v-icon class="mr-2">mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 mr-2" style="min-width: 140px;">
-                    <v-text-field v-model="pair.remote" label="网盘媒体库目录" density="compact"
-                      append-icon="mdi-folder-network"
-                      @click:append="openDirSelector(index, 'remote', 'transfer')"></v-text-field>
-                  </div>
-                  <template v-if="config.transfer_monitor_clouddrive2_enabled">
-                    <v-text-field v-model="pair.cd2Prefix" label="CD2 挂载前缀" density="compact"
-                      placeholder="可选，如 /115open" class="mr-2" hide-details style="max-width: 160px;"></v-text-field>
-                  </template>
-                  <v-btn icon size="small" color="error" class="ml-1" @click="removePath(index, 'transfer')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('transfer')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• <strong>本地STRM目录：</strong>本地STRM文件生成路径</div>
-                  <div class="mb-1">• <strong>网盘媒体库目录：</strong>需要生成本地STRM文件的网盘媒体库路径</div>
-                  <div v-if="config.transfer_monitor_clouddrive2_enabled">• <strong>CD2 挂载前缀：</strong>仅
-                    CloudDrive2
-                    储存时填写，将与此行网盘路径拼接</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in transferMpPaths" :key="`mp-${index}`" class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="媒体库服务器映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="MP映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'mp')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('mp')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• 媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新或Emby提取媒体信息。</div>
-                  <div>• 当映射路径一样时可省略此配置。</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-sync">
-        <v-card-text>
-          <!-- 基础配置 -->
-          <div class="basic-config">
-            <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-              <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-              <div class="text-caption mb-2">全量扫描配置的网盘目录，并在对应的本地目录生成STRM文件。</div>
-            </v-alert>
-            <v-row>
-              <v-col cols="12" md="3">
-                <v-select v-model="config.full_sync_overwrite_mode" label="覆盖模式" :items="[
-                  { title: '总是', value: 'always' },
-                  { title: '从不', value: 'never' }
-                ]" chips closable-chips></v-select>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.full_sync_remove_unless_strm" label="清理失效STRM文件" color="warning"></v-switch>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.full_sync_remove_unless_dir" label="清理无效STRM目录" color="warning"
-                  :disabled="!config.full_sync_remove_unless_strm"></v-switch>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.full_sync_remove_unless_file" label="清理无效STRM文件关联的媒体信息文件" color="warning"
-                  :disabled="!config.full_sync_remove_unless_strm"></v-switch>
-              </v-col>
-            </v-row>
-
-            <v-row>
-              <v-col cols="12" md="12">
-                <v-select v-model="config.full_sync_cleanup_confirm_mode" label="清理失效 STRM 二次验证" :items="[
-                  { title: '无（通过稳定性检查后立即删除）', value: 'none' },
-                  { title: '插件界面确认', value: 'plugin_ui' },
-                  { title: 'Telegram 通知按钮确认', value: 'telegram' },
-                ]" hint="需开启「清理失效STRM文件」；选择后待删文件先入队，确认后再物理删除" persistent-hint density="compact"
-                  :disabled="!config.full_sync_remove_unless_strm"></v-select>
-              </v-col>
-            </v-row>
-
-            <v-row>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.timing_full_sync_strm" label="定期全量同步" color="info"></v-switch>
-              </v-col>
-              <v-col cols="12" md="3">
-                <VCronField v-model="config.cron_full_sync_strm" label="运行全量同步周期" hint="设置全量同步的执行周期" persistent-hint
-                  density="compact"></VCronField>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.full_sync_auto_download_mediainfo_enabled" label="下载媒体数据文件"
-                  color="warning"></v-switch>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-text-field v-model="fullSyncMinFileSizeFormattedRef" label="STRM最小文件大小"
-                  hint="小于此值的文件将不生成STRM(单位K,M,G)" persistent-hint density="compact" placeholder="例如: 100M (可为空)"
-                  clearable></v-text-field>
-              </v-col>
-            </v-row>
-
-            <v-row>
-              <v-col cols="12" md="3">
-                <v-switch v-model="config.full_sync_media_server_refresh_enabled" label="全量同步后刷新媒体库" color="error"
-                  density="compact"></v-switch>
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-text-field v-model.number="config.full_sync_media_server_refresh_delay" label="媒体库延迟刷新(秒)" type="number"
-                  min="0" density="compact" hint="0 表示不延迟" persistent-hint></v-text-field>
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-select v-model="config.full_sync_mediaservers" label="媒体服务器" :items="mediaservers" multiple chips
-                  closable-chips :disabled="!config.full_sync_media_server_refresh_enabled" hint="全量同步完成后将刷新整个媒体库，请谨慎使用"
-                  persistent-hint></v-select>
-              </v-col>
-              <v-col v-if="config.full_sync_media_server_refresh_enabled" cols="12">
-                <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-                  <div class="text-body-2 mb-1"><strong>重要警告</strong></div>
-                  <div class="text-caption">
-                    启用此功能后，全量同步完成后将自动刷新整个媒体库。此操作会扫描所有媒体文件，可能导致媒体服务器负载增加，请确保您已了解此风险并自行承担相应责任。
-                  </div>
-                </v-alert>
-              </v-col>
-            </v-row>
-
-            <v-row>
-              <v-col cols="12">
-                <div class="d-flex flex-column">
-                  <div v-for="(pair, index) in fullSyncPaths" :key="`full-${index}`"
-                    class="mb-2 d-flex align-center gap-1">
-                    <div class="path-selector flex-grow-1 mr-1">
-                      <v-text-field v-model="pair.local" label="本地STRM目录" density="compact" append-icon="mdi-folder"
-                        @click:append="openDirSelector(index, 'local', 'fullSync')"></v-text-field>
-                    </div>
-                    <v-icon class="shrink-0">mdi-pound</v-icon>
-                    <div class="path-selector flex-grow-1 mx-1">
-                      <v-text-field v-model="pair.remote" label="网盘媒体库目录" density="compact"
-                        append-icon="mdi-folder-network"
-                        @click:append="openDirSelector(index, 'remote', 'fullSync')"></v-text-field>
-                    </div>
-                    <v-tooltip :text="pair.enabled ? '参与全量同步，点击关闭' : '不参与全量同步，点击开启'" location="top">
-                      <template #activator="{ props: tooltipProps }">
-                        <v-btn v-bind="tooltipProps" icon size="small" :color="pair.enabled ? 'primary' : 'default'"
-                          variant="text" class="shrink-0" @click="pair.enabled = !pair.enabled">
-                          <v-icon>{{ pair.enabled ? 'mdi-sync' : 'mdi-sync-off' }}</v-icon>
-                        </v-btn>
-                      </template>
-                    </v-tooltip>
-                    <v-btn icon size="small" color="error" variant="text" class="shrink-0"
-                      @click="removePath(index, 'fullSync')">
-                      <v-icon>mdi-delete</v-icon>
-                    </v-btn>
-                  </div>
-                  <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                    @click="addPath('fullSync')">
-                    添加路径
-                  </v-btn>
-                </div>
-
-                <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                  <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                  <div class="text-caption">
-                    <div class="mb-1">• <strong>同步：</strong>开启时该目录参与全量同步，关闭则不参与（机器人命令按路径执行不受影响）</div>
-                    <div class="mb-1">• <strong>本地STRM目录：</strong>本地STRM文件生成路径</div>
-                    <div>• <strong>网盘媒体库目录：</strong>需要生成本地STRM文件的网盘媒体库路径</div>
-                  </div>
-                </v-alert>
-              </v-col>
-            </v-row>
-          </div>
-
-          <!-- 高级配置 -->
-          <v-expansion-panels variant="tonal" class="mt-6">
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon icon="mdi-tune-variant" class="mr-2"></v-icon>
-                高级配置
-              </v-expansion-panel-title>
-              <v-expansion-panel-text class="pa-4">
-                <v-row>
-                  <v-col cols="12" md="3">
-                    <v-switch v-model="config.full_sync_strm_log" label="输出STRM同步日志" color="primary"></v-switch>
-                  </v-col>
-                  <v-col cols="12" md="3">
-                    <v-switch v-model="config.full_sync_process_rust" label="Rust模式处理数据" color="primary"></v-switch>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-select v-model="config.full_sync_iter_function" label="迭代函数" :items="[
-                      { title: 'iter_files_with_path_skim', value: 'iter_files_with_path_skim' },
-                      { title: 'iter_files_with_path', value: 'iter_files_with_path' }
-                    ]" chips closable-chips></v-select>
-                  </v-col>
-                </v-row>
-                <v-row>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.full_sync_batch_num" label="全量同步批处理数量" type="number"
-                      hint="每次批量处理的文件/目录数量" persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.full_sync_process_num" label="全量同步生成进程数" type="number"
-                      hint="同时执行同步任务的进程数量" persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                </v-row>
-                <v-row>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.full_sync_remove_unless_max_threshold"
-                      label="清理无效 STRM 最大删除比例阈值 (%)" type="number" hint="当待删除文件数占本地文件总数的百分比超过此值时，将进入数据稳定性检查（默认 10%）"
-                      persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.full_sync_remove_unless_stable_threshold"
-                      label="清理数据稳定性检查阈值 (%)" type="number" hint="数据稳定性检查的变异系数阈值，低于此值表示删除数据稳定可执行操作（默认 5%）"
-                      persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-increment-sync">
-        <v-card-text>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption mb-2">增量扫描配置的网盘目录，并在对应的本地目录生成STRM文件。</div>
-          </v-alert>
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_strm_enabled" label="启用" color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <VCronField v-model="config.increment_sync_cron" label="运行增量同步周期" hint="设置增量同步的执行周期" persistent-hint
-                density="compact"></VCronField>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-text-field v-model="incrementSyncMinFileSizeFormattedRef" label="STRM最小文件大小"
-                hint="小于此值的文件将不生成STRM(单位K,M,G)" persistent-hint density="compact" placeholder="例如: 100M (可为空)"
-                clearable></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_auto_download_mediainfo_enabled" label="下载媒体数据文件"
-                color="warning"></v-switch>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_media_server_refresh_enabled" label="媒体服务器刷新"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-text-field v-model.number="config.increment_sync_media_server_refresh_delay" label="媒体库延迟刷新(秒)"
-                type="number" min="0" density="compact" hint="0 表示不延迟" persistent-hint></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_emby_mediainfo_enabled" label="Emby 媒体信息提取"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select v-model="config.increment_sync_mediaservers" label="媒体服务器" :items="mediaservers" multiple chips
-                closable-chips></v-select>
-            </v-col>
-          </v-row>
-
-          <v-row v-if="config.increment_sync_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled">
-            <v-col cols="12">
-              <v-alert type="warning" variant="tonal" density="compact" icon="mdi-alert-circle-outline">
-                <div class="text-caption">
-                  此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_scrape_metadata_enabled" label="STRM自动刮削"
-                color="primary"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_remove_unless_strm" label="清理失效STRM文件"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_remove_unless_dir" label="清理无效STRM目录" color="warning"
-                :disabled="!config.increment_sync_remove_unless_strm"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.increment_sync_remove_unless_file" label="清理无效STRM文件关联的媒体信息文件" color="warning"
-                :disabled="!config.increment_sync_remove_unless_strm"></v-switch>
-            </v-col>
-          </v-row>
-
-          <v-row v-if="config.increment_sync_scrape_metadata_enabled" class="mt-2 mb-2">
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(item, index) in incrementSyncExcludePaths" :key="`increment-exclude-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <v-text-field v-model="item.path" label="刮削排除目录" density="compact" variant="outlined" readonly
-                    hide-details class="flex-grow-1 mr-2">
-                  </v-text-field>
-                  <v-btn icon size="small" color="error" class="ml-2"
-                    @click="removeExcludePathEntry(index, 'increment_exclude')" :disabled="!item.path">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-folder-plus-outline" variant="tonal" class="mt-1 align-self-start"
-                  @click="openExcludeDirSelector('increment_sync_scrape_metadata_exclude_paths')">
-                  添加刮削排除目录
-                </v-btn>
-              </div>
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-caption">此处添加的本地目录，在STRM文件生成后将不会自动触发刮削。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in incrementSyncPaths" :key="`increment-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="本地STRM目录" density="compact" append-icon="mdi-folder"
-                      @click:append="openDirSelector(index, 'local', 'incrementSync')"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="网盘媒体库目录" density="compact"
-                      append-icon="mdi-folder-network"
-                      @click:append="openDirSelector(index, 'remote', 'incrementSync')"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'incrementSync')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('incrementSync')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• <strong>本地STRM目录：</strong>本地STRM文件生成路径</div>
-                  <div>• <strong>网盘媒体库目录：</strong>需要生成本地STRM文件的网盘媒体库路径</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in incrementSyncMPPaths" :key="`increment-mp-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="媒体库服务器映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="MP映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'increment-mp')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('increment-mp')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• 媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新或 Emby 提取媒体信息。</div>
-                  <div>• 当映射路径一样时可省略此配置。</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <!-- 高级配置 -->
-          <v-expansion-panels variant="tonal" class="mt-6">
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon icon="mdi-tune-variant" class="mr-2"></v-icon>
-                高级配置
-              </v-expansion-panel-title>
-              <v-expansion-panel-text class="pa-4">
-                <v-row>
-                  <v-col cols="12" md="6">
-                    <v-switch v-model="config.increment_sync_second_level_dir_scan" label="扫描二级目录生成目录树"
-                      color="primary"></v-switch>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.increment_sync_itertree_timeout_seconds" label="目录树导出超时（秒）"
-                      type="number" min="0" hide-spin-buttons hint="115 云端导出目录树任务的最大等待时间；0 表示不限制"
-                      persistent-hint></v-text-field>
-                  </v-col>
-                </v-row>
-                <v-row>
-                  <v-col cols="12">
-                    <v-alert type="info" variant="tonal" density="compact" icon="mdi-information">
-                      <div class="text-caption">
-                        开启后，将扫描「增量同步目录」中配置的网盘路径下的二级子目录，并以这些二级目录为单位生成目录树。每个配置路径下仅允许包含子文件夹、不得包含文件，且二级目录数量不超过
-                        100 个。
-                      </div>
-                    </v-alert>
-                  </v-col>
-                </v-row>
-                <v-row v-if="config.increment_sync_remove_unless_strm">
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.increment_sync_remove_unless_max_threshold"
-                      label="清理无效 STRM 最大删除比例阈值 (%)" type="number" hint="待删除文件数占本地文件总数的百分比超过此值时，将进入数据稳定性检查（默认 10%）"
-                      persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field v-model.number="config.increment_sync_remove_unless_stable_threshold"
-                      label="清理数据稳定性检查阈值 (%)" type="number" hint="数据稳定性检查的变异系数阈值，低于此值表示删除数据稳定可执行操作（默认 5%）"
-                      persistent-hint density="compact"></v-text-field>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-life">
-        <v-card-text>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption mb-2">监控115生活（上传、移动、接收文件、删除、复制、重命名）事件，自动在本地对应目录生成STRM文件或者删除STRM文件。</div>
-          </v-alert>
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.monitor_life_enabled" label="启用" color="info"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select v-model="config.monitor_life_event_modes" label="处理事件类型" :items="[
-                { title: '新增事件', value: 'creata' },
-                { title: '删除事件', value: 'remove' },
-                { title: '重命名事件', value: 'rename' },
-                { title: '网盘整理', value: 'transfer' }
-              ]" multiple chips closable-chips></v-select>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.monitor_life_remove_mp_history" label="同步删除历史记录" color="warning"
-                :disabled="config.monitor_life_remove_mp_source"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.monitor_life_remove_mp_source" label="同步删除源文件" color="warning"
-                @change="value => { if (value) config.monitor_life_remove_mp_history = true }"></v-switch>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12" md="6">
-              <v-switch v-model="config.monitor_life_rename_auto_related_files" label="重命名事件时同步重命名 STRM 关联文件"
-                color="primary" density="compact" hide-details></v-switch>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <v-card variant="outlined" class="pa-3 life-move-strategy-card">
-                <div class="d-flex align-center mb-2 life-move-title">
-                  <v-icon icon="mdi-tune-variant" size="14" class="mr-1"></v-icon>
-                  <span>移动事件处理策略</span>
-                </div>
-                <v-divider class="mb-3"></v-divider>
-                <v-row>
-                  <v-col cols="12" md="4">
-                    <v-select v-model="config.monitor_life_move_media_mode" label="媒体目录内移动模式" :items="[
-                      { title: '删除/重建（recreate）', value: 'recreate' },
-                      { title: '纯本地迁移（local_move）', value: 'local_move' }
-                    ]" density="compact" variant="outlined" hide-details="auto"></v-select>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <v-switch v-model="config.monitor_life_move_out_media_remove_local_strm"
-                      label="媒体 -> 其它目录 时删除本地STRM" color="warning" density="compact" hide-details></v-switch>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <v-switch v-model="config.monitor_life_move_media_to_transfer_remove_local_strm"
-                      label="媒体 -> 待整理 时删除本地STRM" color="warning" density="compact" hide-details></v-switch>
-                  </v-col>
-                </v-row>
-
-                <v-row v-if="config.monitor_life_move_media_mode === 'recreate'">
-                  <v-col cols="12" md="6">
-                    <v-switch v-model="config.monitor_life_move_media_keep_old_strm" label="媒体 -> 媒体 时保留旧STRM"
-                      color="primary" density="compact" hide-details></v-switch>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-switch v-model="config.monitor_life_move_media_create_new_strm" label="媒体 -> 媒体 时生成新STRM"
-                      color="primary" density="compact" hide-details></v-switch>
-                  </v-col>
-                </v-row>
-
-                <v-row v-if="config.monitor_life_move_media_mode === 'local_move'">
-                  <v-col cols="12">
-                    <v-switch v-model="config.monitor_life_move_media_local_move_related_files"
-                      label="local_move 时迁移 STRM 关联文件" color="primary" density="compact" hide-details></v-switch>
-                  </v-col>
-                </v-row>
-
-                <v-alert type="info" variant="text" density="compact" class="mt-3" icon="mdi-information">
-                  <div class="text-caption">
-                    <div class="mb-1">下表根据你当前配置实时生成，展示“源目录 -> 目标目录”的实际处理动作</div>
-                    <div>说明：源目录类型以数据库可识别路径为准</div>
-                  </div>
-                </v-alert>
-
-                <v-table density="compact" class="mt-2 life-move-matrix">
-                  <thead>
-                    <tr>
-                      <th class="text-left">源目录</th>
-                      <th class="text-left">目标目录</th>
-                      <th class="text-left">当前处理动作（实时）</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in lifeMoveMatrixRows" :key="`${item.source}-${item.target}`">
-                      <td>{{ item.sourceLabel }}</td>
-                      <td>{{ item.targetLabel }}</td>
-                      <td>{{ item.action }}</td>
-                    </tr>
-                  </tbody>
-                </v-table>
-              </v-card>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.monitor_life_media_server_refresh_enabled" label="媒体服务器刷新"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-text-field v-model.number="config.monitor_life_media_server_refresh_delay" label="媒体库延迟刷新(秒)"
-                type="number" min="0" density="compact" hint="0 表示不延迟" persistent-hint></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.monitor_life_emby_mediainfo_enabled" label="Emby 媒体信息提取"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select v-model="config.monitor_life_mediaservers" label="媒体服务器" :items="mediaservers" multiple chips
-                closable-chips></v-select>
-            </v-col>
-          </v-row>
-
-          <v-row v-if="config.monitor_life_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled">
-            <v-col cols="12">
-              <v-alert type="warning" variant="tonal" density="compact" icon="mdi-alert-circle-outline">
-                <div class="text-caption">
-                  此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.monitor_life_auto_download_mediainfo_enabled" label="下载媒体数据文件"
-                color="warning"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.monitor_life_scrape_metadata_enabled" label="STRM自动刮削"
-                color="primary"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="monitorLifeMinFileSizeFormattedRef" label="STRM最小文件大小"
-                hint="小于此值的文件将不生成STRM(单位K,M,G)" persistent-hint density="compact" placeholder="例如: 100M (可为空)"
-                clearable></v-text-field>
-            </v-col>
-          </v-row>
-
-          <!-- Monitor Life Exclude Paths -->
-          <v-row v-if="config.monitor_life_scrape_metadata_enabled" class="mt-2 mb-2">
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(item, index) in monitorLifeExcludePaths" :key="`life-exclude-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <v-text-field v-model="item.path" label="刮削排除目录" density="compact" variant="outlined" readonly
-                    hide-details class="flex-grow-1 mr-2">
-                  </v-text-field>
-                  <v-btn icon size="small" color="error" class="ml-2"
-                    @click="removeExcludePathEntry(index, 'life_exclude')" :disabled="!item.path">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-folder-plus-outline" variant="tonal" class="mt-1 align-self-start"
-                  @click="openExcludeDirSelector('monitor_life_scrape_metadata_exclude_paths')">
-                  添加刮削排除目录
-                </v-btn>
-              </div>
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-caption">此处添加的本地目录，在115生活事件监控生成STRM后将不会自动触发刮削。</div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in monitorLifePaths" :key="`life-${index}`" class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="本地STRM目录" density="compact" append-icon="mdi-folder"
-                      @click:append="openDirSelector(index, 'local', 'monitorLife')"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="网盘媒体库目录" density="compact"
-                      append-icon="mdi-folder-network"
-                      @click:append="openDirSelector(index, 'remote', 'monitorLife')"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'monitorLife')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('monitorLife')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• <strong>本地STRM目录：</strong>本地STRM文件生成路径</div>
-                  <div>• <strong>网盘媒体库目录：</strong>需要生成本地STRM文件的网盘媒体库路径</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in monitorLifeMpPaths" :key="`life-mp-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="媒体库服务器映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="MP映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'monitorLifeMp')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('monitorLifeMp')">
-                  添加路径
-                </v-btn>
-              </div>
-
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">• 媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新或 Emby 提取媒体信息。</div>
-                  <div>• 当映射路径一样时可省略此配置。</div>
-                </div>
-              </v-alert>
-            </v-col>
-          </v-row>
-
-          <v-expansion-panels variant="tonal" class="mt-6">
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon icon="mdi-tune-variant" class="mr-2"></v-icon>
-                高级配置
-              </v-expansion-panel-title>
-              <v-expansion-panel-text class="pa-4">
-                <v-row>
-                  <v-col cols="12" md="3">
-                    <v-text-field v-model.number="config.monitor_life_transfer_stall_timeout_minutes"
-                      label="整理无进展超时(分钟)" type="number" min="1" density="compact" hint="队列持续无变化达到时限后记录残留任务并恢复监控"
-                      persistent-hint></v-text-field>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-
-          <v-expansion-panels variant="tonal" class="mt-3 life-logic-panels">
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon icon="mdi-table-eye" class="mr-2"></v-icon>
-                事件处理逻辑与当前配置
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <div class="life-table-scroll">
-                  <v-table density="compact" class="life-logic-table">
-                    <thead>
-                      <tr>
-                        <th>类型</th>
-                        <th>115 事件</th>
-                        <th>所需模式</th>
-                        <th>实际处理</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in lifeEventLogicRows" :key="item.types">
-                        <td class="life-type-cell">{{ item.types }}</td>
-                        <td><strong>{{ item.events }}</strong></td>
-                        <td>
-                          <v-chip v-if="item.mode" size="x-small" variant="tonal"
-                            :color="isLifeModeEnabled(item.mode) ? 'success' : 'default'">
-                            {{ item.modeLabel }} · {{ isLifeModeEnabled(item.mode) ? '已启用' : '未启用' }}
-                          </v-chip>
-                          <span v-else class="text-medium-emphasis">{{ item.modeLabel }}</span>
-                        </td>
-                        <td>{{ item.action }}</td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </div>
-                <v-alert type="info" variant="text" density="compact" class="mt-2" icon="mdi-database-outline">
-                  <div class="text-caption">
-                    所有拉取到的事件都会先保存到生活事件数据库；未接入的事件只留档，不操作文件数据库或本地文件。
-                  </div>
-                </v-alert>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon icon="mdi-routes" class="mr-2"></v-icon>
-                路径判断、文件类型与安全边界
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <div class="life-table-scroll">
-                  <v-table density="compact" class="life-logic-table life-rule-table">
-                    <thead>
-                      <tr>
-                        <th>判断阶段</th>
-                        <th>条件</th>
-                        <th>结果</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in lifePathRuleRows" :key="`${item.stage}-${item.condition}`">
-                        <td><strong>{{ item.stage }}</strong></td>
-                        <td>{{ item.condition }}</td>
-                        <td>{{ item.result }}</td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </div>
-                <v-alert type="warning" variant="tonal" density="compact" class="mt-3"
-                  icon="mdi-alert-outline">
-                  <div class="text-caption">
-                    文件 type 24 已支持 115 将“移动 + 重命名”合并上报；文件夹 type 20 仍只支持同父目录改名。
-                    文件夹改名或移动不会逐个校验内部 STRM 内容，依赖路径型 URL 时需留意旧 file_path。
-                  </div>
-                </v-alert>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-caption">注意：当 MoviePilot 主程序运行整理任务时 115生活事件 监控会自动暂停，整理运行完成后会继续监控。</div>
-          </v-alert>
-
-          <v-row class="mt-4">
-            <v-col cols="12">
-              <v-btn color="info" variant="outlined" prepend-icon="mdi-bug-check" @click="checkLifeEventStatus">
-                故障检查
-              </v-btn>
-              <div class="text-caption text-grey mt-2">
-                检查115生活事件进程状态，测试数据拉取功能，并提供详细的调试信息
-              </div>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-api-strm">
-        <v-card-text>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption mb-2">API STRM 生成功能允许第三方开发者通过 HTTP API 调用，批量生成 STRM 文件。</div>
-            <div class="text-caption">
-              详细 API 文档请参考：
-              <a href="https://github.com/DDSRem-Dev/MoviePilot-Plugins/blob/main/docs/p115strmhelper/API_STRM生成功能文档.md"
-                target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">
-                GitHub 文档链接
-              </a>
+        <AppleSettingsRow
+          title="CloudDrive2 储存监控"
+          description="当整理目标存储为 CloudDrive2 挂载目录时开启，支持按行配置 CD2 挂载前缀"
+          :subtray-open="Boolean(config.transfer_monitor_clouddrive2_enabled) || hasCd2ConfigWhenDisabled"
+        >
+          <v-switch
+            v-model="config.transfer_monitor_clouddrive2_enabled"
+            color="info"
+            density="compact"
+            hide-details
+            inset
+          />
+          <template #subtray>
+            <div v-if="config.transfer_monitor_clouddrive2_enabled" class="p115-callout p115-callout--info">
+              <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+              <span>仅 CloudDrive2 储存的路径需要填写「CD2 挂载前缀」，该前缀会与该行的网盘媒体库目录拼接成最终路径。</span>
             </div>
-          </v-alert>
+            <div v-if="hasCd2ConfigWhenDisabled" class="p115-callout p115-callout--warn">
+              <v-icon size="16" color="warning" icon="mdi-alert-circle-outline" class="mt-0.5 flex-shrink-0" />
+              <span>CloudDrive2 储存监控已关闭，但「监控MP整理」目录配置中仍存在 CD2 挂载前缀，请检查配置。</span>
+            </div>
+          </template>
+        </AppleSettingsRow>
 
-          <v-row>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.api_strm_scrape_metadata_enabled" label="STRM自动刮削" color="primary"
-                density="compact"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-switch v-model="config.api_strm_media_server_refresh_enabled" label="媒体服务器刷新" color="warning"
-                density="compact"></v-switch>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-text-field v-model.number="config.api_strm_media_server_refresh_delay" label="媒体库延迟刷新(秒)" type="number"
-                min="0" density="compact" hint="0 表示不延迟" persistent-hint></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select v-model="config.api_strm_mediaservers" label="媒体服务器" :items="mediaservers" multiple chips
-                closable-chips density="compact"></v-select>
-            </v-col>
-          </v-row>
+        <AppleSettingsRow
+          title="STRM 自动刮削"
+          description="STRM 生成后自动调用 MoviePilot 元数据刮削流程"
+        >
+          <v-switch
+            v-model="config.transfer_monitor_scrape_metadata_enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
 
-          <v-divider class="my-4"></v-divider>
+        <AppleSettingsRow
+          v-if="config.transfer_monitor_scrape_metadata_enabled"
+          title="刮削排除目录"
+          description="此处添加的本地目录在 STRM 生成后不会自动触发刮削"
+          vertical
+        >
+          <div class="d-flex flex-column gap-2">
+            <div
+              v-for="(item, index) in transferExcludePaths"
+              :key="`transfer-exclude-${index}`"
+              class="d-flex align-center gap-2"
+            >
+              <v-text-field
+                v-model="item.path"
+                placeholder="点击下方按钮选择需要排除自动刮削的本地目录"
+                density="compact"
+                variant="outlined"
+                readonly
+                hide-details
+                class="flex-grow-1"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16" color="primary" icon="mdi-folder-outline" />
+                </template>
+              </v-text-field>
+              <button
+                type="button"
+                class="p115-btn p115-btn--icon p115-btn--danger"
+                :disabled="!item.path"
+                title="移除排除目录"
+                @click="removeExcludePathEntry(index, 'transfer_exclude')"
+              >
+                <v-icon size="16" icon="mdi-trash-can-outline" />
+              </button>
+            </div>
+            <div>
+              <button
+                type="button"
+                class="p115-btn p115-btn--tonal p115-btn--sm"
+                @click="openExcludeDirSelector('transfer_monitor_scrape_metadata_exclude_paths')"
+              >
+                <v-icon size="15" icon="mdi-folder-plus-outline" />
+                <span>添加刮削排除目录</span>
+              </button>
+            </div>
+          </div>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
 
-          <div class="text-subtitle-2 mb-2">路径映射配置:</div>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-information">
-            <div class="text-caption">配置网盘路径到本地路径的映射关系。当 API 请求中未指定 local_path 时，系统会根据此配置自动匹配路径。</div>
-          </v-alert>
+      <AppleSettingsGroup
+        title="媒体服务器刷新与信息提取"
+        subtitle="入库后通知 Emby / Jellyfin / Plex 刷新并提取媒体流信息"
+        icon="mdi-television-play"
+      >
+        <AppleSettingsRow title="媒体服务器刷新" description="生成 STRM 后通知选定的媒体服务器局部刷新">
+          <v-switch
+            v-model="config.transfer_monitor_media_server_refresh_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
 
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in apiStrmPaths" :key="`api-strm-${index}`" class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="本地STRM目录" density="compact" append-icon="mdi-folder"
-                      @click:append="openDirSelector(index, 'local', 'apiStrm')"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="网盘媒体库目录" density="compact"
-                      append-icon="mdi-folder-network"
-                      @click:append="openDirSelector(index, 'remote', 'apiStrm')"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'apiStrm')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('apiStrm')">
-                  添加路径
-                </v-btn>
+        <AppleSettingsRow
+          title="媒体库延迟刷新 (秒)"
+          description="0 表示不延迟，立即刷新"
+          wide-control
+        >
+          <v-text-field
+            v-model.number="config.transfer_monitor_media_server_refresh_delay"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体服务器" description="选择需要联动的媒体服务器实例" wide-control>
+          <v-select
+            v-model="config.transfer_monitor_mediaservers"
+            :items="mediaservers"
+            label="选择媒体服务器"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="Emby 媒体信息提取"
+          description="自动触发 Emby 探测 STRM 视频编码与分辨率元数据"
+          :subtray-open="Boolean(config.transfer_monitor_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled)"
+        >
+          <v-switch
+            v-model="config.transfer_monitor_emby_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+          <template #subtray>
+            <div class="p115-callout p115-callout--warn">
+              <v-icon size="16" color="warning" icon="mdi-alert-circle-outline" class="mt-0.5 flex-shrink-0" />
+              <span>
+                此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
+              </span>
+            </div>
+          </template>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="重新整理失效清理"
+        subtitle="当整理方式为「移动」且源路径已在媒体库内时，自动清理源路径对应的旧失效 STRM 文件"
+        icon="mdi-recycle"
+      >
+        <AppleSettingsRow
+          title="清理失效 STRM"
+          description="重新整理移动后清理源位置的旧 .strm 文件"
+        >
+          <v-switch
+            v-model="config.transfer_monitor_remove_stale_strm"
+            color="error"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <template v-if="config.transfer_monitor_remove_stale_strm">
+          <AppleSettingsRow
+            title="清理无效 STRM 空目录"
+            description="移除旧 STRM 后若其父目录已为空则一并清理"
+          >
+            <v-switch
+              v-model="config.transfer_monitor_remove_stale_strm_dir"
+              color="error"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+
+          <AppleSettingsRow
+            title="清理无效 STRM 关联媒体信息文件"
+            description="同步清理旧 STRM 同目录下的同名 NFO、字幕、海报等关联文件"
+          >
+            <v-switch
+              v-model="config.transfer_monitor_remove_stale_strm_file"
+              color="error"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+        </template>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="监控目录映射"
+        subtitle="本地 STRM 生成路径 ↔ 网盘媒体库路径"
+        icon="mdi-folder-swap-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="transfer"
+          :items="transferPaths"
+          :show-cd2-prefix="Boolean(config.transfer_monitor_clouddrive2_enabled)"
+          add-label="添加监控路径映射"
+          @add="addPath('transfer')"
+          @remove="(i) => removePath(i, 'transfer')"
+          @browse-local="(i) => openDirSelector(i, 'local', 'transfer')"
+          @browse-remote="(i) => openDirSelector(i, 'remote', 'transfer')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• <strong>本地STRM目录：</strong>本地 STRM 文件生成路径</div>
+            <div>• <strong>网盘媒体库目录：</strong>需要生成本地 STRM 文件的网盘媒体库路径</div>
+            <div v-if="config.transfer_monitor_clouddrive2_enabled">
+              • <strong>CD2 挂载前缀：</strong>仅 CloudDrive2 储存时填写，将与此行网盘路径拼接
+            </div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="MoviePilot 与媒体服务器目录转换 (可选)"
+        subtitle="映射路径一致时可留空省略"
+        icon="mdi-swap-horizontal-circle-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="transfer-mp"
+          :items="transferMpPaths"
+          local-label="媒体库服务器映射目录"
+          local-placeholder="/media/strm"
+          local-icon="mdi-television-play"
+          remote-label="MP映射目录"
+          remote-placeholder="/mnt/strm"
+          remote-icon="mdi-folder-home-outline"
+          :allow-local-browse="false"
+          :allow-remote-browse="false"
+          add-label="添加目录转换规则"
+          @add="addPath('mp')"
+          @remove="(i) => removePath(i, 'mp')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• 媒体服务器映射路径和 MP 映射路径不一样时请配置此项，如果不配置则无法正常刷新或 Emby 提取媒体信息。</div>
+            <div>• 当映射路径一样时可省略此配置。</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+    </div>
+
+    <!-- ===================================================================
+         2. 全量同步 (tab-sync)
+         =================================================================== -->
+    <div v-else-if="strmSubTab === 'tab-sync'" class="p115-section-stack">
+      <div class="p115-callout p115-callout--info">
+        <v-icon size="18" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+        <div>
+          <strong>功能说明：</strong>全量扫描配置的网盘目录，并在对应的本地目录生成 STRM 文件。
+        </div>
+      </div>
+
+      <AppleSettingsGroup
+        title="全量同步计划与生成策略"
+        subtitle="定时周期、覆盖规则与附属媒体数据下载"
+        icon="mdi-sync"
+      >
+        <AppleSettingsRow title="定期全量同步" description="按设定的 Cron 表达式定时自动执行全量扫描">
+          <v-switch v-model="config.timing_full_sync_strm" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="运行全量同步周期" description="设置全量同步的定时执行周期" wide-control>
+          <VCronField
+            v-model="config.cron_full_sync_strm"
+            label="运行全量同步周期"
+            density="compact"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="覆盖模式" description="当本地同名 STRM 已存在时的处理方式" wide-control>
+          <v-select
+            v-model="config.full_sync_overwrite_mode"
+            :items="[
+              { title: '总是', value: 'always' },
+              { title: '从不', value: 'never' },
+            ]"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="下载媒体数据文件" description="同步期间自动下载网盘目录内的字幕等附属文件">
+          <v-switch
+            v-model="config.full_sync_auto_download_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="STRM 最小文件大小"
+          description="小于此值的文件将不生成 STRM (支持单位 K, M, G)"
+          wide-control
+        >
+          <v-text-field
+            v-model="fullSyncMinFileSizeFormattedRef"
+            placeholder="例如: 100M (可为空)"
+            density="compact"
+            variant="outlined"
+            clearable
+            hide-details
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="失效 STRM 清理与二次验证"
+        subtitle="清理网盘已不存在的本地残留文件，支持二次人工确认保护"
+        icon="mdi-broom"
+      >
+        <AppleSettingsRow
+          title="清理失效 STRM 文件"
+          description="扫描完成后清理网盘对应路径已不存在的本地 STRM"
+        >
+          <v-switch v-model="config.full_sync_remove_unless_strm" color="warning" density="compact" hide-details inset />
+        </AppleSettingsRow>
+
+        <template v-if="config.full_sync_remove_unless_strm">
+          <AppleSettingsRow
+            title="清理无效 STRM 目录"
+            description="移除失效 STRM 后同步清理变为空目录的本地文件夹"
+          >
+            <v-switch
+              v-model="config.full_sync_remove_unless_dir"
+              color="warning"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+
+          <AppleSettingsRow
+            title="清理无效 STRM 文件关联的媒体信息文件"
+            description="同步清理同目录下的同名 NFO、字幕与海报等附属文件"
+          >
+            <v-switch
+              v-model="config.full_sync_remove_unless_file"
+              color="warning"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+
+          <AppleSettingsRow
+            title="清理失效 STRM 二次验证"
+            description="选择验证模式后待删文件先入队，确认后再执行物理删除"
+            wide-control
+          >
+            <v-select
+              v-model="config.full_sync_cleanup_confirm_mode"
+              :items="[
+                { title: '无（通过稳定性检查后立即删除）', value: 'none' },
+                { title: '插件界面确认', value: 'plugin_ui' },
+                { title: 'Telegram 通知按钮确认', value: 'telegram' },
+              ]"
+              density="compact"
+              variant="outlined"
+              hide-details
+            />
+          </AppleSettingsRow>
+        </template>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="媒体库全局刷新"
+        subtitle="全量同步完成后刷新整个媒体服务器（谨慎开启）"
+        icon="mdi-refresh-circle"
+      >
+        <AppleSettingsRow
+          title="全量同步后刷新媒体库"
+          description="完成后触发所选媒体服务器全库扫描"
+          :subtray-open="Boolean(config.full_sync_media_server_refresh_enabled)"
+        >
+          <v-switch
+            v-model="config.full_sync_media_server_refresh_enabled"
+            color="error"
+            density="compact"
+            hide-details
+            inset
+          />
+          <template #subtray>
+            <div class="p115-callout p115-callout--warn">
+              <v-icon size="18" color="warning" icon="mdi-alert-outline" class="mt-0.5 flex-shrink-0" />
+              <div>
+                <strong>重要警告：</strong>启用此功能后，全量同步完成后将自动刷新整个媒体库。此操作会扫描所有媒体文件，可能导致媒体服务器负载增加，请确保您已了解此风险并自行承担相应责任。
               </div>
-            </v-col>
-          </v-row>
+            </div>
+          </template>
+        </AppleSettingsRow>
 
-          <v-divider class="my-4"></v-divider>
+        <AppleSettingsRow title="媒体库延迟刷新 (秒)" description="0 表示不延迟" wide-control>
+          <v-text-field
+            v-model.number="config.full_sync_media_server_refresh_delay"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
 
-          <div class="text-subtitle-2 mb-2">MoviePilot-媒体库 目录转换:</div>
-          <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-information">
-            <div class="text-caption">媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新或Emby提取媒体信息</div>
-          </v-alert>
+        <AppleSettingsRow
+          title="媒体服务器"
+          description="全量同步完成后将刷新整个媒体库，请谨慎使用"
+          wide-control
+        >
+          <v-select
+            v-model="config.full_sync_mediaservers"
+            :items="mediaservers"
+            label="选择媒体服务器"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+            :disabled="!config.full_sync_media_server_refresh_enabled"
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
 
-          <v-row>
-            <v-col cols="12">
-              <div class="d-flex flex-column">
-                <div v-for="(pair, index) in apiStrmMPPaths" :key="`api-strm-mp-${index}`"
-                  class="mb-2 d-flex align-center">
-                  <div class="path-selector flex-grow-1 mr-2">
-                    <v-text-field v-model="pair.local" label="媒体库服务器映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-icon>mdi-pound</v-icon>
-                  <div class="path-selector flex-grow-1 ml-2">
-                    <v-text-field v-model="pair.remote" label="MP映射目录" density="compact"></v-text-field>
-                  </div>
-                  <v-btn icon size="small" color="error" class="ml-2" @click="removePath(index, 'apiStrm-mp')">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-                <v-btn size="small" prepend-icon="mdi-plus" variant="outlined" class="mt-2 align-self-start"
-                  @click="addPath('apiStrm-mp')">
-                  添加路径
-                </v-btn>
-              </div>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-window-item>
-    </v-window>
-  </v-card-text>
+      <AppleSettingsGroup
+        title="全量同步目录映射"
+        subtitle="支持逐行独立开启/关闭该目录是否参与全量同步"
+        icon="mdi-folder-sync-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="fullsync"
+          :items="fullSyncPaths"
+          :show-enabled-toggle="true"
+          add-label="添加全量同步路径"
+          @add="addPath('fullSync')"
+          @remove="(i) => removePath(i, 'fullSync')"
+          @browse-local="(i) => openDirSelector(i, 'local', 'fullSync')"
+          @browse-remote="(i) => openDirSelector(i, 'remote', 'fullSync')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• <strong>同步图标按钮：</strong>开启时该目录参与全量同步，关闭则不参与（机器人命令按路径执行不受影响）</div>
+            <div>• <strong>本地STRM目录：</strong>本地 STRM 文件生成路径</div>
+            <div>• <strong>网盘媒体库目录：</strong>需要生成本地 STRM 文件的网盘媒体库路径</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <div class="p115-disclosure-bezel">
+        <details class="p115-disclosure">
+          <summary>
+            <span class="p115-disclosure-icon">
+              <v-icon size="16" icon="mdi-tune-variant" />
+            </span>
+            <span class="p115-disclosure-meta">
+              <span class="p115-disclosure-title">高级配置</span>
+              <span class="p115-disclosure-sub">Rust 引擎、迭代函数、并发进程数与删除数据稳定性阈值</span>
+            </span>
+          </summary>
+          <div class="p115-disclosure-body">
+            <AppleSettingsRow
+              title="输出 STRM 同步日志"
+              description="在同步运行日志中输出逐条 STRM 文件处理明细"
+            >
+              <v-switch v-model="config.full_sync_strm_log" color="primary" density="compact" hide-details inset />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="Rust 模式处理数据"
+              description="使用高性能 Rust 扩展模块加速大规模文件列表过滤与路径比对"
+            >
+              <v-switch v-model="config.full_sync_process_rust" color="primary" density="compact" hide-details inset />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="迭代函数"
+              description="选择遍历 115 目录树的底层 API 函数"
+              wide-control
+            >
+              <v-select
+                v-model="config.full_sync_iter_function"
+                :items="[
+                  { title: 'iter_files_with_path_skim', value: 'iter_files_with_path_skim' },
+                  { title: 'iter_files_with_path', value: 'iter_files_with_path' },
+                ]"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="全量同步批处理数量"
+              description="每次批量处理的文件与目录条目数量"
+              wide-control
+            >
+              <v-text-field
+                v-model.number="config.full_sync_batch_num"
+                type="number"
+                suffix="条"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="全量同步生成进程数"
+              description="同时并发执行同步任务的进程/协程数量"
+              wide-control
+            >
+              <v-text-field
+                v-model.number="config.full_sync_process_num"
+                type="number"
+                suffix="个"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="清理无效 STRM 最大删除比例阈值"
+              description="当待删除文件数占本地文件总数的百分比超过此值时，将进入数据稳定性检查（默认 10%）"
+              wide-control
+            >
+              <v-text-field
+                v-model.number="config.full_sync_remove_unless_max_threshold"
+                type="number"
+                suffix="%"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="清理数据稳定性检查阈值"
+              description="数据稳定性检查的变异系数阈值，低于此值表示删除数据稳定可执行操作（默认 5%）"
+              wide-control
+            >
+              <v-text-field
+                v-model.number="config.full_sync_remove_unless_stable_threshold"
+                type="number"
+                suffix="%"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         3. 增量同步 (tab-increment-sync)
+         =================================================================== -->
+    <div v-else-if="strmSubTab === 'tab-increment-sync'" class="p115-section-stack">
+      <div class="p115-callout p115-callout--info">
+        <v-icon size="18" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+        <div>
+          <strong>功能说明：</strong>增量扫描配置的网盘目录，并在对应的本地目录生成 STRM 文件。
+        </div>
+      </div>
+
+      <AppleSettingsGroup
+        title="增量同步计划与刮削"
+        subtitle="轻量周期增量对比目录树"
+        icon="mdi-book-sync-outline"
+      >
+        <AppleSettingsRow title="启用增量同步" description="开启后按设定周期运行增量目录扫描">
+          <v-switch v-model="config.increment_sync_strm_enabled" color="warning" density="compact" hide-details inset />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="运行增量同步周期" description="设置增量同步的执行周期" wide-control>
+          <VCronField v-model="config.increment_sync_cron" label="运行增量同步周期" density="compact" hide-details />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="STRM 最小文件大小"
+          description="小于此值的文件将不生成 STRM (单位 K, M, G)"
+          wide-control
+        >
+          <v-text-field
+            v-model="incrementSyncMinFileSizeFormattedRef"
+            placeholder="例如: 100M (可为空)"
+            density="compact"
+            variant="outlined"
+            clearable
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="下载媒体数据文件" description="增量发现新文件时自动下载附属媒体数据文件">
+          <v-switch
+            v-model="config.increment_sync_auto_download_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="STRM 自动刮削"
+          description="新增 STRM 生成后自动触发元数据刮削"
+        >
+          <v-switch
+            v-model="config.increment_sync_scrape_metadata_enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          v-if="config.increment_sync_scrape_metadata_enabled"
+          title="刮削排除目录"
+          description="此处添加的本地目录在 STRM 生成后不会自动触发刮削"
+          vertical
+        >
+          <div class="d-flex flex-column gap-2">
+            <div
+              v-for="(item, index) in incrementSyncExcludePaths"
+              :key="`inc-exclude-${index}`"
+              class="d-flex align-center gap-2"
+            >
+              <v-text-field
+                v-model="item.path"
+                placeholder="点击下方按钮选择需要排除自动刮削的本地目录"
+                density="compact"
+                variant="outlined"
+                readonly
+                hide-details
+                class="flex-grow-1"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16" color="primary" icon="mdi-folder-outline" />
+                </template>
+              </v-text-field>
+              <button
+                type="button"
+                class="p115-btn p115-btn--icon p115-btn--danger"
+                :disabled="!item.path"
+                title="移除排除目录"
+                @click="removeExcludePathEntry(index, 'increment_exclude')"
+              >
+                <v-icon size="16" icon="mdi-trash-can-outline" />
+              </button>
+            </div>
+            <div>
+              <button
+                type="button"
+                class="p115-btn p115-btn--tonal p115-btn--sm"
+                @click="openExcludeDirSelector('increment_sync_scrape_metadata_exclude_paths')"
+              >
+                <v-icon size="15" icon="mdi-folder-plus-outline" />
+                <span>添加刮削排除目录</span>
+              </button>
+            </div>
+          </div>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="媒体服务器联动与失效清理"
+        subtitle="增量入库刷新、Emby 提取与失效文件清理"
+        icon="mdi-television-play"
+      >
+        <AppleSettingsRow title="媒体服务器刷新" description="增量同步产生更新后通知媒体服务器">
+          <v-switch
+            v-model="config.increment_sync_media_server_refresh_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体库延迟刷新 (秒)" description="0 表示不延迟" wide-control>
+          <v-text-field
+            v-model.number="config.increment_sync_media_server_refresh_delay"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体服务器" description="选择联动刷新的媒体服务器" wide-control>
+          <v-select
+            v-model="config.increment_sync_mediaservers"
+            :items="mediaservers"
+            label="选择媒体服务器"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="Emby 媒体信息提取"
+          description="提取增量新增 STRM 的媒体编码信息"
+          :subtray-open="Boolean(config.increment_sync_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled)"
+        >
+          <v-switch
+            v-model="config.increment_sync_emby_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+          <template #subtray>
+            <div class="p115-callout p115-callout--warn">
+              <v-icon size="16" color="warning" icon="mdi-alert-circle-outline" class="mt-0.5 flex-shrink-0" />
+              <span>
+                此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
+              </span>
+            </div>
+          </template>
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="清理失效 STRM 文件"
+          description="自动移除增量比对中网盘已删除的本地残留 STRM"
+        >
+          <v-switch
+            v-model="config.increment_sync_remove_unless_strm"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <template v-if="config.increment_sync_remove_unless_strm">
+          <AppleSettingsRow
+            title="清理无效 STRM 目录"
+            description="移除失效 STRM 后同步清理变为空目录的本地文件夹"
+          >
+            <v-switch
+              v-model="config.increment_sync_remove_unless_dir"
+              color="warning"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+
+          <AppleSettingsRow
+            title="清理无效 STRM 文件关联的媒体信息文件"
+            description="同步清理同目录下的同名 NFO、字幕与海报等附属文件"
+          >
+            <v-switch
+              v-model="config.increment_sync_remove_unless_file"
+              color="warning"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+        </template>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup title="增量同步目录映射" icon="mdi-folder-sync-outline" padded>
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="incsync"
+          :items="incrementSyncPaths"
+          add-label="添加增量同步路径"
+          @add="addPath('incrementSync')"
+          @remove="(i) => removePath(i, 'incrementSync')"
+          @browse-local="(i) => openDirSelector(i, 'local', 'incrementSync')"
+          @browse-remote="(i) => openDirSelector(i, 'remote', 'incrementSync')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• <strong>本地STRM目录：</strong>本地 STRM 文件生成路径</div>
+            <div>• <strong>网盘媒体库目录：</strong>需要生成本地 STRM 文件的网盘媒体库路径</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="MoviePilot 与媒体服务器目录转换 (可选)"
+        subtitle="映射路径一致时可省略"
+        icon="mdi-swap-horizontal-circle-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="incsync-mp"
+          :items="incrementSyncMPPaths"
+          local-label="媒体库服务器映射目录"
+          remote-label="MP映射目录"
+          :allow-local-browse="false"
+          :allow-remote-browse="false"
+          add-label="添加目录转换规则"
+          @add="addPath('increment-mp')"
+          @remove="(i) => removePath(i, 'increment-mp')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• 媒体服务器映射路径和 MP 映射路径不一样时请配置此项，如果不配置则无法正常刷新或 Emby 提取媒体信息。</div>
+            <div>• 当映射路径一样时可省略此配置。</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <div class="p115-disclosure-bezel">
+        <details class="p115-disclosure">
+          <summary>
+            <span class="p115-disclosure-icon">
+              <v-icon size="16" icon="mdi-tune-variant" />
+            </span>
+            <span class="p115-disclosure-meta">
+              <span class="p115-disclosure-title">高级配置</span>
+              <span class="p115-disclosure-sub">二级目录树扫描、目录树导出超时与删除稳定性阈值</span>
+            </span>
+          </summary>
+          <div class="p115-disclosure-body">
+            <AppleSettingsRow
+              title="扫描二级目录生成目录树"
+              description="以网盘路径下的二级子目录为单位生成目录树（每个配置路径下仅允许包含子文件夹、不得直接包含文件，且二级目录不超过 100 个）"
+            >
+              <v-switch
+                v-model="config.increment_sync_second_level_dir_scan"
+                color="primary"
+                density="compact"
+                hide-details
+                inset
+              />
+            </AppleSettingsRow>
+
+            <AppleSettingsRow
+              title="目录树导出超时"
+              description="115 云端导出目录树任务的最大等待时间；0 表示不限制"
+              wide-control
+            >
+              <v-text-field
+                v-model.number="config.increment_sync_itertree_timeout_seconds"
+                type="number"
+                min="0"
+                hide-spin-buttons
+                suffix="秒"
+                density="compact"
+                variant="outlined"
+                hide-details
+              />
+            </AppleSettingsRow>
+
+            <template v-if="config.increment_sync_remove_unless_strm">
+              <AppleSettingsRow
+                title="清理无效 STRM 最大删除比例阈值"
+                description="待删除文件数占本地文件总数的百分比超过此值时，将进入数据稳定性检查（默认 10%）"
+                wide-control
+              >
+                <v-text-field
+                  v-model.number="config.increment_sync_remove_unless_max_threshold"
+                  type="number"
+                  suffix="%"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </AppleSettingsRow>
+
+              <AppleSettingsRow
+                title="清理数据稳定性检查阈值"
+                description="数据稳定性检查的变异系数阈值，低于此值表示删除数据稳定可执行操作（默认 5%）"
+                wide-control
+              >
+                <v-text-field
+                  v-model.number="config.increment_sync_remove_unless_stable_threshold"
+                  type="number"
+                  suffix="%"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </AppleSettingsRow>
+            </template>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         4. 监控 115 生活事件 (tab-life)
+         =================================================================== -->
+    <div v-else-if="strmSubTab === 'tab-life'" class="p115-section-stack">
+      <div class="p115-callout p115-callout--info">
+        <v-icon size="18" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+        <div>
+          <strong>功能说明：</strong>监控 115 生活（上传、移动、接收文件、删除、复制、重命名）事件，自动在本地对应目录生成 STRM 文件或者删除 STRM 文件。
+        </div>
+      </div>
+
+      <AppleSettingsGroup
+        title="生活事件监控与基础响应"
+        subtitle="实时拉取 115 账号操作流并同步到本地"
+        icon="mdi-calendar-heart"
+      >
+        <AppleSettingsRow title="启用生活事件监控" description="持续监听 115 账号生活事件流">
+          <v-switch v-model="config.monitor_life_enabled" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="处理事件类型" description="选择需要响应的 115 生活事件类别" wide-control>
+          <v-select
+            v-model="config.monitor_life_event_modes"
+            :items="[
+              { title: '新增事件', value: 'creata' },
+              { title: '删除事件', value: 'remove' },
+              { title: '重命名事件', value: 'rename' },
+              { title: '网盘整理', value: 'transfer' },
+            ]"
+            label="选择事件类型"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="同步删除历史记录"
+          description="当删除事件移除本地 STRM 时同步清理 MoviePilot 整理历史记录"
+        >
+          <v-switch
+            v-model="config.monitor_life_remove_mp_history"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+            :disabled="config.monitor_life_remove_mp_source"
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="同步删除源文件"
+          description="删除事件发生时连同整理记录关联源文件一并处理（开启时将自动开启同步删除历史记录）"
+        >
+          <v-switch
+            v-model="config.monitor_life_remove_mp_source"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+            @update:model-value="(val) => { if (val) config.monitor_life_remove_mp_history = true; }"
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="重命名事件时同步重命名 STRM 关联文件"
+          description="改名时自动同步修改同目录下的 NFO、字幕、海报等同名关联文件"
+        >
+          <v-switch
+            v-model="config.monitor_life_rename_auto_related_files"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <!-- Real-Time Move Strategy Matrix Card -->
+      <AppleSettingsGroup
+        title="移动事件处理策略与实时动作矩阵"
+        subtitle="实时计算「源目录 → 目标目录」处理动作（源目录类型以数据库可识别路径为准）"
+        icon="mdi-routes"
+      >
+        <AppleSettingsRow title="媒体目录内移动模式" description="控制媒体目录之间移动文件时的 STRM 同步方式" wide-control>
+          <v-select
+            v-model="config.monitor_life_move_media_mode"
+            :items="[
+              { title: '删除/重建（recreate）', value: 'recreate' },
+              { title: '纯本地迁移（local_move）', value: 'local_move' },
+            ]"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体 -> 其它目录 时删除本地 STRM">
+          <v-switch
+            v-model="config.monitor_life_move_out_media_remove_local_strm"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体 -> 待整理 时删除本地 STRM">
+          <v-switch
+            v-model="config.monitor_life_move_media_to_transfer_remove_local_strm"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <template v-if="config.monitor_life_move_media_mode === 'recreate'">
+          <AppleSettingsRow title="媒体 -> 媒体 时保留旧 STRM">
+            <v-switch
+              v-model="config.monitor_life_move_media_keep_old_strm"
+              color="primary"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+          <AppleSettingsRow title="媒体 -> 媒体 时生成新 STRM">
+            <v-switch
+              v-model="config.monitor_life_move_media_create_new_strm"
+              color="primary"
+              density="compact"
+              hide-details
+              inset
+            />
+          </AppleSettingsRow>
+        </template>
+
+        <AppleSettingsRow
+          v-if="config.monitor_life_move_media_mode === 'local_move'"
+          title="local_move 时迁移 STRM 关联文件"
+        >
+          <v-switch
+            v-model="config.monitor_life_move_media_local_move_related_files"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="实时移动策略预览表"
+          description="下表根据你当前配置实时生成，展示“源目录 -> 目标目录”的实际处理动作"
+          vertical
+        >
+          <div class="p115-table-scroll">
+            <table class="p115-native-table">
+              <thead>
+                <tr>
+                  <th>源目录</th>
+                  <th>目标目录</th>
+                  <th>当前处理动作（实时）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in lifeMoveMatrixRows" :key="`${item.source}-${item.target}`">
+                  <td><span class="p115-badge p115-badge--blue">{{ item.sourceLabel }}</span></td>
+                  <td><span class="p115-badge p115-badge--pink">{{ item.targetLabel }}</span></td>
+                  <td>{{ item.action }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="媒体服务器、刮削与附属下载"
+        icon="mdi-television-play"
+      >
+        <AppleSettingsRow title="媒体服务器刷新">
+          <v-switch
+            v-model="config.monitor_life_media_server_refresh_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体库延迟刷新 (秒)" description="0 表示不延迟" wide-control>
+          <v-text-field
+            v-model.number="config.monitor_life_media_server_refresh_delay"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体服务器" wide-control>
+          <v-select
+            v-model="config.monitor_life_mediaservers"
+            :items="mediaservers"
+            label="选择媒体服务器"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="Emby 媒体信息提取"
+          :subtray-open="Boolean(config.monitor_life_emby_mediainfo_enabled && !config.native_emby_mediainfo_enabled)"
+        >
+          <v-switch
+            v-model="config.monitor_life_emby_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+          <template #subtray>
+            <div class="p115-callout p115-callout--warn">
+              <v-icon size="16" color="warning" icon="mdi-alert-circle-outline" class="mt-0.5 flex-shrink-0" />
+              <span>
+                此功能需配合<strong>神医助手PRO</strong>使用，请确保神医助手PRO版本为 <strong>v3.0.0.40</strong> 及以上。
+              </span>
+            </div>
+          </template>
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="下载媒体数据文件">
+          <v-switch
+            v-model="config.monitor_life_auto_download_mediainfo_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="STRM 最小文件大小"
+          description="小于此值的文件将不生成 STRM (单位 K, M, G)"
+          wide-control
+        >
+          <v-text-field
+            v-model="monitorLifeMinFileSizeFormattedRef"
+            placeholder="例如: 100M (可为空)"
+            density="compact"
+            variant="outlined"
+            clearable
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="STRM 自动刮削">
+          <v-switch
+            v-model="config.monitor_life_scrape_metadata_enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          v-if="config.monitor_life_scrape_metadata_enabled"
+          title="刮削排除目录"
+          description="此处添加的本地目录，在 115 生活事件监控生成 STRM 后将不会自动触发刮削"
+          vertical
+        >
+          <div class="d-flex flex-column gap-2">
+            <div
+              v-for="(item, index) in monitorLifeExcludePaths"
+              :key="`life-exclude-${index}`"
+              class="d-flex align-center gap-2"
+            >
+              <v-text-field
+                v-model="item.path"
+                placeholder="点击下方按钮选择需要排除自动刮削的本地目录"
+                density="compact"
+                variant="outlined"
+                readonly
+                hide-details
+                class="flex-grow-1"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16" color="primary" icon="mdi-folder-outline" />
+                </template>
+              </v-text-field>
+              <button
+                type="button"
+                class="p115-btn p115-btn--icon p115-btn--danger"
+                :disabled="!item.path"
+                title="移除排除目录"
+                @click="removeExcludePathEntry(index, 'life_exclude')"
+              >
+                <v-icon size="16" icon="mdi-trash-can-outline" />
+              </button>
+            </div>
+            <div>
+              <button
+                type="button"
+                class="p115-btn p115-btn--tonal p115-btn--sm"
+                @click="openExcludeDirSelector('monitor_life_scrape_metadata_exclude_paths')"
+              >
+                <v-icon size="15" icon="mdi-folder-plus-outline" />
+                <span>添加刮削排除目录</span>
+              </button>
+            </div>
+          </div>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup title="生活事件监控目录映射" icon="mdi-folder-heart-outline" padded>
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="life"
+          :items="monitorLifePaths"
+          add-label="添加监控路径"
+          @add="addPath('monitorLife')"
+          @remove="(i) => removePath(i, 'monitorLife')"
+          @browse-local="(i) => openDirSelector(i, 'local', 'monitorLife')"
+          @browse-remote="(i) => openDirSelector(i, 'remote', 'monitorLife')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• <strong>本地STRM目录：</strong>本地 STRM 文件生成路径</div>
+            <div>• <strong>网盘媒体库目录：</strong>需要生成本地 STRM 文件的网盘媒体库路径</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="MoviePilot 与媒体服务器目录转换 (可选)"
+        subtitle="映射路径一致时可省略"
+        icon="mdi-swap-horizontal-circle-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="life-mp"
+          :items="monitorLifeMpPaths"
+          local-label="媒体库服务器映射目录"
+          remote-label="MP映射目录"
+          :allow-local-browse="false"
+          :allow-remote-browse="false"
+          add-label="添加目录转换规则"
+          @add="addPath('monitorLifeMp')"
+          @remove="(i) => removePath(i, 'monitorLifeMp')"
+        />
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <div>
+            <div>• 媒体服务器映射路径和 MP 映射路径不一样时请配置此项，如果不配置则无法正常刷新或 Emby 提取媒体信息。</div>
+            <div>• 当映射路径一样时可省略此配置。</div>
+          </div>
+        </div>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup title="高级配置与在线诊断" icon="mdi-bug-check-outline">
+        <AppleSettingsRow
+          title="整理无进展超时 (分钟)"
+          description="队列持续无变化达到时限后记录残留任务并恢复监控"
+          wide-control
+        >
+          <v-text-field
+            v-model.number="config.monitor_life_transfer_stall_timeout_minutes"
+            type="number"
+            min="1"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="115 生活事件故障检查"
+          description="检查 115 生活事件进程状态，测试数据拉取功能，并提供详细的调试信息"
+        >
+          <button type="button" class="p115-btn p115-btn--tonal p115-btn--sm" @click="checkLifeEventStatus">
+            <v-icon size="15" icon="mdi-bug-check-outline" />
+            <span>故障检查</span>
+          </button>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <!-- Reference Tables in Progressive Disclosure Drawers -->
+      <details class="p115-guide-details">
+        <summary>
+          <v-icon size="16" icon="mdi-table-eye" />
+          <span>事件处理逻辑与当前配置对照表</span>
+        </summary>
+        <div class="p115-guide-body">
+          <div class="p115-table-scroll">
+            <table class="p115-native-table p115-native-table--wide">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>115 事件</th>
+                  <th>所需模式</th>
+                  <th>实际处理</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in lifeEventLogicRows" :key="item.types">
+                  <td class="p115-tabular font-weight-medium">{{ item.types }}</td>
+                  <td><strong class="p115-mono">{{ item.events }}</strong></td>
+                  <td>
+                    <span
+                      v-if="item.mode"
+                      class="p115-badge"
+                      :class="isLifeModeEnabled(item.mode) ? 'p115-badge--green' : 'p115-badge--neutral'"
+                    >
+                      <span class="p115-badge-dot" />
+                      {{ item.modeLabel }} · {{ isLifeModeEnabled(item.mode) ? '已启用' : '未启用' }}
+                    </span>
+                    <span v-else class="opacity-70">{{ item.modeLabel }}</span>
+                  </td>
+                  <td>{{ item.action }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="p115-callout p115-callout--info mt-3">
+            <v-icon size="16" color="primary" icon="mdi-database-outline" class="mt-0.5 flex-shrink-0" />
+            <span>所有拉取到的事件都会先保存到生活事件数据库；未接入的事件只留档，不操作文件数据库或本地文件。</span>
+          </div>
+        </div>
+      </details>
+
+      <details class="p115-guide-details">
+        <summary>
+          <v-icon size="16" icon="mdi-shield-check-outline" />
+          <span>路径判断、文件类型与安全边界规则表</span>
+        </summary>
+        <div class="p115-guide-body">
+          <div class="p115-table-scroll">
+            <table class="p115-native-table p115-native-table--wide">
+              <thead>
+                <tr>
+                  <th>判断阶段</th>
+                  <th>条件</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in lifePathRuleRows" :key="`${item.stage}-${item.condition}`">
+                  <td><strong>{{ item.stage }}</strong></td>
+                  <td>{{ item.condition }}</td>
+                  <td>{{ item.result }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="p115-callout p115-callout--warn mt-3">
+            <v-icon size="16" color="warning" icon="mdi-alert-outline" class="mt-0.5 flex-shrink-0" />
+            <span>
+              文件 type 24 已支持 115 将“移动 + 重命名”合并上报；文件夹 type 20 仍只支持同父目录改名。文件夹改名或移动不会逐个校验内部 STRM 内容，依赖路径型 URL 时需留意旧 file_path。
+            </span>
+          </div>
+        </div>
+      </details>
+
+      <div class="p115-callout p115-callout--warn">
+        <v-icon size="18" color="warning" icon="mdi-alert-outline" class="mt-0.5 flex-shrink-0" />
+        <span>注意：当 MoviePilot 主程序运行整理任务时 115生活事件 监控会自动暂停，整理运行完成后会继续监控。</span>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         5. API STRM 生成 (tab-api-strm)
+         =================================================================== -->
+    <div v-else-if="strmSubTab === 'tab-api-strm'" class="p115-section-stack">
+      <div class="p115-callout p115-callout--info">
+        <v-icon size="18" color="primary" icon="mdi-api" class="mt-0.5 flex-shrink-0" />
+        <div>
+          <div class="mb-1">
+            <strong>功能说明：</strong>API STRM 生成功能允许第三方开发者通过 HTTP API 调用，批量生成 STRM 文件。
+          </div>
+          <div>
+            详细 API 文档请参考：
+            <a
+              href="https://github.com/DDSRem-Dev/MoviePilot-Plugins/blob/main/docs/p115strmhelper/API_STRM生成功能文档.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="p115-ext-link"
+            >
+              GitHub 文档链接
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <AppleSettingsGroup title="API 生成后处理设置" icon="mdi-cog-sync-outline">
+        <AppleSettingsRow title="STRM 自动刮削" description="API 写入 STRM 后自动触发元数据刮削">
+          <v-switch
+            v-model="config.api_strm_scrape_metadata_enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体服务器刷新" description="API 生成完成后刷新指定的媒体服务器">
+          <v-switch
+            v-model="config.api_strm_media_server_refresh_enabled"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体库延迟刷新 (秒)" description="0 表示不延迟" wide-control>
+          <v-text-field
+            v-model.number="config.api_strm_media_server_refresh_delay"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="媒体服务器" wide-control>
+          <v-select
+            v-model="config.api_strm_mediaservers"
+            :items="mediaservers"
+            label="选择媒体服务器"
+            multiple
+            chips
+            closable-chips
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="路径映射配置"
+        subtitle="当 API 请求中未指定 local_path 时，系统会根据此配置自动匹配路径"
+        icon="mdi-folder-swap-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="api-strm"
+          :items="apiStrmPaths"
+          add-label="添加 API 路径映射"
+          @add="addPath('apiStrm')"
+          @remove="(i) => removePath(i, 'apiStrm')"
+          @browse-local="(i) => openDirSelector(i, 'local', 'apiStrm')"
+          @browse-remote="(i) => openDirSelector(i, 'remote', 'apiStrm')"
+        />
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="MoviePilot 与媒体库目录转换 (可选)"
+        subtitle="媒体服务器映射路径和 MP 映射路径不一样时请配置此项，否则无法正常刷新或 Emby 提取媒体信息"
+        icon="mdi-swap-horizontal-circle-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="dual"
+          key-prefix="api-strm-mp"
+          :items="apiStrmMPPaths"
+          local-label="媒体库服务器映射目录"
+          remote-label="MP映射目录"
+          :allow-local-browse="false"
+          :allow-remote-browse="false"
+          add-label="添加目录转换规则"
+          @add="addPath('apiStrm-mp')"
+          @remove="(i) => removePath(i, 'apiStrm-mp')"
+        />
+      </AppleSettingsGroup>
+    </div>
+  </div>
 </template>
 
 <script setup>
 import { computed, ref, inject } from 'vue';
+import AppleSegmentedControl from '../ui/AppleSegmentedControl.vue';
+import AppleSettingsGroup from '../ui/AppleSettingsGroup.vue';
+import AppleSettingsRow from '../ui/AppleSettingsRow.vue';
+import PathMappingComposer from '../ui/PathMappingComposer.vue';
 import TransferPostprocessRecovery from '../dialogs/TransferPostprocessRecovery.vue';
 
-const strmSubTab = ref('tab-transfer');
+const activeSubTabs = inject('activeSubTabs', null);
+const fallbackSubTab = ref('tab-transfer');
+
+const strmSubTab = computed({
+  get: () => (activeSubTabs ? activeSubTabs.strm : fallbackSubTab.value),
+  set: (val) => {
+    if (activeSubTabs) activeSubTabs.strm = val;
+    else fallbackSubTab.value = val;
+  },
+});
+
+const subTabItems = [
+  { value: 'tab-transfer', label: '监控MP整理', icon: 'mdi-file-move-outline' },
+  { value: 'tab-sync', label: '全量同步', icon: 'mdi-sync' },
+  { value: 'tab-increment-sync', label: '增量同步', icon: 'mdi-book-sync-outline' },
+  { value: 'tab-life', label: '监控115生活事件', icon: 'mdi-calendar-heart' },
+  { value: 'tab-api-strm', label: 'API STRM生成', icon: 'mdi-api' },
+];
 
 const config = inject('config');
 const mediaservers = inject('mediaservers');
 const transferPaths = inject('transferPaths');
-/** CloudDrive2 已关闭但目录配置中仍有 CD2 前缀时为 true */
-const hasCd2ConfigWhenDisabled = computed(() => {
-  const c = config?.value ?? config;
-  if (c?.transfer_monitor_clouddrive2_enabled) return false;
-  const paths = transferPaths?.value ?? transferPaths ?? [];
-  return (
-    Array.isArray(paths) &&
-    paths.some((p) => String(p?.cd2Prefix ?? '').trim() !== '')
-  );
-});
 const transferMpPaths = inject('transferMpPaths');
 const fullSyncPaths = inject('fullSyncPaths');
 const incrementSyncPaths = inject('incrementSyncPaths');
@@ -1084,6 +1594,13 @@ const openExcludeDirSelector = inject('openExcludeDirSelector');
 const removeExcludePathEntry = inject('removeExcludePathEntry');
 const checkLifeEventStatus = inject('checkLifeEventStatus');
 
+const hasCd2ConfigWhenDisabled = computed(() => {
+  const c = config?.value ?? config;
+  if (c?.transfer_monitor_clouddrive2_enabled) return false;
+  const paths = transferPaths?.value ?? transferPaths ?? [];
+  return Array.isArray(paths) && paths.some((p) => String(p?.cd2Prefix ?? '').trim() !== '');
+});
+
 const lifeEventLogicRows = [
   {
     types: '1, 2',
@@ -1097,7 +1614,7 @@ const lifeEventLogicRows = [
     events: 'move_image_file / move_file',
     mode: null,
     modeLabel: '移动策略',
-    action: '根据旧、新路径所属的媒体、待整理或其它目录执行下方实时移动矩阵；没有独立事件模式开关。',
+    action: '根据旧、新路径所属的媒体、待整理或其它目录执行上方实时移动矩阵；没有独立事件模式开关。',
   },
   {
     types: '14',
@@ -1241,73 +1758,69 @@ const lifeMoveMatrixRows = computed(() => {
 </script>
 
 <style scoped>
-.life-move-strategy-card {
-  background: rgba(var(--v-theme-on-surface), 0.02);
-  border-color: rgba(var(--v-theme-on-surface), 0.08);
+.p115-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.life-move-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-  letter-spacing: 0.01em;
+.p115-subnav-bar {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding-bottom: 2px;
 }
 
-.life-move-matrix {
-  background: transparent;
-}
-
-.life-logic-panels :deep(.v-expansion-panel-text__wrapper) {
-  padding: 12px 16px 16px;
-}
-
-.life-table-scroll {
+.p115-table-scroll {
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 11px;
+  border: 1px solid var(--p115-border-hairline);
+  background: var(--p115-bg-inset);
 }
 
-.life-logic-table {
-  min-width: 820px;
-  background: transparent;
+.p115-native-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.79rem;
+  line-height: 1.5;
 }
 
-.life-rule-table {
+.p115-native-table--wide {
   min-width: 720px;
 }
 
-.life-logic-table :deep(th) {
+.p115-native-table th {
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 0.73rem;
+  font-weight: 620;
+  color: var(--p115-text-secondary);
+  border-bottom: 1px solid var(--p115-border-hairline);
   white-space: nowrap;
-  color: rgba(var(--v-theme-on-surface), 0.72);
-  font-size: 0.75rem;
 }
 
-.life-logic-table :deep(td) {
-  min-width: 120px;
-  padding-top: 10px !important;
-  padding-bottom: 10px !important;
+.p115-native-table td {
+  padding: 9px 12px;
+  color: var(--p115-text-primary);
+  border-bottom: 1px solid var(--p115-border-hairline);
   vertical-align: top;
-  line-height: 1.55;
 }
 
-.life-logic-table :deep(td:last-child) {
-  min-width: 300px;
+.p115-native-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
-.life-type-cell {
-  min-width: 64px !important;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 600px) {
-  .life-logic-panels :deep(.v-expansion-panel-title) {
-    min-height: 52px;
-    padding: 12px;
-    font-size: 0.875rem;
-  }
-
-  .life-logic-panels :deep(.v-expansion-panel-text__wrapper) {
-    padding: 8px 10px 12px;
-  }
+.p115-ext-link {
+  color: var(--p115-blue-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 </style>

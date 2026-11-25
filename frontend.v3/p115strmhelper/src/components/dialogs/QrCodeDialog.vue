@@ -1,69 +1,154 @@
 <template>
-  <v-dialog v-model="qrDialog.show" max-width="450">
-    <v-card>
-      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-2 bg-primary-lighten-5">
-        <v-icon icon="mdi-qrcode" class="mr-2" color="primary" size="small" />
-        <span>115网盘扫码登录</span>
-      </v-card-title>
+  <v-dialog v-model="qrDialog.show" max-width="460" :content-class="dialogContentClass">
+    <v-card flat class="p115-sheet">
+      <div class="p115-sheet-header">
+        <div class="p115-sheet-title">
+          <v-icon icon="mdi-qrcode-scan" color="primary" size="20" />
+          <span>115网盘扫码登录</span>
+        </div>
+        <button type="button" class="p115-btn p115-btn--ghost p115-btn--icon" aria-label="关闭" @click="$emit('close')">
+          <v-icon size="18" icon="mdi-close" />
+        </button>
+      </div>
 
-      <v-card-text class="text-center py-4">
-        <v-alert v-if="qrDialog.error" type="error" density="compact" class="mb-3 mx-3" variant="tonal" closable>
-          {{ qrDialog.error }}
-        </v-alert>
-
-        <div v-if="qrDialog.loading" class="d-flex flex-column align-center py-3">
-          <v-progress-circular indeterminate color="primary" class="mb-3"></v-progress-circular>
-          <div>正在获取二维码...</div>
+      <div class="p115-sheet-body p115-qr-body">
+        <div class="p115-qr-seg-wrap">
+          <div class="p115-qr-caption">请选择扫码客户端渠道</div>
+          <AppleSegmentedControl v-model="qrDialog.clientType" :items="clientItems" />
         </div>
 
-        <div v-else-if="qrDialog.qrcode" class="d-flex flex-column align-center">
-          <div class="mb-2 font-weight-medium">请选择扫码方式</div>
-          <v-chip-group v-model="qrDialog.clientType" class="mb-3" mandatory selected-class="primary">
-            <v-chip v-for="type in clientTypes" :key="type.value" :value="type.value" variant="outlined"
-              color="primary" size="small">
-              {{ type.label }}
-            </v-chip>
-          </v-chip-group>
-          <div class="d-flex flex-column align-center mb-3">
-            <v-card flat class="border pa-2 mb-2">
-              <img :src="qrDialog.qrcode" width="220" height="220" />
-            </v-card>
-            <div class="text-body-2 text-grey mb-1">{{ qrDialog.tips }}</div>
-            <div class="text-subtitle-2 font-weight-medium text-primary">{{ qrDialog.status }}</div>
+        <div v-if="qrDialog.error" class="p115-callout p115-callout--error mb-3 w-100 text-left">
+          <v-icon size="18" color="error" icon="mdi-alert-circle-outline" />
+          <span>{{ qrDialog.error }}</span>
+        </div>
+
+        <div v-if="qrDialog.loading" class="p115-qr-state">
+          <v-progress-circular indeterminate color="primary" size="38" />
+          <span>正在获取二维码...</span>
+        </div>
+
+        <div v-else-if="qrDialog.qrcode" class="p115-qr-showcase">
+          <div class="p115-bezel p115-qr-frame">
+            <div class="p115-bezel-core p115-qr-frame-core">
+              <img :src="qrDialog.qrcode" width="212" height="212" alt="115登录二维码" class="p115-qr-img" />
+            </div>
           </div>
-          <v-btn color="primary" variant="tonal" @click="$emit('refresh')" size="small" class="mb-2">
-            <v-icon left size="small" class="mr-1">mdi-refresh</v-icon>刷新二维码
-          </v-btn>
+
+          <div class="p115-badge p115-badge--blue mt-3">
+            <span class="p115-badge-dot" />
+            <span>{{ qrDialog.status }}</span>
+          </div>
+          <div class="p115-qr-tips">{{ qrDialog.tips }}</div>
         </div>
 
-        <div v-else class="d-flex flex-column align-center py-3">
-          <v-icon icon="mdi-qrcode-off" size="64" color="grey" class="mb-3"></v-icon>
-          <div class="text-subtitle-1">二维码获取失败</div>
-          <div class="text-body-2 text-grey">请点击刷新按钮重试</div>
-          <div class="text-caption mt-2 text-grey">
-            <v-icon icon="mdi-alert-circle" size="small" class="mr-1 text-warning"></v-icon>
-            如果多次获取失败，请检查网络连接
-          </div>
+        <div v-else class="p115-qr-state">
+          <v-icon icon="mdi-qrcode-remove" size="52" class="opacity-40" />
+          <div class="font-weight-medium">二维码获取失败</div>
+          <div class="p115-qr-tips">请点击下方「刷新二维码」重试；若多次失败请检查网络连接</div>
         </div>
-      </v-card-text>
-      <v-divider></v-divider>
-      <v-card-actions class="px-3 py-2">
-        <v-btn color="grey" variant="text" @click="$emit('close')" size="small" prepend-icon="mdi-close">关闭</v-btn>
-        <v-spacer></v-spacer>
-        <v-btn color="primary" variant="text" @click="$emit('refresh')" :disabled="qrDialog.loading" size="small"
-          prepend-icon="mdi-refresh">
-          刷新二维码
-        </v-btn>
-      </v-card-actions>
+      </div>
+
+      <div class="p115-sheet-footer">
+        <button type="button" class="p115-btn p115-btn--subtle" @click="$emit('close')">
+          关闭
+        </button>
+        <button
+          type="button"
+          class="p115-btn p115-btn--primary"
+          :disabled="qrDialog.loading"
+          @click="$emit('refresh')"
+        >
+          <v-icon size="16" icon="mdi-refresh" />
+          <span>刷新二维码</span>
+        </button>
+      </div>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue';
+import AppleSegmentedControl from '../ui/AppleSegmentedControl.vue';
+import { useThemeAdapter } from '../composables/useThemeAdapter.js';
+
+const props = defineProps({
   qrDialog: { type: Object, required: true },
   clientTypes: { type: Array, required: true },
 });
 
 defineEmits(['refresh', 'close']);
+
+const { dialogContentClass } = useThemeAdapter();
+
+const clientItems = computed(() =>
+  (props.clientTypes || []).map((t) => ({
+    label: t.label,
+    value: t.value,
+  })),
+);
 </script>
+
+<style scoped>
+.p115-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.p115-qr-seg-wrap {
+  width: 100%;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.p115-qr-caption {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--p115-text-secondary);
+}
+
+.p115-qr-showcase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.p115-qr-frame {
+  padding: 6px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(91, 207, 250, 0.25), rgba(245, 171, 185, 0.25));
+}
+
+.p115-qr-frame-core {
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.p115-qr-img {
+  display: block;
+  border-radius: 8px;
+}
+
+.p115-qr-tips {
+  font-size: 0.78rem;
+  color: var(--p115-text-secondary);
+  margin-top: 6px;
+}
+
+.p115-qr-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 12px;
+  font-size: 0.85rem;
+  color: var(--p115-text-secondary);
+}
+</style>

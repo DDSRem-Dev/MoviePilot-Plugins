@@ -1,560 +1,834 @@
 <template>
-  <v-card-text class="pa-0">
-    <v-tabs v-model="panSubTab" color="primary" class="sub-category-tabs" slider-color="primary">
-      <v-tab value="tab-pan-transfer" class="sub-tab">
-        <v-icon size="small" start>mdi-transfer</v-icon>网盘整理
-      </v-tab>
-      <v-tab value="tab-pan-mount" class="sub-tab">
-        <v-icon size="small" start>mdi-folder-network</v-icon>网盘挂载
-      </v-tab>
-      <v-tab value="tab-directory-upload" class="sub-tab">
-        <v-icon size="small" start>mdi-upload</v-icon>目录上传
-      </v-tab>
-    </v-tabs>
-    <v-divider></v-divider>
-    <v-window v-model="panSubTab" :touch="false" class="tab-window">
-      <v-window-item value="tab-pan-transfer">
-        <v-card-text>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.pan_transfer_enabled" label="启用" color="info"></v-switch>
-            </v-col>
-          </v-row>
+  <div class="p115-section-stack">
+    <!-- Top Segmented Control for 3 Cloud Drive Sub-Modules -->
+    <div class="p115-subnav-bar">
+      <AppleSegmentedControl v-model="panSubTab" :items="subTabItems" />
+    </div>
 
-          <v-row v-if="config.pan_transfer_clouddrive2_config">
-            <v-col cols="12" class="d-flex align-center flex-wrap gap-4">
-              <v-switch v-model="config.pan_transfer_clouddrive2_config.enabled"
-                label="交由 CloudDrive2 储存整理" color="info" hide-details></v-switch>
-              <v-text-field v-if="config.pan_transfer_clouddrive2_config.enabled"
-                v-model="config.pan_transfer_clouddrive2_config.prefix" label="挂载前缀"
-                placeholder="必填，如 /115open" density="compact" hide-details class="flex-grow-1"
-                style="max-width: 280px;"></v-text-field>
-            </v-col>
-          </v-row>
+    <!-- ===================================================================
+         1. 网盘整理 (tab-pan-transfer)
+         =================================================================== -->
+    <div v-if="panSubTab === 'tab-pan-transfer'" class="p115-section-stack">
+      <AppleSettingsGroup
+        title="网盘整理总开关与 CloudDrive2 协同"
+        subtitle="阿里云盘秒传、115 分享转存与频道搜索转存均依赖网盘整理"
+        icon="mdi-transfer"
+      >
+        <AppleSettingsRow title="启用网盘整理" description="开启后自动对进入待整理目录的资源触发 MoviePilot 整理">
+          <v-switch v-model="config.pan_transfer_enabled" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
 
-          <!-- 待整理和未识别目录 -->
-          <v-card variant="outlined" class="mt-4">
-            <v-card-title class="text-subtitle-1">
-              <v-icon start>mdi-folder-move</v-icon>
-              待整理和未识别目录
-            </v-card-title>
-            <v-card-text>
-              <v-row>
-                <v-col cols="12">
-                  <div class="d-flex flex-column">
-                    <div v-for="(path, index) in panTransferPaths" :key="`pan-${index}`"
-                      class="mb-2 d-flex align-center">
-                      <v-text-field v-model="path.path" label="网盘待整理目录" density="compact"
-                        append-icon="mdi-folder-network"
-                        @click:append="openDirSelector(index, 'remote', 'panTransfer')"
-                        class="flex-grow-1"></v-text-field>
-                      <v-btn icon size="small" color="primary" class="ml-2" @click="manualTransfer(index)"
-                        :disabled="!path.path" title="手动整理此目录">
-                        <v-icon>mdi-play</v-icon>
-                      </v-btn>
-                      <v-btn icon size="small" color="error" class="ml-2"
-                        @click="removePanTransferPath(index)">
-                        <v-icon>mdi-delete</v-icon>
-                      </v-btn>
-                    </div>
-                    <v-btn size="small" prepend-icon="mdi-plus" variant="outlined"
-                      class="mt-2 align-self-start" @click="addPanTransferPath">
-                      添加路径
-                    </v-btn>
-                  </div>
-                </v-col>
-              </v-row>
+        <AppleSettingsRow
+          v-if="config.pan_transfer_clouddrive2_config"
+          title="交由 CloudDrive2 储存整理"
+          description="将 115 待整理路径交由 CloudDrive2 挂载目录执行整理"
+        >
+          <v-switch
+            v-model="config.pan_transfer_clouddrive2_config.enabled"
+            color="info"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
 
-              <v-row class="mt-4">
-                <v-col cols="12">
-                  <v-text-field v-model="config.pan_transfer_unrecognized_path" label="网盘整理未识别目录"
-                    density="compact" append-icon="mdi-folder-network"
-                    @click:append="openDirSelector('unrecognized', 'remote', 'panTransferUnrecognized')"></v-text-field>
-                  <v-alert type="info" variant="tonal" density="compact" class="mt-3"
-                    icon="mdi-information">
-                    <div class="text-caption">提示：此目录用于存放整理过程中未能识别的媒体文件。</div>
-                  </v-alert>
-                  <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-                    <div class="text-caption">注意：未识别目录不能设置在任何媒体库目录或待整理目录的内部。</div>
-                  </v-alert>
-                </v-col>
-              </v-row>
-            </v-card-text>
-          </v-card>
+        <AppleSettingsRow
+          v-if="config.pan_transfer_clouddrive2_config && config.pan_transfer_clouddrive2_config.enabled"
+          title="CD2 挂载前缀"
+          description="必填，将与 115 待整理目录拼接为完整 CD2 挂载路径"
+          wide-control
+        >
+          <v-text-field
+            v-model="config.pan_transfer_clouddrive2_config.prefix"
+            placeholder="必填，例如 /115open"
+            density="compact"
+            variant="outlined"
+            hide-details
+          >
+            <template #prepend-inner>
+              <v-icon size="16" color="primary" icon="mdi-link-variant" />
+            </template>
+          </v-text-field>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
 
-          <!-- 分享转存目录 -->
-          <v-card variant="outlined" class="mt-4">
-            <v-card-title class="text-subtitle-1">
-              <v-icon start>mdi-share-variant</v-icon>
-              分享转存目录
-            </v-card-title>
-            <v-card-text>
-              <v-row>
-                <v-col cols="12">
-                  <div class="d-flex flex-column">
-                    <div v-for="(path, index) in shareReceivePaths" :key="`share-${index}`"
-                      class="mb-2 d-flex align-center">
-                      <v-text-field v-model="path.path" label="分享转存目录" density="compact"
-                        append-icon="mdi-folder-network"
-                        @click:append="openDirSelector(index, 'remote', 'shareReceive')"
-                        class="flex-grow-1"></v-text-field>
-                      <v-btn icon size="small" color="error" class="ml-2"
-                        @click="removeShareReceivePath(index)">
-                        <v-icon>mdi-delete</v-icon>
-                      </v-btn>
-                    </div>
-                    <v-btn size="small" prepend-icon="mdi-plus" variant="outlined"
-                      class="mt-2 align-self-start" @click="addShareReceivePath">
-                      添加路径
-                    </v-btn>
-                  </div>
-                </v-col>
-              </v-row>
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-caption">提示：此目录用于存放通过分享链接转存的资源。</div>
-              </v-alert>
-            </v-card-text>
-          </v-card>
+      <!-- 待整理和未识别目录 -->
+      <AppleSettingsGroup
+        title="待整理与未识别目录"
+        subtitle="点击行右侧播放图标可对该目录立即启动一次手动整理任务"
+        icon="mdi-folder-move-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="single"
+          key-prefix="pan-transfer"
+          :items="panTransferPaths"
+          single-label="网盘待整理目录"
+          single-placeholder="/待整理"
+          single-icon="mdi-cloud-outline"
+          add-label="添加待整理路径"
+          @add="addPanTransferPath"
+          @remove="removePanTransferPath"
+          @browse-single="(i) => openDirSelector(i, 'remote', 'panTransfer')"
+        >
+          <template #row-action="{ item, index }">
+            <button
+              type="button"
+              class="p115-btn p115-btn--icon p115-btn--tonal"
+              :disabled="!item.path"
+              title="手动整理此目录"
+              @click="manualTransfer(index)"
+            >
+              <v-icon size="16" icon="mdi-play" />
+            </button>
+          </template>
+        </PathMappingComposer>
 
-          <!-- 离线下载目录 -->
-          <v-card variant="outlined" class="mt-4">
-            <v-card-title class="text-subtitle-1">
-              <v-icon start>mdi-download</v-icon>
-              离线下载目录
-            </v-card-title>
-            <v-card-text>
-              <v-row>
-                <v-col cols="12">
-                  <div class="d-flex flex-column">
-                    <div v-for="(path, index) in offlineDownloadPaths" :key="`offline-${index}`"
-                      class="mb-2 d-flex align-center">
-                      <v-text-field v-model="path.path" label="离线下载目录" density="compact"
-                        append-icon="mdi-folder-network"
-                        @click:append="openDirSelector(index, 'remote', 'offlineDownload')"
-                        class="flex-grow-1"></v-text-field>
-                      <v-btn icon size="small" color="error" class="ml-2"
-                        @click="removeOfflineDownloadPath(index)">
-                        <v-icon>mdi-delete</v-icon>
-                      </v-btn>
-                    </div>
-                    <v-btn size="small" prepend-icon="mdi-plus" variant="outlined"
-                      class="mt-2 align-self-start" @click="addOfflineDownloadPath">
-                      添加路径
-                    </v-btn>
-                  </div>
-                </v-col>
-              </v-row>
-              <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-                <div class="text-caption">提示：此目录用于存放通过离线下载功能下载的资源。</div>
-              </v-alert>
-            </v-card-text>
-          </v-card>
+        <div class="mt-4">
+          <v-text-field
+            v-model="config.pan_transfer_unrecognized_path"
+            label="网盘整理未识别目录"
+            placeholder="例如：/未识别"
+            density="compact"
+            variant="outlined"
+            hide-details
+          >
+            <template #prepend-inner>
+              <v-icon size="16" color="warning" icon="mdi-folder-question-outline" />
+            </template>
+            <template #append-inner>
+              <button
+                type="button"
+                class="p115-inline-browse"
+                title="浏览网盘未识别目录"
+                @click="openDirSelector('unrecognized', 'remote', 'panTransferUnrecognized')"
+              >
+                <v-icon size="16" icon="mdi-cloud-search-outline" />
+              </button>
+            </template>
+          </v-text-field>
+        </div>
 
-          <v-divider class="my-4"></v-divider>
+        <div v-if="unrecognizedNestedWarning" class="p115-callout p115-callout--error mt-3">
+          <v-icon size="16" color="error" icon="mdi-alert-octagon-outline" class="mt-0.5 flex-shrink-0" />
+          <span>{{ unrecognizedNestedWarning }}</span>
+        </div>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>配置说明：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">使用本功能需要先进入 设定-目录 进行配置：</div>
-              <div class="mb-1">1. 添加目录配置卡，按需配置媒体类型和媒体类别，资源存储选择115网盘，资源目录输入网盘待整理文件夹</div>
-              <div class="mb-1">2. 自动整理模式选择手动整理，媒体库存储依旧选择115网盘，并配置好媒体库路径，整理方式选择移动，按需配置分类、重命名、通知</div>
-              <div>3. 配置完成目录设置后只需要在上方 网盘待整理目录 填入 网盘待整理文件夹 即可</div>
-            </div>
-          </v-alert>
+        <div class="p115-callout p115-callout--info mt-3">
+          <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+          <span>提示：此目录用于存放整理过程中未能识别的媒体文件。</span>
+        </div>
 
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-caption">注意：配置目录时不能选择刮削元数据，否则可能导致风控！</div>
-          </v-alert>
+        <div class="p115-callout p115-callout--warn mt-2">
+          <v-icon size="16" color="warning" icon="mdi-alert-outline" class="mt-0.5 flex-shrink-0" />
+          <span>注意：未识别目录不能设置在任何媒体库目录或待整理目录的内部。</span>
+        </div>
+      </AppleSettingsGroup>
 
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-body-2 mb-1"><strong>注意事项：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">• 阿里云盘，115网盘分享链接秒传或转存都依赖于网盘整理</div>
-              <div class="mb-1">• TG/Slack资源搜索转存也依赖于网盘整理</div>
+      <!-- 分享转存目录 -->
+      <AppleSettingsGroup
+        title="分享转存目录"
+        subtitle="用于存放通过分享链接转存的资源"
+        icon="mdi-share-variant-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="single"
+          key-prefix="share-receive"
+          :items="shareReceivePaths"
+          single-label="分享转存目录"
+          single-placeholder="/分享转存"
+          single-icon="mdi-share-variant-outline"
+          add-label="添加分享转存路径"
+          @add="addShareReceivePath"
+          @remove="removeShareReceivePath"
+          @browse-single="(i) => openDirSelector(i, 'remote', 'shareReceive')"
+        />
+      </AppleSettingsGroup>
+
+      <!-- 离线下载目录 -->
+      <AppleSettingsGroup
+        title="离线下载目录"
+        subtitle="用于存放通过离线下载功能下载的资源"
+        icon="mdi-cloud-download-outline"
+        padded
+      >
+        <PathMappingComposer
+          mode="single"
+          key-prefix="offline-dl"
+          :items="offlineDownloadPaths"
+          single-label="离线下载目录"
+          single-placeholder="/离线下载"
+          single-icon="mdi-cloud-download-outline"
+          add-label="添加离线下载路径"
+          @add="addOfflineDownloadPath"
+          @remove="removeOfflineDownloadPath"
+          @browse-single="(i) => openDirSelector(i, 'remote', 'offlineDownload')"
+        />
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="离线下载失败重试"
+        subtitle="处理当前 115 账号的可重试失败任务，包含历史积压项，不依赖网盘整理开关"
+        icon="mdi-refresh"
+      >
+        <AppleSettingsRow title="自动重试失败任务" description="重启后保留已用次数；达到上限仍失败则停止自动重试">
+          <v-switch v-model="config.offline_retry_enabled" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
+        <AppleSettingsRow
+          v-if="config.offline_retry_enabled"
+          title="最多重试次数"
+          description="每个任务最多尝试 1～100 次；重试请求失败或超时也计入次数"
+        >
+          <v-text-field
+            v-model.number="config.offline_retry_max_attempts"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            aria-label="离线下载最多重试次数"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+        <AppleSettingsRow
+          v-if="config.offline_retry_enabled"
+          title="重试间隔（小时）"
+          description="首次发现失败后开始计时，每两分钟检查一次；新间隔在下次安排时生效"
+        >
+          <v-text-field
+            v-model.number="config.offline_retry_interval_hours"
+            type="number"
+            min="1"
+            max="8760"
+            step="1"
+            aria-label="离线下载重试间隔（小时）"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <details class="p115-guide-details" open>
+        <summary>
+          <v-icon size="16" icon="mdi-book-open-variant" />
+          <span>配置说明与重要注意事项</span>
+        </summary>
+        <div class="p115-guide-body">
+          <div class="font-weight-bold mb-1">使用本功能需要先进入「设定 - 目录」进行配置：</div>
+          <div class="mb-1">1. 添加目录配置卡，按需配置媒体类型和媒体类别，资源存储选择 115网盘，资源目录输入网盘待整理文件夹</div>
+          <div class="mb-1">2. 自动整理模式选择手动整理，媒体库存储依旧选择 115网盘，并配置好媒体库路径，整理方式选择移动，按需配置分类、重命名、通知</div>
+          <div class="mb-3">3. 配置完成目录设置后只需要在上方「网盘待整理目录」填入网盘待整理文件夹即可</div>
+
+          <div class="p115-callout p115-callout--error mb-2">
+            <v-icon size="16" color="error" icon="mdi-alert-outline" class="mt-0.5 flex-shrink-0" />
+            <span><strong>注意：</strong>配置目录时不能选择刮削元数据，否则可能导致风控！</span>
+          </div>
+
+          <div class="p115-callout p115-callout--warn mb-2">
+            <v-icon size="16" color="warning" icon="mdi-alert-circle-outline" class="mt-0.5 flex-shrink-0" />
+            <div>
+              <div>• 阿里云盘、115网盘分享链接秒传或转存都依赖于网盘整理</div>
+              <div>• TG/Slack 资源搜索转存也依赖于网盘整理</div>
               <div>• 当阿里云盘分享秒传未能识别分享媒体信息时，会自动将资源转存到网盘整理未识别目录，后续需要用户手动重命名整理</div>
+              <div>• 115 生活事件监控默认会忽略网盘整理触发的移动事件，所以推荐使用 MP 整理事件监控生成 STRM</div>
             </div>
-          </v-alert>
+          </div>
+        </div>
+      </details>
 
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-caption">注意：115生活事件监控默认会忽略网盘整理触发的移动事件，所以推荐使用MP整理事件监控生成STRM</div>
-          </v-alert>
+      <AppleSettingsGroup title="在线诊断" icon="mdi-bug-check-outline">
+        <AppleSettingsRow
+          title="115 生活事件故障检查"
+          description="检查 115 生活事件进程状态，测试数据拉取功能，并提供详细的调试信息"
+        >
+          <button type="button" class="p115-btn p115-btn--tonal p115-btn--sm" @click="checkLifeEventStatus">
+            <v-icon size="15" icon="mdi-bug-check-outline" />
+            <span>故障检查</span>
+          </button>
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+    </div>
 
-          <v-row class="mt-4">
-            <v-col cols="12">
-              <v-btn color="info" variant="outlined" prepend-icon="mdi-bug-check"
-                @click="checkLifeEventStatus">
-                故障检查
-              </v-btn>
-              <div class="text-caption text-grey mt-2">
-                检查115生活事件进程状态，测试数据拉取功能，并提供详细的调试信息
+    <!-- ===================================================================
+         2. 网盘挂载 FUSE (tab-pan-mount)
+         =================================================================== -->
+    <div v-else-if="panSubTab === 'tab-pan-mount'" class="p115-section-stack">
+      <AppleSettingsGroup
+        title="FUSE 本地文件系统挂载"
+        subtitle="将 115 网盘挂载为容器内的本地目录"
+        icon="mdi-harddisk"
+      >
+        <AppleSettingsRow title="启用网盘挂载" description="将 115 网盘挂载为本地文件系统">
+          <v-switch v-model="config.fuse_enabled" color="success" density="compact" hide-details inset />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="挂载点路径" description="文件系统挂载的本地路径（必须是已存在的目录）" wide-control>
+          <v-text-field
+            v-model="config.fuse_mountpoint"
+            placeholder="/mnt/115"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="p115-mono"
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="目录读取缓存 TTL (秒)" description="目录列表缓存时间，默认 60 秒" wide-control>
+          <v-text-field
+            v-model.number="config.fuse_readdir_ttl"
+            type="number"
+            min="0"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="文件所有者 UID" description="挂载文件的用户 ID，留空则使用当前运行用户" wide-control>
+          <v-text-field
+            v-model.number="config.fuse_uid"
+            type="number"
+            min="0"
+            clearable
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="文件所有者 GID" description="挂载文件的组 ID，留空则使用当前运行用户" wide-control>
+          <v-text-field
+            v-model.number="config.fuse_gid"
+            type="number"
+            min="0"
+            clearable
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="STRM 文件生成内容接管"
+        subtitle="匹配规则的文件将生成指向挂载路径的 STRM 内容"
+        icon="mdi-file-replace-outline"
+      >
+        <AppleSettingsRow
+          title="接管 STRM 文件生成内容"
+          description="启用后，匹配规则的文件将生成指向挂载路径的 STRM 内容"
+        >
+          <template #badge>
+            <button
+              v-if="config.fuse_strm_takeover_enabled"
+              type="button"
+              class="p115-btn p115-btn--tonal p115-btn--sm"
+              @click="openConfigGeneratorDialog"
+            >
+              <v-icon size="14" icon="mdi-code-tags" />
+              <span>生成 Emby 反代 302 配置</span>
+            </button>
+          </template>
+          <v-switch
+            v-model="config.fuse_strm_takeover_enabled"
+            color="primary"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <template v-if="config.fuse_strm_takeover_enabled">
+          <AppleSettingsRow
+            title="媒体服务器网盘挂载目录"
+            description="媒体服务器中配置的 115 网盘挂载路径"
+            wide-control
+          >
+            <v-text-field
+              v-model="config.fuse_strm_mount_dir"
+              placeholder="/media/115"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="p115-mono"
+            />
+          </AppleSettingsRow>
+
+          <AppleSettingsRow title="STRM 接管匹配规则" vertical>
+            <div class="p115-callout p115-callout--info mb-2">
+              <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+              <div>
+                <div class="font-weight-bold mb-1">STRM URL 生成优先级：</div>
+                <div>1. <strong>URL 自定义模板</strong>（如果启用）：优先使用 Jinja2 模板渲染</div>
+                <div>2. <strong>FUSE STRM 接管</strong>（如果启用且匹配规则）：生成指向挂载路径的 STRM 内容</div>
+                <div>3. <strong>默认格式</strong>：使用基础设置中的「STRM文件URL格式」和「STRM URL 文件名称编码」</div>
               </div>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-pan-mount">
-        <v-card-text>
-          <v-row>
-            <v-col cols="12" md="6">
-              <v-switch v-model="config.fuse_enabled" label="启用" color="success" density="compact"
-                hint="将115网盘挂载为本地文件系统" persistent-hint></v-switch>
-            </v-col>
-            <v-col cols="12" md="6">
-              <v-text-field v-model="config.fuse_mountpoint" label="挂载点路径" hint="文件系统挂载的本地路径"
-                persistent-hint density="compact" variant="outlined" hide-details="auto"
-                placeholder="/mnt/115"></v-text-field>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-text-field v-model.number="config.fuse_readdir_ttl" label="目录读取缓存 TTL（秒）" type="number"
-                hint="目录列表缓存时间，默认60秒" persistent-hint density="compact" variant="outlined"
-                hide-details="auto" min="0"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model.number="config.fuse_uid" label="文件所有者 UID" type="number"
-                hint="挂载文件的用户ID，留空则使用当前运行用户" persistent-hint density="compact" variant="outlined"
-                hide-details="auto" min="0" clearable></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model.number="config.fuse_gid" label="文件所有者 GID" type="number"
-                hint="挂载文件的组ID，留空则使用当前运行用户" persistent-hint density="compact" variant="outlined"
-                hide-details="auto" min="0" clearable></v-text-field>
-            </v-col>
-          </v-row>
+            </div>
 
-          <!-- STRM 文件生成内容接管 -->
-          <v-divider class="my-4"></v-divider>
-          <v-row>
-            <v-col cols="12">
-              <v-switch v-model="config.fuse_strm_takeover_enabled" label="接管 STRM 文件生成内容" color="primary"
-                density="compact" hint="启用后，匹配规则的文件将生成指向挂载路径的 STRM 内容" persistent-hint></v-switch>
-            </v-col>
-          </v-row>
-          <v-expand-transition>
-            <div v-if="config.fuse_strm_takeover_enabled">
-              <v-divider class="my-4"></v-divider>
-              <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information">
-                <div class="text-body-2 mb-1"><strong>STRM URL 生成优先级：</strong></div>
-                <div class="text-caption">
-                  <div class="mb-1">1. <strong>URL 自定义模板</strong>（如果启用）：优先使用 Jinja2 模板渲染</div>
-                  <div class="mb-1">2. <strong>FUSE STRM 接管</strong>（如果启用且匹配规则）：生成指向挂载路径的 STRM 内容</div>
-                  <div>3. <strong>默认格式</strong>：使用基础设置中的「STRM文件URL格式」和「STRM URL 文件名称编码」</div>
+            <div class="d-flex flex-column gap-3">
+              <div
+                v-for="(rule, index) in fuseStrmTakeoverRules"
+                :key="`fuse-rule-${index}`"
+                class="p115-rule-card"
+              >
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <span class="p115-badge p115-badge--blue">规则 #{{ index + 1 }}</span>
+                  <button
+                    type="button"
+                    class="p115-btn p115-btn--icon p115-btn--danger"
+                    title="移除规则"
+                    @click="removePath(index, 'fuseStrmTakeover')"
+                  >
+                    <v-icon size="16" icon="mdi-trash-can-outline" />
+                  </button>
                 </div>
-              </v-alert>
-              <v-divider class="mb-4"></v-divider>
-              <v-row>
-                <v-col cols="12" md="6">
-                  <v-text-field v-model="config.fuse_strm_mount_dir" label="媒体服务器网盘挂载目录"
-                    hint="媒体服务器中配置的 115 网盘挂载路径" persistent-hint density="compact" variant="outlined"
-                    hide-details="auto" placeholder="/media/115"></v-text-field>
-                </v-col>
-              </v-row>
-              <v-row>
-                <v-col cols="12">
-                  <v-btn color="primary" variant="outlined" prepend-icon="mdi-code-tags" size="small"
-                    @click="openConfigGeneratorDialog">
-                    生成 Emby 反代 302 配置
-                  </v-btn>
-                </v-col>
-              </v-row>
-              <v-row>
-                <v-col cols="12">
-                  <div class="text-body-2 mb-2"><strong>接管规则：</strong></div>
-                  <div class="d-flex flex-column">
-                    <v-card v-for="(rule, index) in fuseStrmTakeoverRules"
-                      :key="`fuse-strm-takeover-${index}`" variant="outlined" class="mb-3">
-                      <v-card-text>
-                        <div class="d-flex align-center mb-2">
-                          <span class="text-caption text-medium-emphasis">规则 #{{ index + 1 }}</span>
-                          <v-spacer></v-spacer>
-                          <v-btn icon size="small" color="error"
-                            @click="removePath(index, 'fuseStrmTakeover')">
-                            <v-icon>mdi-delete</v-icon>
-                          </v-btn>
-                        </div>
 
-                        <!-- 匹配方式选择 -->
-                        <div class="mb-3">
-                          <div class="text-caption text-medium-emphasis mb-2">选择匹配方式（可多选）：</div>
-                          <div class="d-flex flex-wrap gap-3">
-                            <v-switch v-model="rule._use_extensions" label="文件后缀" density="compact"
-                              color="primary" hide-details class="ma-0"></v-switch>
-                            <v-switch v-model="rule._use_names" label="文件名称" density="compact"
-                              color="primary" hide-details class="ma-0"></v-switch>
-                            <v-switch v-model="rule._use_paths" label="网盘路径" density="compact"
-                              color="primary" hide-details class="ma-0"></v-switch>
-                          </div>
-                        </div>
+                <div class="text-caption opacity-75 mb-2">选择匹配方式（可多选，同时满足才匹配）：</div>
+                <div class="d-flex flex-wrap gap-5 mb-2">
+                  <v-switch v-model="rule._use_extensions" label="文件后缀" color="primary" density="compact" hide-details inset />
+                  <v-switch v-model="rule._use_names" label="文件名称" color="primary" density="compact" hide-details inset />
+                  <v-switch v-model="rule._use_paths" label="网盘路径" color="primary" density="compact" hide-details inset />
+                </div>
 
-                        <!-- 文件后缀 -->
-                        <v-expand-transition>
-                          <div v-if="rule._use_extensions">
-                            <v-textarea v-model="rule.extensions" label="文件后缀（每行一个，例如：mkv、mp4）"
-                              hint="匹配的文件后缀，不包含点号，每行一个" persistent-hint density="compact"
-                              variant="outlined" rows="2" class="mb-2"
-                              placeholder="mkv&#10;mp4&#10;avi"></v-textarea>
-                          </div>
-                        </v-expand-transition>
+                <v-textarea
+                  v-if="rule._use_extensions"
+                  v-model="rule.extensions"
+                  label="文件后缀（每行一个，不包含点号，如 mkv、mp4）"
+                  placeholder="mkv&#10;mp4&#10;avi"
+                  rows="2"
+                  density="compact"
+                  variant="outlined"
+                  class="mb-2"
+                  hide-details
+                />
+                <v-textarea
+                  v-if="rule._use_names"
+                  v-model="rule.names"
+                  label="文件名称白名单（每行一个，支持部分匹配）"
+                  placeholder="蓝光&#10;BluRay"
+                  rows="2"
+                  density="compact"
+                  variant="outlined"
+                  class="mb-2"
+                  hide-details
+                />
+                <v-textarea
+                  v-if="rule._use_paths"
+                  v-model="rule.paths"
+                  label="网盘文件夹路径（每行一个，支持部分匹配）"
+                  placeholder="/电影/4K&#10;/电视剧"
+                  rows="2"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </div>
 
-                        <!-- 文件名称白名单 -->
-                        <v-expand-transition>
-                          <div v-if="rule._use_names">
-                            <v-textarea v-model="rule.names" label="文件名称白名单（每行一个，支持部分匹配）"
-                              hint="文件名包含这些关键词时匹配，每行一个" persistent-hint density="compact"
-                              variant="outlined" rows="2" class="mb-2"
-                              placeholder="蓝光&#10;BluRay"></v-textarea>
-                          </div>
-                        </v-expand-transition>
-
-                        <!-- 网盘文件夹路径 -->
-                        <v-expand-transition>
-                          <div v-if="rule._use_paths">
-                            <v-textarea v-model="rule.paths" label="网盘文件夹路径（每行一个，支持部分匹配）"
-                              hint="文件路径包含这些路径时匹配，每行一个" persistent-hint density="compact"
-                              variant="outlined" rows="2" placeholder="/电影/4K&#10;/电视剧"></v-textarea>
-                          </div>
-                        </v-expand-transition>
-                      </v-card-text>
-                    </v-card>
-                    <v-btn size="small" prepend-icon="mdi-plus" variant="outlined"
-                      class="align-self-start" @click="addPath('fuseStrmTakeover')">
-                      添加接管规则
-                    </v-btn>
-                  </div>
-                  <v-alert type="info" variant="tonal" density="compact" class="mt-3"
-                    icon="mdi-information">
-                    <div class="text-caption">
-                      <div class="mb-1">• 三种匹配方式可以组合使用，<strong>同时满足</strong>（与关系）才会匹配</div>
-                      <div class="mb-1">• 如果某个匹配条件为空，则<strong>不检查</strong>该条件</div>
-                      <div class="mb-1">• <strong>匹配成功后生成的 STRM 内容：</strong></div>
-                      <div class="mb-1">
-                        格式：<code>{{ config.fuse_strm_mount_dir || '媒体服务器挂载目录' }}/文件网盘路径</code></div>
-                      <div> 示例：如果挂载目录为 <code>/media/115</code>，文件网盘路径为 <code>/电影/示例.mkv</code>，则生成的 STRM
-                        内容为
-                        <code>/media/115/电影/示例.mkv</code>
-                      </div>
-                    </div>
-                  </v-alert>
-                </v-col>
-              </v-row>
+              <div>
+                <button
+                  type="button"
+                  class="p115-btn p115-btn--tonal p115-btn--sm"
+                  @click="addPath('fuseStrmTakeover')"
+                >
+                  <v-icon size="15" icon="mdi-plus" />
+                  <span>添加接管规则</span>
+                </button>
+              </div>
             </div>
-          </v-expand-transition>
 
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-body-2 mb-1"><strong>平台限制说明：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">• <strong>Windows 系统不支持：</strong>FUSE 功能基于 Linux 文件系统，无法在 Windows 环境下运行
+            <div class="p115-callout p115-callout--info mt-3">
+              <v-icon size="16" color="primary" icon="mdi-information-outline" class="mt-0.5 flex-shrink-0" />
+              <div>
+                <div>• 三种匹配方式可以组合使用，<strong>同时满足</strong>（与关系）才会匹配；若某条件为空则不检查该条件</div>
+                <div>
+                  • 匹配成功后生成的 STRM 内容格式：
+                  <code class="p115-mono">{{ config.fuse_strm_mount_dir || '媒体服务器挂载目录' }}/文件网盘路径</code>
+                </div>
+                <div>
+                  • 示例：挂载目录为 <code class="p115-mono">/media/115</code>，网盘路径为
+                  <code class="p115-mono">/电影/示例.mkv</code>，则生成 <code class="p115-mono">/media/115/电影/示例.mkv</code>
+                </div>
               </div>
-              <div class="mb-1">• <strong>Linux 裸机：</strong>理论上支持，需要安装 libfuse（libfuse2 或 libfuse3）</div>
-              <div class="mb-1">• <strong>macOS 裸机：</strong>理论上支持，需要安装 macFUSE</div>
-              <div>• <strong>推荐使用 Docker 容器：</strong>目前仅对 Docker 容器环境有较好的支持和测试，建议在 Docker 容器中使用此功能</div>
             </div>
-          </v-alert>
-          <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption mb-2">启用后，115网盘将挂载为容器内的文件系统，可通过文件管理器直接访问。配合上方的"STRM
-              文件生成内容接管"功能，可以让生成的 STRM
-              文件直接指向挂载路径，实现本地文件系统访问。</div>
-            <div class="text-body-2 mt-2 mb-1"><strong>配置说明：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">• <strong>挂载点路径：</strong>容器内的挂载路径，必须是已存在的目录（例如：<code>/media/115</code> 或
-                <code>/data/115</code>）
-              </div>
-              <div class="mb-1">• <strong>目录读取缓存 TTL：</strong>目录列表缓存时间，默认60秒</div>
-              <div class="mb-1">• <strong>文件所有者 UID/GID：</strong>设置挂载文件的用户和组ID，留空则自动使用当前运行用户（Docker
-                容器中建议设置为非
-                root 用户）
-              </div>
-              <div class="mb-1">• <strong>容器权限：</strong>需要容器以 <code>--privileged</code> 或
-                <code>--cap-add SYS_ADMIN</code>
-                权限运行
-              </div>
-              <div>• <strong>STRM 接管：</strong>启用上方的"接管 STRM 文件生成内容"后，匹配规则的文件将生成指向挂载路径的 STRM
-                内容，媒体服务器可直接通过挂载路径访问文件</div>
-            </div>
-          </v-alert>
-          <v-alert type="warning" variant="tonal" density="compact" class="mt-3" icon="mdi-alert">
-            <div class="text-body-2 mb-1"><strong>重要提示：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">• <strong>切勿直接使用媒体服务器刮削挂载路径</strong>，这会导致网盘风控</div>
+          </AppleSettingsRow>
+        </template>
+      </AppleSettingsGroup>
+
+      <details class="p115-guide-details" open>
+        <summary>
+          <v-icon size="16" icon="mdi-information-outline" />
+          <span>平台限制、权限说明与防风控必读指南</span>
+        </summary>
+        <div class="p115-guide-body">
+          <div class="p115-callout p115-callout--error mb-2">
+            <v-icon size="16" color="error" icon="mdi-alert-octagon-outline" class="mt-0.5 flex-shrink-0" />
+            <div>
+              <div>• <strong>切勿直接使用媒体服务器刮削挂载路径</strong>，这会导致网盘风控！</div>
               <div>• <strong>正确方法：</strong>使用本插件的 STRM 文件生成功能，在本地生成 STRM 文件后，再让媒体服务器对 STRM 文件进行刮削</div>
             </div>
-          </v-alert>
-          <v-alert type="info" variant="tonal" density="compact" class="mt-3"
-            icon="mdi-book-open-page-variant">
-            <div class="text-body-2 mb-1"><strong>配置教程：</strong></div>
-            <div class="text-caption">
-              详细的 FUSE 挂载配置指南请参考：
-              <a href="https://blog.ddsrem.com/archives/115strmhelper-fuse-use" target="_blank"
-                rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">FUSE
-                挂载详细配置指南</a>
+          </div>
+
+          <div class="p115-callout p115-callout--warn mb-2">
+            <v-icon size="16" color="warning" icon="mdi-laptop" class="mt-0.5 flex-shrink-0" />
+            <div>
+              <div class="font-weight-bold mb-0.5">平台限制说明：</div>
+              <div>• <strong>Windows 系统不支持：</strong>FUSE 功能基于 Linux 文件系统，无法在 Windows 环境下运行</div>
+              <div>• <strong>Linux 裸机：</strong>理论上支持，需要安装 libfuse（libfuse2 或 libfuse3）</div>
+              <div>• <strong>macOS 裸机：</strong>理论上支持，需要安装 macFUSE</div>
+              <div>• <strong>推荐使用 Docker 容器：</strong>需要容器以 <code class="p115-mono">--privileged</code> 或 <code class="p115-mono">--cap-add SYS_ADMIN</code> 权限运行，UID/GID 建议设为非 root 用户</div>
             </div>
-          </v-alert>
-        </v-card-text>
-      </v-window-item>
-      <v-window-item value="tab-directory-upload">
-        <v-card-text>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.directory_upload_enabled" label="启用" color="info"
-                density="compact" hide-details></v-switch>
-            </v-col>
-            <v-col cols="12" md="8">
-              <v-select v-model="config.directory_upload_mode" label="监控模式" :items="[
-                { title: '兼容模式', value: 'compatibility' },
-                { title: '性能模式', value: 'fast' }
-              ]" chips closable-chips density="compact" hide-details></v-select>
-            </v-col>
-          </v-row>
-          <v-row v-if="config.directory_upload_clouddrive2_config">
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.directory_upload_clouddrive2_config.enabled"
-                label="交由 CloudDrive2 上传" color="info" density="compact"
-                hide-details></v-switch>
-            </v-col>
-            <v-col v-if="config.directory_upload_clouddrive2_config.enabled" cols="12" md="8">
-              <v-text-field v-model="config.directory_upload_clouddrive2_config.prefix"
-                label="挂载前缀" placeholder="必填，如 /115open" density="compact"
-                variant="outlined" hide-details></v-text-field>
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="config.directory_upload_uploadext" label="上传文件扩展名"
-                hint="指定哪些扩展名的文件会被上传到115网盘，多个用逗号分隔；留空或填 * 表示不限制后缀" persistent-hint density="compact" variant="outlined"
-                hide-details="auto"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model="config.directory_upload_copyext" label="复制文件扩展名"
-                hint="指定哪些扩展名的文件会被复制到本地目标目录，多个用逗号分隔" persistent-hint density="compact" variant="outlined"
-                hide-details="auto"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.directory_upload_skip_bdmv_stream" label="跳过蓝光原盘 STREAM 目录"
-                hint="关闭后将允许上传 BDMV/STREAM 下的 m2ts 等文件" persistent-hint color="info" density="compact"
-                hide-details="auto"></v-switch>
-            </v-col>
-          </v-row>
+          </div>
 
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-switch v-model="config.directory_upload_rescan_enabled" label="启用漏传巡检"
-                hint="周期扫描缺少 STRM 的上传文件，自动补交上传队列" persistent-hint
-                color="info" density="compact" hide-details="auto"></v-switch>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model.number="config.directory_upload_rescan_interval"
-                label="巡检间隔（分钟）" type="number" min="1" max="1440"
-                hint="首次启动后约 2 分钟开始巡检，之后按此间隔执行" persistent-hint
-                density="compact" variant="outlined" hide-details="auto"></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-text-field v-model.number="config.directory_upload_rescan_max_submit"
-                label="单轮提交上限" type="number" min="1" max="10000"
-                hint="限制单轮补交任务数量，避免集中占用上传队列" persistent-hint
-                density="compact" variant="outlined" hide-details="auto"></v-text-field>
-            </v-col>
-          </v-row>
+          <div class="mt-2">
+            详细的 FUSE 挂载配置指南请参考：
+            <a
+              href="https://blog.ddsrem.com/archives/115strmhelper-fuse-use"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="p115-ext-link"
+            >
+              FUSE 挂载详细配置指南
+            </a>
+          </div>
+        </div>
+      </details>
+    </div>
 
-          <v-divider class="my-3"></v-divider>
-          <div class="text-subtitle-2 mb-2">路径配置:</div>
+    <!-- ===================================================================
+         3. 目录上传 (tab-directory-upload)
+         =================================================================== -->
+    <div v-else-if="panSubTab === 'tab-directory-upload'" class="p115-section-stack">
+      <AppleSettingsGroup
+        title="目录监控自动上传"
+        subtitle="监控本地目录新文件并自动上传至 115 网盘或复制到本地目录"
+        icon="mdi-upload-network-outline"
+      >
+        <AppleSettingsRow title="启用目录上传" description="开启本地文件夹监控自动上传流程">
+          <v-switch v-model="config.directory_upload_enabled" color="info" density="compact" hide-details inset />
+        </AppleSettingsRow>
 
-          <div v-for="(pair, index) in directoryUploadPaths" :key="`upload-${index}`"
-            class="path-group mb-3 pa-2 border rounded">
+        <AppleSettingsRow
+          title="监控模式"
+          description="性能模式适用于物理盘原生事件；兼容模式使用轮询适用于 SMB/NFS 网络共享目录"
+          wide-control
+        >
+          <AppleSegmentedControl
+            v-model="config.directory_upload_mode"
+            :items="[
+              { label: '兼容模式', value: 'compatibility', icon: 'mdi-lan-connect' },
+              { label: '性能模式', value: 'fast', icon: 'mdi-lightning-bolt-outline' },
+            ]"
+            block
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          v-if="config.directory_upload_clouddrive2_config"
+          title="交由 CloudDrive2 上传"
+          description="通过本地挂载的 CloudDrive2 目录执行上传写入"
+        >
+          <v-switch
+            v-model="config.directory_upload_clouddrive2_config.enabled"
+            color="info"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          v-if="config.directory_upload_clouddrive2_config && config.directory_upload_clouddrive2_config.enabled"
+          title="CD2 挂载前缀"
+          description="必填，将与网盘上传目标目录拼接为完整 CD2 挂载路径"
+          wide-control
+        >
+          <v-text-field
+            v-model="config.directory_upload_clouddrive2_config.prefix"
+            placeholder="必填，例如 /115open"
+            density="compact"
+            variant="outlined"
+            hide-details
+          >
+            <template #prepend-inner>
+              <v-icon size="16" color="primary" icon="mdi-link-variant" />
+            </template>
+          </v-text-field>
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="跳过蓝光原盘 STREAM 目录"
+          description="关闭后将允许上传 BDMV/STREAM 下的 m2ts 等文件"
+        >
+          <v-switch
+            v-model="config.directory_upload_skip_bdmv_stream"
+            color="info"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="上传文件扩展名"
+          description="指定哪些扩展名的文件会被上传到 115 网盘，多个用逗号分隔；留空或填 * 表示不限制后缀"
+          vertical
+        >
+          <v-text-field
+            v-model="config.directory_upload_uploadext"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="p115-mono"
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow
+          title="复制文件扩展名"
+          description="指定哪些扩展名的文件会被复制到本地目标目录，多个用逗号分隔"
+          vertical
+        >
+          <v-text-field
+            v-model="config.directory_upload_copyext"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="p115-mono"
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="漏传巡检与队列保护"
+        subtitle="周期扫描缺少 STRM 的上传文件，自动补交上传队列"
+        icon="mdi-radar"
+      >
+        <AppleSettingsRow
+          title="启用漏传巡检"
+          description="首次启动后约 2 分钟开始巡检，之后按巡检间隔执行"
+        >
+          <v-switch
+            v-model="config.directory_upload_rescan_enabled"
+            color="info"
+            density="compact"
+            hide-details
+            inset
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="巡检间隔 (分钟)" description="范围 1 ~ 1440 分钟" wide-control>
+          <v-text-field
+            v-model.number="config.directory_upload_rescan_interval"
+            type="number"
+            min="1"
+            max="1440"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+
+        <AppleSettingsRow title="单轮提交上限" description="限制单轮补交任务数量，避免集中占用上传队列" wide-control>
+          <v-text-field
+            v-model.number="config.directory_upload_rescan_max_submit"
+            type="number"
+            min="1"
+            max="10000"
+            density="compact"
+            variant="outlined"
+            hide-details
+          />
+        </AppleSettingsRow>
+      </AppleSettingsGroup>
+
+      <AppleSettingsGroup
+        title="监控路径组配置"
+        subtitle="支持同时配置网盘上传目标、本地复制目录与上传后即时 STRM 输出目录"
+        icon="mdi-folder-multiple-plus-outline"
+        padded
+      >
+        <div class="d-flex flex-column gap-3">
+          <div
+            v-for="(pair, index) in directoryUploadPaths"
+            :key="`upload-${index}`"
+            class="p115-rule-card"
+          >
+            <div class="d-flex align-center justify-space-between mb-3">
+              <span class="p115-badge p115-badge--blue">监控组 #{{ index + 1 }}</span>
+              <div class="d-flex align-center gap-3">
+                <v-switch
+                  v-model="pair.delete"
+                  label="处理后删除源文件"
+                  color="error"
+                  density="compact"
+                  hide-details
+                  inset
+                />
+                <button
+                  type="button"
+                  class="p115-btn p115-btn--icon p115-btn--danger"
+                  title="删除此路径配置"
+                  @click="removePath(index, 'directoryUpload')"
+                >
+                  <v-icon size="16" icon="mdi-trash-can-outline" />
+                </button>
+              </div>
+            </div>
+
             <v-row dense>
-              <!-- 本地监控目录 -->
               <v-col cols="12" md="6">
-                <v-text-field v-model="pair.src" label="本地监控目录" density="compact" variant="outlined"
-                  hide-details append-icon="mdi-folder-search-outline"
-                  @click:append="openDirSelector(index, 'local', 'directoryUpload', 'src')">
-                  <template v-slot:prepend-inner>
-                    <v-icon color="blue">mdi-folder-table</v-icon>
+                <v-text-field
+                  v-model="pair.src"
+                  label="本地监控目录"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                >
+                  <template #prepend-inner>
+                    <v-icon size="16" color="primary" icon="mdi-folder-search-outline" />
+                  </template>
+                  <template #append-inner>
+                    <button
+                      type="button"
+                      class="p115-inline-browse"
+                      title="浏览本地监控目录"
+                      @click="openDirSelector(index, 'local', 'directoryUpload', 'src')"
+                    >
+                      <v-icon size="16" icon="mdi-folder-open-outline" />
+                    </button>
                   </template>
                 </v-text-field>
               </v-col>
-              <!-- 网盘上传目录 -->
+
               <v-col cols="12" md="6">
-                <v-text-field v-model="pair.dest_remote" label="网盘上传目标目录" density="compact"
-                  variant="outlined" hide-details append-icon="mdi-folder-network-outline"
-                  @click:append="openDirSelector(index, 'remote', 'directoryUpload', 'dest_remote')">
-                  <template v-slot:prepend-inner>
-                    <v-icon color="green">mdi-cloud-upload</v-icon>
+                <v-text-field
+                  v-model="pair.dest_remote"
+                  label="网盘上传目标目录"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                >
+                  <template #prepend-inner>
+                    <v-icon size="16" color="secondary" icon="mdi-cloud-upload-outline" />
+                  </template>
+                  <template #append-inner>
+                    <button
+                      type="button"
+                      class="p115-inline-browse"
+                      title="浏览网盘上传目标目录"
+                      @click="openDirSelector(index, 'remote', 'directoryUpload', 'dest_remote')"
+                    >
+                      <v-icon size="16" icon="mdi-cloud-search-outline" />
+                    </button>
                   </template>
                 </v-text-field>
               </v-col>
-            </v-row>
-            <v-row dense class="mt-1">
-              <!-- 非上传文件目标目录 -->
-              <v-col cols="12" md="6">
-                <v-text-field v-model="pair.dest_local" label="本地复制目标目录 (可选)" density="compact"
-                  variant="outlined" hide-details append-icon="mdi-folder-plus-outline"
-                  @click:append="openDirSelector(index, 'local', 'directoryUpload', 'dest_local')">
-                  <template v-slot:prepend-inner>
-                    <v-icon color="orange">mdi-content-copy</v-icon>
+
+              <v-col cols="12" md="6" class="mt-2">
+                <v-text-field
+                  v-model="pair.dest_local"
+                  label="本地复制目标目录 (可选)"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                >
+                  <template #prepend-inner>
+                    <v-icon size="16" color="warning" icon="mdi-content-copy" />
+                  </template>
+                  <template #append-inner>
+                    <button
+                      type="button"
+                      class="p115-inline-browse"
+                      title="浏览本地复制目标目录"
+                      @click="openDirSelector(index, 'local', 'directoryUpload', 'dest_local')"
+                    >
+                      <v-icon size="16" icon="mdi-folder-open-outline" />
+                    </button>
                   </template>
                 </v-text-field>
               </v-col>
-              <!-- STRM 输出目录 -->
-              <v-col cols="12" md="6">
-                <v-text-field v-model="pair.dest_strm" label="STRM 输出目录 (可选)" density="compact"
-                  variant="outlined" append-icon="mdi-file-document-outline" hide-details="auto"
-                  @click:append="openDirSelector(index, 'local', 'directoryUpload', 'dest_strm')">
-                  <template v-slot:prepend-inner>
-                    <v-icon color="purple">mdi-file-star</v-icon>
+
+              <v-col cols="12" md="6" class="mt-2">
+                <v-text-field
+                  v-model="pair.dest_strm"
+                  label="STRM 输出目录 (可选)"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                >
+                  <template #prepend-inner>
+                    <v-icon size="16" color="primary" icon="mdi-file-link-outline" />
+                  </template>
+                  <template #append-inner>
+                    <button
+                      type="button"
+                      class="p115-inline-browse"
+                      title="浏览 STRM 输出目录"
+                      @click="openDirSelector(index, 'local', 'directoryUpload', 'dest_strm')"
+                    >
+                      <v-icon size="16" icon="mdi-folder-open-outline" />
+                    </button>
                   </template>
                 </v-text-field>
-              </v-col>
-            </v-row>
-            <v-row dense class="mt-1">
-              <!-- 删除源文件开关 -->
-              <v-col cols="12" md="10" class="d-flex align-center">
-                <v-switch v-model="pair.delete" label="处理后删除源文件" color="error" density="compact"
-                  hide-details></v-switch>
-              </v-col>
-              <!-- 删除按钮 -->
-              <v-col cols="12" md="2" class="d-flex align-center justify-end">
-                <v-btn icon="mdi-delete-outline" size="small" color="error" variant="text" title="删除此路径配置"
-                  @click="removePath(index, 'directoryUpload')">
-                </v-btn>
               </v-col>
             </v-row>
           </div>
 
-          <v-btn size="small" prepend-icon="mdi-plus-box-multiple-outline" variant="tonal" class="mt-2"
-            color="primary" @click="addPath('directoryUpload')">
-            添加监控路径组
-          </v-btn>
+          <div>
+            <button
+              type="button"
+              class="p115-btn p115-btn--tonal p115-btn--sm"
+              @click="addPath('directoryUpload')"
+            >
+              <v-icon size="15" icon="mdi-plus" />
+              <span>添加监控路径组</span>
+            </button>
+          </div>
+        </div>
+      </AppleSettingsGroup>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mt-3" icon="mdi-information">
-            <div class="text-body-2 mb-1"><strong>功能说明：</strong></div>
-            <div class="text-caption">
-              <div class="mb-1">• 监控指定的"本地监控目录"</div>
-              <div class="mb-1">• 当目录中出现新文件时：</div>
-              <div class="ml-4 mb-1">- 如果文件扩展名匹配"上传文件扩展名"，则将其上传到对应的"网盘上传目标目录"；若配置了"STRM
-                输出目录"，上传成功后会立即在该目录生成对应
-                .strm 文件
-              </div>
-              <div class="ml-4 mb-1">- 如果文件扩展名匹配"复制文件扩展名"，则将其复制到对应的"本地复制目标目录"</div>
-              <div class="mb-1">• 处理完成后，如果"删除源文件"开关打开，则会删除原始文件</div>
-              <div class="mb-1">• 扩展名不匹配的文件将被忽略</div>
-              <div class="mb-1">• "STRM 输出目录"：上传成功后立即在此目录生成对应 .strm 文件，目录结构同监控目录相对路径</div>
-            </div>
-            <strong>注意:</strong><br>
-            - 请确保MoviePilot对本地目录有读写权限，对网盘目录有写入权限。<br>
-            - "本地复制目标目录"和"STRM 输出目录"是可选的，如果不填，则仅执行上传操作（如果匹配）。<br>
-            - 监控模式："性能模式"使用系统原生文件系统事件，适用于物理路径，性能高且更稳定；"兼容模式"使用轮询方式，适用于网络共享目录（如SMB/NFS），性能较低但兼容性好。
-          </v-alert>
-        </v-card-text>
-      </v-window-item>
-    </v-window>
-  </v-card-text>
+      <details class="p115-guide-details">
+        <summary>
+          <v-icon size="16" icon="mdi-information-outline" />
+          <span>目录上传工作机制与权限注意事项</span>
+        </summary>
+        <div class="p115-guide-body">
+          <div>• 监控指定的“本地监控目录”，出现新文件时：</div>
+          <div class="ml-3">- 若扩展名匹配“上传文件扩展名”，上传至“网盘上传目标目录”；若同时配置了“STRM 输出目录”，上传成功后立即按相对路径生成对应 .strm 文件</div>
+          <div class="ml-3">- 若扩展名匹配“复制文件扩展名”，将其复制到“本地复制目标目录”</div>
+          <div>• 处理完成后，若“处理后删除源文件”开关打开，将删除原始文件；扩展名不匹配的文件会被忽略</div>
+          <div class="mt-2"><strong>注意：</strong>请确保 MoviePilot 对本地目录有读写权限、对网盘目录有写入权限。“本地复制目标目录”和“STRM 输出目录”均为可选项。</div>
+        </div>
+      </details>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, inject } from 'vue';
+import { computed, ref, inject } from 'vue';
+import AppleSegmentedControl from '../ui/AppleSegmentedControl.vue';
+import AppleSettingsGroup from '../ui/AppleSettingsGroup.vue';
+import AppleSettingsRow from '../ui/AppleSettingsRow.vue';
+import PathMappingComposer from '../ui/PathMappingComposer.vue';
 
-const panSubTab = ref('tab-pan-transfer');
+const activeSubTabs = inject('activeSubTabs', null);
+const fallbackSubTab = ref('tab-pan-transfer');
+
+const panSubTab = computed({
+  get: () => (activeSubTabs ? activeSubTabs.pan : fallbackSubTab.value),
+  set: (val) => {
+    if (activeSubTabs) activeSubTabs.pan = val;
+    else fallbackSubTab.value = val;
+  },
+});
+
+const subTabItems = [
+  { value: 'tab-pan-transfer', label: '网盘整理', icon: 'mdi-transfer' },
+  { value: 'tab-pan-mount', label: '网盘挂载', icon: 'mdi-harddisk' },
+  { value: 'tab-directory-upload', label: '目录上传', icon: 'mdi-upload' },
+];
 
 const config = inject('config');
 const panTransferPaths = inject('panTransferPaths');
@@ -574,4 +848,70 @@ const openDirSelector = inject('openDirSelector');
 const manualTransfer = inject('manualTransfer');
 const checkLifeEventStatus = inject('checkLifeEventStatus');
 const openConfigGeneratorDialog = inject('openConfigGeneratorDialog');
+
+const unrecognizedNestedWarning = computed(() => {
+  const unrec = String(config?.pan_transfer_unrecognized_path || '').trim().replace(/\/+$/, '');
+  if (!unrec || unrec === '/') return '';
+  const list = panTransferPaths?.value || [];
+  for (const item of list) {
+    const p = String(item?.path || '').trim().replace(/\/+$/, '');
+    if (!p || p === '/') continue;
+    if (unrec === p || unrec.startsWith(`${p}/`)) {
+      return `检测到未识别目录「${unrec}」位于待整理目录「${p}」内部，这会导致循环触发整理，请修改为独立目录！`;
+    }
+  }
+  return '';
+});
 </script>
+
+<style scoped>
+.p115-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.p115-subnav-bar {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding-bottom: 2px;
+}
+
+.p115-rule-card {
+  padding: 12px 14px;
+  border-radius: 13px;
+  background: var(--p115-bg-inset);
+  border: 1px solid var(--p115-border-hairline);
+}
+
+.p115-inline-browse {
+  appearance: none;
+  border: none;
+  background: rgba(91, 207, 250, 0.14);
+  color: var(--p115-blue-ink);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.1s var(--p115-press);
+}
+
+.p115-inline-browse:hover {
+  background: rgba(91, 207, 250, 0.24);
+}
+
+.p115-ext-link {
+  color: var(--p115-blue-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+</style>

@@ -1,12 +1,12 @@
-import { createApp } from 'vue'
-import { createVuetify } from 'vuetify'
-import * as components from 'vuetify/components'
-import * as directives from 'vuetify/directives'
-import 'vuetify/styles'
-import { aliases, mdi } from 'vuetify/iconsets/mdi'
-import App from './App.vue'
+import { createApp } from 'vue';
+import { createVuetify } from 'vuetify';
+import * as components from 'vuetify/components';
+import * as directives from 'vuetify/directives';
+import 'vuetify/styles';
+import { aliases, mdi } from 'vuetify/iconsets/mdi';
+import App from './App.vue';
+import './styles/apple-theme.css';
 
-// 创建Vuetify实例，配置蓝粉白主题
 const vuetify = createVuetify({
   components,
   directives,
@@ -23,27 +23,25 @@ const vuetify = createVuetify({
       bluePinkWhite: {
         dark: false,
         colors: {
-          primary: '#5bcffa',      // 蓝色基准色
-          secondary: '#f5abb9',     // 粉色基准色
-          accent: '#ffb8c9',        // 粉色强调色（更亮的粉色）
-          error: '#F44336',
-          warning: '#FF9800',
+          primary: '#5bcffa',
+          secondary: '#f5abb9',
+          accent: '#ffb8c9',
+          error: '#ff3b30',
+          warning: '#ff9f0a',
           info: '#5bcffa',
-          success: '#4CAF50',
-          background: '#FAFAFA',    // 浅灰白背景
-          surface: '#FFFFFF',       // 白色表面
-          'on-primary': '#FFFFFF',
-          'on-secondary': '#FFFFFF',
-          'on-surface': '#212121',
-          'on-background': '#212121',
+          success: '#34c759',
+          background: '#f6f9fc',
+          surface: '#ffffff',
+          'on-primary': '#05263b',
+          'on-secondary': '#ffffff',
+          'on-surface': '#0f172a',
+          'on-background': '#0f172a',
         },
       },
     },
   },
-})
+});
 
-// 创建Vue应用实例
-const app = createApp(App)
-app.use(vuetify)
-
-app.mount('#app') 
+const app = createApp(App);
+app.use(vuetify);
+app.mount('#app');

@@ -1,93 +1,163 @@
 <template>
   <div class="dashboard-widget dashboard-widget--transfer-mini">
-    <v-card :flat="!config?.attrs?.border" class="strm-dash-card transfer-mini-card dashboard-grid-fill h-100 d-flex flex-column">
-      <v-card-item v-if="config?.attrs?.title || config?.attrs?.subtitle" class="pb-2">
-        <v-card-title class="d-flex flex-wrap align-center gap-2 ps-0 text-subtitle-1">
-          <v-icon icon="mdi-folder-cog" color="primary" size="small" />
-          {{ config?.attrs?.title || "手动网盘整理" }}
-        </v-card-title>
-        <v-card-subtitle v-if="config?.attrs?.subtitle">{{ config.attrs.subtitle }}</v-card-subtitle>
-        <template v-slot:append>
-          <v-btn class="dashboard-grid-no-drag" icon size="small" variant="text" :loading="transferConfigLoading" @click="loadTransferConfig">
-            <v-icon>mdi-refresh</v-icon>
-          </v-btn>
-        </template>
-      </v-card-item>
+    <v-card :flat="!config?.attrs?.border" class="strm-dash-card dashboard-grid-fill">
+      <!-- Unified Apple Widget Header -->
+      <div v-if="config?.attrs?.title || config?.attrs?.subtitle" class="p115-dash-header">
+        <div class="p115-dash-header-left">
+          <div class="p115-dash-icon">
+            <v-icon icon="mdi-folder-cog-outline" size="18" />
+          </div>
+          <div class="p115-dash-titles">
+            <div class="p115-dash-title-row">
+              <span>{{ config?.attrs?.title || "手动网盘整理" }}</span>
+            </div>
+            <div v-if="config?.attrs?.subtitle" class="p115-dash-subtitle">
+              {{ config.attrs.subtitle }}
+            </div>
+          </div>
+        </div>
 
-      <v-card-text class="pa-3 pt-0 transfer-mini-card__body flex-grow-1 d-flex flex-column">
-        <div v-if="transferConfigLoading && !transferConfigLoaded" class="text-center py-6">
-          <v-progress-circular indeterminate color="primary" size="36" />
+        <div v-if="!allowRefresh" class="p115-dash-header-right">
+          <button
+            type="button"
+            class="p115-btn p115-btn--subtle p115-btn--icon dashboard-grid-no-drag"
+            :disabled="transferConfigLoading"
+            title="刷新配置"
+            @click="loadTransferConfig"
+          >
+            <v-progress-circular v-if="transferConfigLoading" indeterminate size="13" width="2" />
+            <v-icon v-else size="16" icon="mdi-refresh" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Widget Body -->
+      <div class="p115-dash-body p115-dash-body--auto justify-center">
+        <div v-if="transferConfigLoading && !transferConfigLoaded" class="text-center py-4">
+          <v-progress-circular indeterminate color="primary" size="30" />
         </div>
         <template v-else-if="transferConfigLoaded">
-          <v-alert v-if="!panTransferEnabled" type="warning" variant="tonal" density="compact" class="mb-3">
-            请先在插件设置中开启「网盘整理」
-          </v-alert>
-          <v-alert v-else-if="panTransferSelectItems.length === 0" type="info" variant="tonal" density="compact"
-            class="mb-3">
-            请先在插件设置中配置「网盘整理目录」
-          </v-alert>
-          <template v-else>
-            <v-select v-model="selectedManualPath" :items="panTransferSelectItems" item-title="title" item-value="value"
-              label="整理目录" density="compact" hide-details variant="outlined" class="mb-3 dashboard-grid-no-drag" />
-            <v-btn class="dashboard-grid-no-drag" block color="primary" variant="tonal" prepend-icon="mdi-play-circle" :disabled="!selectedManualPath"
-              @click="openManualTransferDialog">
-              执行整理
-            </v-btn>
-          </template>
+          <div v-if="!panTransferEnabled" class="p115-callout p115-callout--warn">
+            <v-icon size="16" color="warning" icon="mdi-alert-outline" />
+            <span>请先在插件设置中开启「网盘整理」</span>
+          </div>
+          <div v-else-if="panTransferSelectItems.length === 0" class="p115-callout p115-callout--info">
+            <v-icon size="16" color="primary" icon="mdi-information-outline" />
+            <span>请先在插件设置中配置「网盘整理目录」</span>
+          </div>
+          <div v-else class="d-flex flex-column gap-3">
+            <v-select
+              v-model="selectedManualPath"
+              :items="panTransferSelectItems"
+              item-title="title"
+              item-value="value"
+              label="选择待整理目录"
+              density="compact"
+              hide-details
+              variant="outlined"
+              class="dashboard-grid-no-drag"
+            />
+            <button
+              type="button"
+              class="p115-btn p115-btn--primary w-100 dashboard-grid-no-drag"
+              :disabled="!selectedManualPath"
+              @click="openManualTransferDialog"
+            >
+              <v-icon size="16" icon="mdi-play-circle-outline" />
+              <span>执行整理</span>
+            </button>
+          </div>
         </template>
-      </v-card-text>
+      </div>
 
-      <v-divider v-if="allowRefresh" />
-      <v-card-actions v-if="allowRefresh" class="px-3 py-2 refresh-actions">
-        <span class="text-caption text-disabled">{{ lastRefreshedTimeDisplayTransfer }}</span>
-        <v-spacer />
-        <v-btn class="dashboard-grid-no-drag" icon variant="text" size="small" :loading="transferConfigLoading" @click="loadTransferConfig">
-          <v-icon size="small">mdi-refresh</v-icon>
-        </v-btn>
-      </v-card-actions>
+      <!-- Refresh Footer -->
+      <div v-if="allowRefresh" class="p115-dash-footer">
+        <span class="text-caption opacity-65 p115-tabular">{{ lastRefreshedTimeDisplayTransfer }}</span>
+        <button
+          type="button"
+          class="p115-btn p115-btn--ghost p115-btn--icon dashboard-grid-no-drag"
+          :disabled="transferConfigLoading"
+          title="刷新配置"
+          @click="loadTransferConfig"
+        >
+          <v-progress-circular v-if="transferConfigLoading" indeterminate size="13" width="2" />
+          <v-icon v-else size="15" icon="mdi-refresh" />
+        </button>
+      </div>
     </v-card>
 
-    <v-dialog v-model="manualTransferDialog.show" max-width="500" persistent>
-      <v-card>
-        <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-2">
-          <v-icon icon="mdi-play-circle" class="mr-2" color="primary" size="small" />
-          手动整理确认
-        </v-card-title>
-        <v-card-text class="px-3 py-3">
+    <v-dialog v-model="manualTransferDialog.show" max-width="480" persistent :content-class="dialogContentClass">
+      <v-card class="p115-sheet" elevation="0">
+        <div class="p115-sheet-header">
+          <div class="p115-sheet-title">
+            <v-icon size="19" color="primary" icon="mdi-play-circle-outline" />
+            <span>手动整理确认</span>
+          </div>
+        </div>
+        <div class="p115-sheet-body">
           <div v-if="!manualTransferDialog.loading && !manualTransferDialog.result">
             <div class="text-body-2 mb-3">确定要手动整理以下目录吗？</div>
-            <v-alert type="info" variant="tonal" density="compact" icon="mdi-information">
-              <div class="text-body-2"><strong>路径：</strong>{{ manualTransferDialog.path }}</div>
-            </v-alert>
+            <div class="p115-callout p115-callout--info">
+              <v-icon size="16" color="primary" icon="mdi-folder-network-outline" />
+              <div><strong>路径：</strong><span class="p115-mono">{{ manualTransferDialog.path }}</span></div>
+            </div>
           </div>
-          <div v-else-if="manualTransferDialog.loading" class="d-flex flex-column align-center py-3">
-            <v-progress-circular indeterminate color="primary" size="48" class="mb-3" />
-            <div class="text-body-2 text-medium-emphasis">正在启动整理任务...</div>
+          <div v-else-if="manualTransferDialog.loading" class="d-flex flex-column align-center py-4">
+            <v-progress-circular indeterminate color="primary" size="42" class="mb-3" />
+            <div class="text-body-2 opacity-75">正在启动整理任务...</div>
           </div>
           <div v-else-if="manualTransferDialog.result">
-            <v-alert :type="manualTransferDialog.result.type" variant="tonal" density="compact"
-              :icon="manualTransferDialog.result.type === 'success' ? 'mdi-check-circle' : 'mdi-alert-circle'">
-              <div class="text-subtitle-2 mb-1">{{ manualTransferDialog.result.title }}</div>
-              <div class="text-body-2">{{ manualTransferDialog.result.message }}</div>
-            </v-alert>
+            <div
+              class="p115-callout"
+              :class="manualTransferDialog.result.type === 'success' ? 'p115-callout--success' : 'p115-callout--error'"
+            >
+              <v-icon
+                size="18"
+                :color="manualTransferDialog.result.type === 'success' ? 'success' : 'error'"
+                :icon="manualTransferDialog.result.type === 'success' ? 'mdi-check-circle-outline' : 'mdi-alert-circle-outline'"
+              />
+              <div>
+                <div class="font-weight-bold mb-1">{{ manualTransferDialog.result.title }}</div>
+                <div>{{ manualTransferDialog.result.message }}</div>
+              </div>
+            </div>
           </div>
-        </v-card-text>
-        <v-card-actions class="px-3 py-2">
-          <v-spacer />
+        </div>
+        <div class="p115-sheet-footer justify-end">
           <template v-if="!manualTransferDialog.loading && !manualTransferDialog.result">
-            <v-btn class="dashboard-grid-no-drag" color="grey" variant="text" size="small" @click="closeManualTransferDialog">取消</v-btn>
-            <v-btn class="dashboard-grid-no-drag" color="primary" variant="text" size="small" @click="confirmManualTransfer">确认执行</v-btn>
+            <button
+              type="button"
+              class="p115-btn p115-btn--subtle p115-btn--sm dashboard-grid-no-drag"
+              @click="closeManualTransferDialog"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="p115-btn p115-btn--primary p115-btn--sm dashboard-grid-no-drag"
+              @click="confirmManualTransfer"
+            >
+              确认执行
+            </button>
           </template>
-          <v-btn v-else class="dashboard-grid-no-drag" color="primary" variant="text" size="small" @click="closeManualTransferDialog">关闭</v-btn>
-        </v-card-actions>
+          <button
+            v-else
+            type="button"
+            class="p115-btn p115-btn--primary p115-btn--sm dashboard-grid-no-drag"
+            @click="closeManualTransferDialog"
+          >
+            关闭
+          </button>
+        </div>
       </v-card>
     </v-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from "vue";
-import { P115_STRM_HELPER_PLUGIN_ID } from "../../utils/pluginId.js";
+import { ref, reactive, computed, onMounted } from 'vue';
+import { P115_STRM_HELPER_PLUGIN_ID } from '../../utils/pluginId.js';
+import { useThemeAdapter } from '../composables/useThemeAdapter.js';
 
 const props = defineProps({
   api: {
@@ -104,39 +174,41 @@ const props = defineProps({
   },
 });
 
+const { dialogContentClass } = useThemeAdapter();
+
 const transferConfigLoading = ref(false);
 const transferConfigLoaded = ref(false);
 const panTransferEnabled = ref(false);
 const panTransferPathsList = ref([]);
-const selectedManualPath = ref("");
+const selectedManualPath = ref('');
 const lastRefreshedTimestampTransfer = ref(null);
 const manualTransferDialog = reactive({
   show: false,
   loading: false,
-  path: "",
+  path: '',
   result: null,
 });
 
 const panTransferSelectItems = computed(() =>
   panTransferPathsList.value
-    .map((p) => (p.path ? String(p.path).trim() : ""))
+    .map((p) => (p.path ? String(p.path).trim() : ''))
     .filter(Boolean)
     .map((path) => ({ title: path, value: path })),
 );
 
 const lastRefreshedTimeDisplayTransfer = computed(() => {
-  if (!lastRefreshedTimestampTransfer.value) return "";
+  if (!lastRefreshedTimestampTransfer.value) return '';
   const date = new Date(lastRefreshedTimestampTransfer.value);
-  return `更新于: ${date.getHours().toString().padStart(2, "0")}:${date
+  return `更新于: ${date.getHours().toString().padStart(2, '0')}:${date
     .getMinutes()
     .toString()
-    .padStart(2, "0")}:${date.getSeconds().toString().padStart(2, "0")}`;
+    .padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
 });
 
 function parsePanTransferPaths(raw) {
-  if (!raw || typeof raw !== "string") return [];
+  if (!raw || typeof raw !== 'string') return [];
   return raw
-    .split("\n")
+    .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
     .map((path) => ({ path }));
@@ -148,20 +220,19 @@ async function loadTransferConfig() {
     const data = await props.api.get(`plugin/${P115_STRM_HELPER_PLUGIN_ID}/get_config`);
     if (data) {
       panTransferEnabled.value = Boolean(data.pan_transfer_enabled);
-      panTransferPathsList.value = parsePanTransferPaths(data.pan_transfer_paths || "");
+      panTransferPathsList.value = parsePanTransferPaths(data.pan_transfer_paths || '');
       const vals = panTransferSelectItems.value.map((x) => x.value);
       if (vals.length > 0) {
         if (!selectedManualPath.value || !vals.includes(selectedManualPath.value)) {
           selectedManualPath.value = vals[0];
         }
       } else {
-        selectedManualPath.value = "";
+        selectedManualPath.value = '';
       }
     }
     transferConfigLoaded.value = true;
     lastRefreshedTimestampTransfer.value = Date.now();
-  } catch (err) {
-    console.error("获取整理配置失败:", err);
+  } catch {
     transferConfigLoaded.value = true;
   } finally {
     transferConfigLoading.value = false;
@@ -179,7 +250,7 @@ function openManualTransferDialog() {
 
 function closeManualTransferDialog() {
   manualTransferDialog.show = false;
-  manualTransferDialog.path = "";
+  manualTransferDialog.path = '';
   manualTransferDialog.loading = false;
   manualTransferDialog.result = null;
 }
@@ -194,22 +265,21 @@ async function confirmManualTransfer() {
     });
     if (result.code === 0) {
       manualTransferDialog.result = {
-        type: "success",
-        title: "整理任务已启动",
-        message:
-          result.msg || "整理任务已在后台启动，正在执行中。您可以在日志中查看详细进度。",
+        type: 'success',
+        title: '整理任务已启动',
+        message: result.msg || '整理任务已在后台启动，正在执行中。您可以在日志中查看详细进度。',
       };
     } else {
       manualTransferDialog.result = {
-        type: "error",
-        title: "启动失败",
-        message: result.msg || "启动整理任务失败，请检查配置和网络连接。",
+        type: 'error',
+        title: '启动失败',
+        message: result.msg || '启动整理任务失败，请检查配置和网络连接。',
       };
     }
   } catch (error) {
     manualTransferDialog.result = {
-      type: "error",
-      title: "启动失败",
+      type: 'error',
+      title: '启动失败',
       message: `启动整理任务时发生错误：${error.message || error}`,
     };
   } finally {

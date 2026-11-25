@@ -1,254 +1,400 @@
-/* 仪表盘卡片：与 plugin-page / config-card 一致，用 --v-theme-* 适配浅色与深色 */
+/* ==========================================================================
+   P115StrmHelper V3 — Dashboard Widgets Material & Multi-Theme Styles
+   NOTE: Zero `.v-` or `.mdi-` in selectors so Vite federation CSS filter
+   retains 100% of rules in production builds.
+   ========================================================================== */
 
-/*
- * 拖拽把手由 MoviePilot 宿主 dashboard.vue 统一渲染，
- * 本组件只负责填充 dashboard-plugin-vue-renderer 容器并展示内容
- */
 .p115-dashboard-widget {
   display: flex;
   flex-direction: column;
   block-size: 100%;
   inline-size: 100%;
-  min-block-size: 0;
 }
 
-.dashboard-widget--strm {
-  height: 100%;
+.dashboard-widget {
   width: 100%;
-  min-height: 420px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .dashboard-widget--status {
-  height: 100%;
-  width: 100%;
-  min-height: 420px;
+  min-height: 296px;
+}
+
+.dashboard-widget--strm {
+  min-height: 460px;
 }
 
 .dashboard-widget--sync-del {
-  height: 100%;
+  min-height: 436px;
+}
+
+.dashboard-widget--transfer-mini,
+.dashboard-widget--full-sync-mini {
+  min-height: 220px;
+}
+
+/* Root Widget Card — Crisp Apple Glass Surface Harmonized with MoviePilot V3 */
+.strm-dash-card,
+.status-dash-card {
+  position: relative;
+  flex: 1 1 auto;
   width: 100%;
-  min-height: 420px;
+  height: 100%;
+  min-height: 0;
+  border-radius: 18px !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--p115-bg-card, rgba(255, 255, 255, 0.96)) !important;
+  border: 1px solid var(--p115-border-hairline, rgba(15, 23, 42, 0.08)) !important;
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.03),
+    0 10px 26px -10px rgba(91, 207, 250, 0.14),
+    inset 0 1px 0 var(--p115-specular-rim, rgba(255, 255, 255, 0.9)) !important;
+  color: var(--p115-text-primary) !important;
 }
 
-.sync-del-dash-card__body {
-  min-height: 280px;
-  max-height: min(70vh, 640px);
+/* Dark & Purple Host Themes */
+.p115-scope[data-p115-theme="dark"] .strm-dash-card,
+.p115-scope[data-p115-theme="dark"] .status-dash-card,
+[data-theme="dark"] .strm-dash-card,
+[data-theme="dark"] .status-dash-card,
+[data-theme="purple"] .strm-dash-card,
+[data-theme="purple"] .status-dash-card {
+  background: rgba(var(--v-theme-surface, 26, 32, 46), 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow:
+    0 10px 28px -8px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 
-.sync-del-list {
+/* Transparent Wallpaper Glass Theme */
+.p115-scope[data-p115-transparent="true"] .strm-dash-card,
+.p115-scope[data-p115-transparent="true"] .status-dash-card,
+html[data-theme="transparent"] .strm-dash-card,
+html[data-theme="transparent"] .status-dash-card {
+  background-color: rgba(var(--v-theme-surface, 28, 34, 48), var(--transparent-opacity, 0.3)) !important;
+  backdrop-filter: blur(var(--transparent-blur, 12px)) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur, 12px)) saturate(165%) !important;
+  border: 1px solid rgba(var(--v-theme-on-surface, 255, 255, 255), 0.1) !important;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Unified Apple Widget Header */
+.p115-dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--p115-border-hairline);
+  background: linear-gradient(
+    110deg,
+    rgba(91, 207, 250, 0.06) 0%,
+    rgba(255, 255, 255, 0) 48%,
+    rgba(245, 171, 185, 0.06) 100%
+  );
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.p115-dash-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.p115-dash-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #5bcffa 0%, #7ad8fc 52%, #f5abb9 100%);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow:
+    0 3px 10px rgba(91, 207, 250, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.p115-dash-titles {
+  min-width: 0;
+}
+
+.p115-dash-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.94rem;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--p115-text-primary);
+}
+
+.p115-dash-subtitle {
+  font-size: 0.74rem;
+  color: var(--p115-text-secondary);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.p115-dash-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* Widget Body & Scroll Containers */
+.p115-dash-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.p115-dash-body--auto {
   overflow-y: auto;
+}
+
+.dashboard-widget--status .status-dash-card {
+  height: auto;
+  min-height: 100%;
+}
+
+.dashboard-widget--status .p115-dash-body {
+  flex: 1 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+
+.dashboard-widget--transfer-mini .p115-dash-body,
+.dashboard-widget--full-sync-mini .p115-dash-body {
+  flex: 1 0 auto;
+  min-height: 116px;
+}
+
+.p115-dash-scroll {
+  flex: 1 1 auto;
+  min-height: 260px;
+  max-height: min(68vh, 600px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding-right: 4px;
 }
 
-.sync-del-path {
+.dashboard-widget--strm .p115-dash-scroll {
+  min-height: 284px;
+}
+
+/* Equal-Height Sub-Card (ONLY for Status Panel 2-Column Bento) */
+.p115-dash-subcard {
+  flex: 1 1 auto;
+  width: 100%;
+  border-radius: 14px;
+  background: var(--p115-bg-inset, rgba(241, 246, 252, 0.85));
+  border: 1px solid var(--p115-border-hairline);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.p115-dash-subcard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--p115-border-hairline);
+  font-size: 0.83rem;
+  font-weight: 620;
+  color: var(--p115-text-primary);
+}
+
+/* Compact List Row Card (for STRM History, SyncDel History, Pending Batches — NEVER stretches vertically!) */
+.p115-dash-row-card {
+  flex: 0 0 auto;
+  height: auto;
+  border-radius: 13px;
+  padding: 12px 14px;
+  background: var(--p115-bg-inset, rgba(241, 246, 252, 0.85));
+  border: 1px solid var(--p115-border-hairline);
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.p115-dash-row-card:hover {
+  border-color: var(--p115-border-accent);
+}
+
+.p115-dash-row-card--accent {
+  border-inline-start: 3px solid var(--p115-blue, #5bcffa);
+}
+
+.p115-dash-row-card--fail {
+  border-inline-start: 3px solid var(--p115-red, #ff3b30);
+}
+
+.p115-scope[data-p115-transparent="true"] .p115-dash-subcard,
+.p115-scope[data-p115-transparent="true"] .p115-dash-row-card,
+html[data-theme="transparent"] .p115-dash-subcard,
+html[data-theme="transparent"] .p115-dash-row-card {
+  background-color: rgba(var(--v-theme-surface, 255, 255, 255), var(--transparent-opacity-light, 0.2)) !important;
+  backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
+}
+
+/* Stat Pills for STRM Sync Records (Clean Sky Blue / Green / Amber / Red / Muted) */
+.p115-stat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.p115-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 560;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+
+.p115-stat-pill--blue {
+  background: rgba(91, 207, 250, 0.15);
+  color: var(--p115-blue-ink);
+  border-color: rgba(91, 207, 250, 0.24);
+}
+
+.p115-stat-pill--green {
+  background: rgba(52, 199, 89, 0.14);
+  color: var(--p115-green-ink);
+  border-color: rgba(52, 199, 89, 0.24);
+}
+
+.p115-stat-pill--amber {
+  background: rgba(255, 159, 10, 0.15);
+  color: var(--p115-amber-ink);
+  border-color: rgba(255, 159, 10, 0.24);
+}
+
+.p115-stat-pill--red {
+  background: rgba(255, 59, 48, 0.14);
+  color: var(--p115-red-ink);
+  border-color: rgba(255, 59, 48, 0.24);
+}
+
+.p115-stat-pill--muted {
+  background: var(--p115-bg-seg-track);
+  color: var(--p115-text-secondary);
+}
+
+/* Compact Inline Filter Select in Header */
+.p115-dash-filter-select {
+  width: 168px;
+  min-width: 140px;
+}
+
+/* Compact Pagination Bar Inside Widget */
+.p115-dash-pagebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  margin-top: 8px;
+  border-top: 1px solid var(--p115-border-hairline);
+  flex-shrink: 0;
+}
+
+/* Bottom Refresh Status Footer */
+.p115-dash-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  min-height: 36px;
+  border-top: 1px solid var(--p115-border-hairline);
+  background: var(--p115-bg-floating, rgba(255, 255, 255, 0.82));
+  flex-shrink: 0;
+}
+
+.p115-scope[data-p115-transparent="true"] .p115-dash-footer,
+html[data-theme="transparent"] .p115-dash-footer {
+  backdrop-filter: blur(var(--transparent-blur, 10px)) !important;
+  -webkit-backdrop-filter: blur(var(--transparent-blur, 10px)) !important;
+  background: rgba(var(--v-theme-surface, 24, 30, 44), var(--transparent-opacity-heavy, 0.5)) !important;
+}
+
+.sync-del-path,
+.strm-extra-line {
   word-break: break-word;
   line-height: 1.45;
 }
 
-/* 小卡片（网盘整理 / 全量同步）：占满栅格列高度，正文区伸展，底栏贴底对齐 */
-.dashboard-widget--transfer-mini,
-.dashboard-widget--full-sync-mini {
-  display: flex;
-  flex-direction: column;
-  align-self: stretch;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 200px;
-  height: 100%;
-}
-
-.dashboard-widget--transfer-mini>.v-card,
-.dashboard-widget--full-sync-mini>.v-card {
-  flex: 1 1 auto;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 与 Vuetify v-card-text 配合：中间区域吃满剩余高度，两卡 min-height 一致 */
-.transfer-mini-card__body,
-.full-sync-mini-card__body {
-  flex: 1 1 auto;
-  min-height: 7.5rem;
-}
-
-.strm-dash-card,
-.status-dash-card {
-  border-radius: 16px !important;
-  overflow: hidden;
-  background: rgba(var(--v-theme-surface), 0.78) !important;
-  backdrop-filter: blur(18px) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
-  box-shadow:
-    0 8px 28px rgba(91, 207, 250, 0.15),
-    0 2px 8px rgba(245, 171, 185, 0.1),
-    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.06) !important;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
-}
-
-/* 深色 / 高对比主题：提高不透明度与描边，避免发灰或融进背景 */
-.v-theme--dark .strm-dash-card,
-.v-theme--dark .status-dash-card,
-[data-theme="dark"] .strm-dash-card,
-[data-theme="dark"] .status-dash-card {
-  background: rgba(var(--v-theme-surface), 0.88) !important;
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  box-shadow:
-    0 8px 28px rgba(91, 207, 250, 0.22),
-    0 2px 8px rgba(245, 171, 185, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-}
-
-/*
- * 透明主题（MoviePilot transparent.scss）：须用 --transparent-opacity / --transparent-blur，
- * 否则插件内 0.78 不透明 + 固定 blur 会盖住主站 .v-card 的毛玻璃
- */
-html[data-theme="transparent"] .strm-dash-card,
-html[data-theme="transparent"] .status-dash-card {
-  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity, 0.3)) !important;
-  backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08) !important;
-  box-shadow:
-    0 4px 20px rgba(91, 207, 250, 0.1),
-    0 2px 6px rgba(245, 171, 185, 0.06),
-    inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04) !important;
-}
-
-html[data-theme="transparent"] .v-theme--dark .strm-dash-card,
-html[data-theme="transparent"] .v-theme--dark .status-dash-card {
-  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity, 0.3)) !important;
-  backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(var(--transparent-blur, 10px)) saturate(160%) !important;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
-  box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-}
-
-html[data-theme="transparent"] .strm-dash-item,
-html[data-theme="transparent"] .strm-history-item {
-  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity-light, 0.2)) !important;
-  backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
-  -webkit-backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
-}
-
-html[data-theme="transparent"] .status-inner-card {
-  background-color: rgba(var(--v-theme-surface), var(--transparent-opacity-light, 0.2)) !important;
-  backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
-  -webkit-backdrop-filter: blur(var(--transparent-blur-light, 6px)) !important;
-}
-
-html[data-theme="transparent"] .refresh-actions {
-  backdrop-filter: blur(var(--transparent-blur, 10px)) !important;
-  background: rgba(var(--v-theme-surface), var(--transparent-opacity-heavy, 0.5)) !important;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
-  box-shadow: inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04);
-}
-
-html[data-theme="transparent"] .v-theme--dark .refresh-actions {
-  background: rgba(var(--v-theme-surface), var(--transparent-opacity-heavy, 0.5)) !important;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.15) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.status-dash-row .v-col.d-flex {
-  align-self: stretch;
-}
-
-.status-inner-card {
-  min-block-size: 100%;
-  border-radius: 12px !important;
-}
-
-.strm-dash-card__body {
-  min-height: 320px;
-  max-height: min(70vh, 640px);
-}
-
-.strm-dash-list {
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.strm-kind-field {
-  max-width: 280px;
-  flex: 1 1 200px;
-  min-width: 0;
-}
-
-.strm-dash-item {
-  border-radius: 12px;
-  border-inline-start: 3px solid rgb(var(--v-theme-primary));
-  transition: box-shadow 0.2s ease;
-}
-
-.strm-dash-item--fail {
-  border-inline-start-color: rgb(var(--v-theme-error));
-}
-
-.strm-dash-item:hover,
-.strm-history-item:hover {
-  box-shadow: 0 2px 12px rgba(var(--v-theme-on-surface), 0.12);
-}
-
-.v-theme--dark .strm-dash-item:hover,
-.v-theme--dark .strm-history-item:hover,
-[data-theme="dark"] .strm-dash-item:hover,
-[data-theme="dark"] .strm-history-item:hover {
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
-}
-
-.strm-history-item {
-  border-inline-start: 3px solid rgb(var(--v-theme-primary));
-  transition: box-shadow 0.2s ease;
-}
-
-.strm-history-item--fail {
-  border-inline-start-color: rgb(var(--v-theme-error));
-}
-
-.strm-section-label {
-  letter-spacing: 0.02em;
-}
-
-.strm-extra-line {
-  word-break: break-word;
-}
-
-.refresh-actions {
-  background: linear-gradient(135deg,
-      rgba(var(--v-theme-primary), 0.08) 0%,
-      rgba(245, 171, 185, 0.07) 100%) !important;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.12) !important;
-  box-shadow: inset 0 1px 0 rgba(var(--v-theme-on-surface), 0.04);
-}
-
-.v-theme--dark .refresh-actions,
-[data-theme="dark"] .refresh-actions {
-  background: linear-gradient(to top,
-      rgba(var(--v-theme-surface), 0.92) 0%,
-      rgba(var(--v-theme-surface), 0.88) 100%) !important;
-  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.2) !important;
-  box-shadow:
-    0 -2px 12px rgba(91, 207, 250, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-@media (max-width: 768px) {
+@media (max-width: 600px) {
   .dashboard-widget--strm {
-    min-height: 360px;
-  }
-
-  .strm-dash-card__body {
-    max-height: min(65vh, 520px);
+    min-height: 390px;
   }
 
   .dashboard-widget--sync-del {
-    min-height: 360px;
+    min-height: 370px;
   }
 
-  .sync-del-dash-card__body {
-    max-height: min(65vh, 520px);
+  .p115-dash-scroll,
+  .dashboard-widget--strm .p115-dash-scroll {
+    min-height: 220px;
+    max-height: min(62vh, 480px);
+  }
+
+  .p115-dash-header {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .p115-dash-header-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .p115-dash-body {
+    padding: 10px 12px;
+  }
+
+  .p115-dash-filter-select {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .p115-dash-pagebar {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .p115-dash-scroll {
+    max-height: 380px;
   }
 }

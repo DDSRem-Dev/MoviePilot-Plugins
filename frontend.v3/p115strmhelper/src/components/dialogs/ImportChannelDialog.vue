@@ -1,39 +1,61 @@
 <template>
-  <v-dialog v-model="importDialog.show" max-width="600" persistent>
-    <v-card>
-      <v-card-title class="text-subtitle-1 d-flex align-center px-3 py-2 bg-primary-lighten-5">
-        <v-icon icon="mdi-import" class="mr-2" color="primary" size="small" />
-        <span>一键导入频道配置</span>
-      </v-card-title>
-      <v-card-text class="py-4">
-        <v-alert v-if="importDialog.error" type="error" density="compact" class="mb-3" variant="tonal" closable>
-          {{ importDialog.error }}
-        </v-alert>
-        <p class="text-caption mb-2 text-grey-darken-1">
-          请在此处粘贴JSON格式的频道列表。格式应为：<br>
-          <code>[{"name":"名称1", "id":"id1"}, {"name":"名称2", "id":"id2"}]</code>
-        </p>
-        <v-textarea v-model="importDialog.jsonText" label="频道配置JSON" variant="outlined" rows="8" auto-grow
-          hide-details="auto" placeholder='[{"name":"Lsp115","id":"Lsp115"}]'></v-textarea>
-      </v-card-text>
-      <v-divider></v-divider>
-      <v-card-actions class="px-3 py-2">
-        <v-spacer></v-spacer>
-        <v-btn color="grey" variant="text" @click="$emit('close')" size="small">
-          取消
-        </v-btn>
-        <v-btn color="primary" variant="text" @click="$emit('confirm')" size="small">
-          确认导入
-        </v-btn>
-      </v-card-actions>
+  <v-dialog v-model="importDialog.show" max-width="580" persistent :content-class="dialogContentClass">
+    <v-card flat class="p115-sheet">
+      <div class="p115-sheet-header">
+        <div class="p115-sheet-title">
+          <v-icon icon="mdi-code-json" color="primary" size="20" />
+          <span>一键导入 Telegram 频道配置</span>
+        </div>
+        <button type="button" class="p115-btn p115-btn--ghost p115-btn--icon" aria-label="关闭" @click="$emit('close')">
+          <v-icon size="18" icon="mdi-close" />
+        </button>
+      </div>
+
+      <div class="p115-sheet-body">
+        <div v-if="importDialog.error" class="p115-callout p115-callout--error mb-3">
+          <v-icon size="18" color="error" icon="mdi-alert-circle-outline" />
+          <span>{{ importDialog.error }}</span>
+        </div>
+
+        <div class="p115-callout p115-callout--info mb-3">
+          <v-icon size="18" color="primary" icon="mdi-information-outline" />
+          <div>
+            <div>请粘贴 JSON 数组格式的频道列表，示例结构：</div>
+            <code class="p115-mono d-block mt-1">[{"name":"名称1", "id":"id1"}, {"name":"名称2", "id":"id2"}]</code>
+          </div>
+        </div>
+
+        <v-textarea
+          v-model="importDialog.jsonText"
+          label="频道配置 JSON"
+          variant="outlined"
+          rows="7"
+          auto-grow
+          hide-details="auto"
+          class="p115-mono"
+          placeholder='[{"name":"Lsp115","id":"Lsp115"}]'
+        />
+      </div>
+
+      <div class="p115-sheet-footer">
+        <button type="button" class="p115-btn p115-btn--subtle" @click="$emit('close')">取消</button>
+        <button type="button" class="p115-btn p115-btn--primary" @click="$emit('confirm')">
+          <v-icon size="16" icon="mdi-check" />
+          <span>确认导入</span>
+        </button>
+      </div>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup>
+import { useThemeAdapter } from '../composables/useThemeAdapter.js';
+
 defineProps({
   importDialog: { type: Object, required: true },
 });
 
 defineEmits(['close', 'confirm']);
+
+const { dialogContentClass } = useThemeAdapter();
 </script>

@@ -3,11 +3,6 @@ import { reactive } from 'vue';
 /**
  * 目录选择器 Composable
  * 管理本地/网盘目录选择对话框的状态和操作
- * @param {object|Function} api - MoviePilot API 对象
- * @param {object} config - 插件配置的 reactive 对象
- * @param {object} message - 消息提示的 reactive 对象
- * @param {string} PLUGIN_ID - 插件ID
- * @param {object} pathRefs - 路径管理 composable 返回的所有路径 refs
  */
 export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
   const {
@@ -26,7 +21,6 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     monitorLifeExcludePaths,
   } = pathRefs;
 
-  // 目录选择器对话框状态
   const dirDialog = reactive({
     show: false,
     isLocal: true,
@@ -41,7 +35,7 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     fieldKey: null,
     targetConfigKeyForExclusion: null,
     originalPathTypeBackup: '',
-    originalIndexBackup: -1
+    originalIndexBackup: -1,
   });
 
   const loadDirContent = async () => {
@@ -51,12 +45,16 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     try {
       if (dirDialog.isLocal) {
         try {
-          const response = await api.post('storage/list', { path: dirDialog.currentPath || '/', type: 'share', flag: 'ROOT' });
+          const response = await api.post('storage/list', {
+            path: dirDialog.currentPath || '/',
+            type: 'share',
+            flag: 'ROOT',
+          });
           const items = Array.isArray(response) ? response : response?.data;
           if (Array.isArray(items)) {
             dirDialog.items = items
-              .filter(item => item.type === 'dir')
-              .map(item => ({ name: item.name, path: item.path, is_dir: true }))
+              .filter((item) => item.type === 'dir')
+              .map((item) => ({ name: item.name, path: item.path, is_dir: true }))
               .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
           } else {
             throw new Error(response?.message || '浏览目录失败：无效响应');
@@ -70,11 +68,13 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
         if (!config.cookies || config.cookies.trim() === '') {
           throw new Error('请先设置115 Cookie才能浏览网盘目录');
         }
-        const result = await api.get(`plugin/${PLUGIN_ID}/browse_dir?path=${encodeURIComponent(dirDialog.currentPath)}&is_local=${dirDialog.isLocal}`);
+        const result = await api.get(
+          `plugin/${PLUGIN_ID}/browse_dir?path=${encodeURIComponent(dirDialog.currentPath)}&is_local=${dirDialog.isLocal}`,
+        );
 
         if (result && result.code === 0 && result.data) {
           dirDialog.items = result.data.items
-            .filter(item => item.is_dir)
+            .filter((item) => item.is_dir)
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
           dirDialog.currentPath = result.data.path || dirDialog.currentPath;
         } else {
@@ -92,9 +92,59 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     }
   };
 
+  const resolveInitialDirPath = (index, isLocal, pathType, fieldKey) => {
+    const sideKey = isLocal ? 'local' : 'remote';
+    if (pathType === 'transfer' && transferPaths.value?.[index]?.[sideKey]) {
+      return transferPaths.value[index][sideKey];
+    }
+    if (pathType === 'fullSync' && fullSyncPaths.value?.[index]?.[sideKey]) {
+      return fullSyncPaths.value[index][sideKey];
+    }
+    if (pathType === 'incrementSync' && incrementSyncPaths.value?.[index]?.[sideKey]) {
+      return incrementSyncPaths.value[index][sideKey];
+    }
+    if (pathType === 'monitorLife' && monitorLifePaths.value?.[index]?.[sideKey]) {
+      return monitorLifePaths.value[index][sideKey];
+    }
+    if (pathType === 'apiStrm' && apiStrmPaths.value?.[index]?.[sideKey]) {
+      return apiStrmPaths.value[index][sideKey];
+    }
+    if (pathType === 'panTransfer' && panTransferPaths.value?.[index]?.path) {
+      return panTransferPaths.value[index].path;
+    }
+    if (pathType === 'shareReceive' && shareReceivePaths.value?.[index]?.path) {
+      return shareReceivePaths.value[index].path;
+    }
+    if (pathType === 'offlineDownload' && offlineDownloadPaths.value?.[index]?.path) {
+      return offlineDownloadPaths.value[index].path;
+    }
+    if (pathType === 'panTransferUnrecognized' && config.pan_transfer_unrecognized_path) {
+      return config.pan_transfer_unrecognized_path;
+    }
+    if (pathType === 'directoryUpload' && fieldKey && directoryUploadPaths.value?.[index]?.[fieldKey]) {
+      return directoryUploadPaths.value[index][fieldKey];
+    }
+    if (pathType === 'syncDelLibrary' && index >= 0 && syncDelLibraryPaths.value?.[index] && fieldKey) {
+      return syncDelLibraryPaths.value[index][fieldKey] || '/';
+    }
+    if (pathType === 'backupItems' && index >= 0 && fieldKey) {
+      const backupItems = config.strm_backup_items;
+      return (backupItems && backupItems[index] && backupItems[index][fieldKey]) || '/';
+    }
+    if (pathType === 'backupSourcePath' && index >= 0 && fieldKey) {
+      const backupItems = config.strm_backup_items;
+      const srcIndex = parseInt(fieldKey, 10);
+      if (backupItems?.[index]?.source_paths && !Number.isNaN(srcIndex)) {
+        return backupItems[index].source_paths[srcIndex] || '/';
+      }
+    }
+    return '/';
+  };
+
   const openDirSelector = (index, locationType, pathType, fieldKey = null) => {
+    const isLocal = locationType === 'local';
     dirDialog.show = true;
-    dirDialog.isLocal = locationType === 'local';
+    dirDialog.isLocal = isLocal;
     dirDialog.loading = false;
     dirDialog.error = null;
     dirDialog.items = [];
@@ -104,35 +154,7 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     dirDialog.targetConfigKeyForExclusion = null;
     dirDialog.originalPathTypeBackup = '';
     dirDialog.originalIndexBackup = -1;
-
-    // 设置初始路径
-    if (pathType === 'syncDelLibrary' && index >= 0 && syncDelLibraryPaths.value[index] && fieldKey) {
-      const currentPath = syncDelLibraryPaths.value[index][fieldKey] || '/';
-      dirDialog.currentPath = currentPath;
-    } else if (pathType === 'backupItems' && index >= 0 && fieldKey) {
-      const backupItems = config.strm_backup_items;
-      if (backupItems && backupItems[index]) {
-        const currentPath = backupItems[index][fieldKey] || '/';
-        dirDialog.currentPath = currentPath;
-      } else {
-        dirDialog.currentPath = '/';
-      }
-    } else if (pathType === 'backupSourcePath' && index >= 0 && fieldKey) {
-      const backupItems = config.strm_backup_items;
-      if (backupItems && backupItems[index] && backupItems[index].source_paths) {
-        const srcIndex = parseInt(fieldKey, 10);
-        if (!isNaN(srcIndex) && backupItems[index].source_paths[srcIndex]) {
-          dirDialog.currentPath = backupItems[index].source_paths[srcIndex];
-        } else {
-          dirDialog.currentPath = '/';
-        }
-      } else {
-        dirDialog.currentPath = '/';
-      }
-    } else {
-      dirDialog.currentPath = '/';
-    }
-
+    dirDialog.currentPath = String(resolveInitialDirPath(index, isLocal, pathType, fieldKey) || '/').trim() || '/';
     loadDirContent();
   };
 
@@ -161,10 +183,10 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
     if (parts.length === 0) {
       dirDialog.currentPath = '/';
     } else if (parts.length === 1 && normalizedPath.includes(':')) {
-      dirDialog.currentPath = parts[0] + ':/';
+      dirDialog.currentPath = `${parts[0]}:/`;
     } else {
       parts.pop();
-      dirDialog.currentPath = parts.length === 0 ? '/' : (normalizedPath.startsWith('/') ? '/' : '') + parts.join('/') + '/';
+      dirDialog.currentPath = parts.length === 0 ? '/' : `${normalizedPath.startsWith('/') ? '/' : ''}${parts.join('/')}/`;
     }
     loadDirContent();
   };
@@ -172,7 +194,11 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
   const confirmDirSelection = () => {
     if (!dirDialog.currentPath) return;
     let processedPath = dirDialog.currentPath;
-    if (processedPath !== '/' && !(/^[a-zA-Z]:[\\\/]$/.test(processedPath)) && (processedPath.endsWith('/') || processedPath.endsWith('\\\\'))) {
+    if (
+      processedPath !== '/' &&
+      !/^[a-zA-Z]:[\\\/]$/.test(processedPath) &&
+      (processedPath.endsWith('/') || processedPath.endsWith('\\'))
+    ) {
       processedPath = processedPath.slice(0, -1);
     }
     if (dirDialog.type === 'excludePath' && dirDialog.targetConfigKeyForExclusion) {
@@ -184,14 +210,12 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
       if (targetArrayRef) {
         if (targetArrayRef.value.length === 1 && !targetArrayRef.value[0].path) {
           targetArrayRef.value[0] = { path: processedPath };
+        } else if (!targetArrayRef.value.some((item) => item.path === processedPath)) {
+          targetArrayRef.value.push({ path: processedPath });
         } else {
-          if (!targetArrayRef.value.some(item => item.path === processedPath)) {
-            targetArrayRef.value.push({ path: processedPath });
-          } else {
-            message.text = '该排除路径已存在。';
-            message.type = 'warning';
-            setTimeout(() => { message.text = ''; }, 3000);
-          }
+          message.text = '该排除路径已存在。';
+          message.type = 'warning';
+          setTimeout(() => { message.text = ''; }, 3000);
         }
       }
       dirDialog.type = dirDialog.originalPathTypeBackup;
@@ -199,24 +223,46 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
       dirDialog.targetConfigKeyForExclusion = null;
       dirDialog.originalPathTypeBackup = '';
       dirDialog.originalIndexBackup = -1;
-    }
-    else if (dirDialog.index >= 0 && dirDialog.type !== 'excludePath') {
+    } else if (dirDialog.index >= 0 && dirDialog.type !== 'excludePath') {
       switch (dirDialog.type) {
-        case 'transfer': dirDialog.isLocal ? transferPaths.value[dirDialog.index].local = processedPath : transferPaths.value[dirDialog.index].remote = processedPath; break;
-        case 'fullSync': dirDialog.isLocal ? fullSyncPaths.value[dirDialog.index].local = processedPath : fullSyncPaths.value[dirDialog.index].remote = processedPath; break;
-        case 'incrementSync': dirDialog.isLocal ? incrementSyncPaths.value[dirDialog.index].local = processedPath : incrementSyncPaths.value[dirDialog.index].remote = processedPath; break;
-        case 'monitorLife': dirDialog.isLocal ? monitorLifePaths.value[dirDialog.index].local = processedPath : monitorLifePaths.value[dirDialog.index].remote = processedPath; break;
-        case 'apiStrm': dirDialog.isLocal ? apiStrmPaths.value[dirDialog.index].local = processedPath : apiStrmPaths.value[dirDialog.index].remote = processedPath; break;
-        case 'panTransfer': panTransferPaths.value[dirDialog.index].path = processedPath; break;
-        case 'shareReceive': shareReceivePaths.value[dirDialog.index].path = processedPath; break;
-        case 'offlineDownload': offlineDownloadPaths.value[dirDialog.index].path = processedPath; break;
+        case 'transfer':
+          if (dirDialog.isLocal) transferPaths.value[dirDialog.index].local = processedPath;
+          else transferPaths.value[dirDialog.index].remote = processedPath;
+          break;
+        case 'fullSync':
+          if (dirDialog.isLocal) fullSyncPaths.value[dirDialog.index].local = processedPath;
+          else fullSyncPaths.value[dirDialog.index].remote = processedPath;
+          break;
+        case 'incrementSync':
+          if (dirDialog.isLocal) incrementSyncPaths.value[dirDialog.index].local = processedPath;
+          else incrementSyncPaths.value[dirDialog.index].remote = processedPath;
+          break;
+        case 'monitorLife':
+          if (dirDialog.isLocal) monitorLifePaths.value[dirDialog.index].local = processedPath;
+          else monitorLifePaths.value[dirDialog.index].remote = processedPath;
+          break;
+        case 'apiStrm':
+          if (dirDialog.isLocal) apiStrmPaths.value[dirDialog.index].local = processedPath;
+          else apiStrmPaths.value[dirDialog.index].remote = processedPath;
+          break;
+        case 'panTransfer':
+          panTransferPaths.value[dirDialog.index].path = processedPath;
+          break;
+        case 'shareReceive':
+          shareReceivePaths.value[dirDialog.index].path = processedPath;
+          break;
+        case 'offlineDownload':
+          offlineDownloadPaths.value[dirDialog.index].path = processedPath;
+          break;
         case 'syncDelLibrary':
           if (dirDialog.index >= 0 && syncDelLibraryPaths.value[dirDialog.index] && dirDialog.fieldKey) {
             syncDelLibraryPaths.value[dirDialog.index][dirDialog.fieldKey] = processedPath;
           }
           break;
         case 'directoryUpload':
-          if (dirDialog.fieldKey && directoryUploadPaths.value[dirDialog.index]) directoryUploadPaths.value[dirDialog.index][dirDialog.fieldKey] = processedPath;
+          if (dirDialog.fieldKey && directoryUploadPaths.value[dirDialog.index]) {
+            directoryUploadPaths.value[dirDialog.index][dirDialog.fieldKey] = processedPath;
+          }
           break;
         case 'backupItems':
           if (dirDialog.index >= 0 && dirDialog.fieldKey) {
@@ -232,15 +278,16 @@ export function useDirSelector(api, config, message, PLUGIN_ID, pathRefs) {
             const item = backupItems && backupItems[dirDialog.index];
             if (item && item.source_paths) {
               const srcIndex = parseInt(dirDialog.fieldKey, 10);
-              if (!isNaN(srcIndex) && srcIndex < item.source_paths.length) {
+              if (!Number.isNaN(srcIndex) && srcIndex < item.source_paths.length) {
                 item.source_paths[srcIndex] = processedPath;
               }
             }
           }
           break;
       }
+    } else if (dirDialog.type === 'panTransferUnrecognized') {
+      config.pan_transfer_unrecognized_path = processedPath;
     }
-    else if (dirDialog.type === 'panTransferUnrecognized') config.pan_transfer_unrecognized_path = processedPath;
     closeDirDialog();
   };
 

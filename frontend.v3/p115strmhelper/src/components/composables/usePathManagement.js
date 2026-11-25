@@ -20,7 +20,7 @@ export function usePathManagement(config) {
   const shareReceivePaths = ref([{ path: '' }]);
   const offlineDownloadPaths = ref([{ path: '' }]);
   const transferExcludePaths = ref([{ path: '' }]);
-  const incrementSyncExcludePaths = ref([{ local: '', remote: '' }]);
+  const incrementSyncExcludePaths = ref([{ path: '' }]);
   const monitorLifeExcludePaths = ref([{ path: '' }]);
   const directoryUploadPaths = ref([{ src: '', dest_remote: '', dest_local: '', dest_strm: '', delete: false }]);
   const syncDelLibraryPaths = ref([{ mediaserver: '', moviepilot: '', p115: '' }]);
