@@ -1,12 +1,13 @@
 import time
-from typing import List, Tuple
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+from threading import RLock
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from p115center import P115Center, OfflineInfo
+from p115center import OfflineInfo, P115Center
 from p115client import P115Client
-from p115client.tool.clouddownload import clouddownload_iter
 from p115client.tool.attr import get_attr
+from p115client.tool.clouddownload import clouddownload_iter
 
 from app.sdk.logging import logger
 
@@ -14,8 +15,9 @@ from ...core.config import configer
 from ...core.p115 import get_pid_by_path
 from ...helper.life import MonitorLife
 from ...schemas.offline import OfflineTaskItem
-from ...utils.string import StringUtils
 from ...utils.sentry import sentry_manager
+from ...utils.string import StringUtils
+from .retry import OfflineRetryManager
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -24,15 +26,27 @@ class OfflineDownloadHelper:
     离线下载
     """
 
-    def __init__(self, client: P115Client, monitorlife: MonitorLife):
+    def __init__(self, client: P115Client, monitorlife: MonitorLife) -> None:
         self.client = client
         self.monitorlife = monitorlife
         self.transfer_list: List = []
+        self._lock = RLock()
+        self._retry: Optional[OfflineRetryManager] = None
 
         self.offline_list_cache = {"data": None, "timestamp": 0}
 
+    def _load_state(self) -> OfflineRetryManager:
+        if self._retry is None:
+            self._retry = OfflineRetryManager(self.client)
+            self.transfer_list = self._retry.transfers
+        return self._retry
+
     @staticmethod
-    def build_offline_urls_payload(urls, savepath=None, wp_path_id=None):
+    def build_offline_urls_payload(
+        urls: List[str],
+        savepath: Optional[str] = None,
+        wp_path_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         构建添加下载列表参数
         """
@@ -56,6 +70,7 @@ class OfflineDownloadHelper:
             if self.transfer_list[i]["hash"] == target_hash:
                 target_path = self.transfer_list[i]["path"]
                 del self.transfer_list[i]
+                self._load_state().save()
                 return target_path
             i += 1
         return None
@@ -74,16 +89,20 @@ class OfflineDownloadHelper:
         """
         try:
             if not item[1].get("data", None):
-                if item[1].get("count", None):
+                transfer = next(t for t in self.transfer_list if t["hash"] == item[0])
+                if transfer.get("count", 0):
                     logger.error(
                         f"【离线下载】{item[0]} 下载失败，无法添加到网盘整理队列"
                     )
                     self.__remove_transfer_list_by_hash(item[0])
                 else:
-                    item[1]["count"] = 1
+                    transfer["count"] = 1
+                    self._load_state().save()
                     logger.warn(f"【离线下载】{item[0]} 下载任务二次检测")
                 return
-            parent_path = self.__remove_transfer_list_by_hash(item[0])
+            parent_path = next(
+                t["path"] for t in self.transfer_list if t["hash"] == item[0]
+            )
             logger.info(f"【离线下载】{item[0]} 下载完成，添加到网盘整理队列")
             data = get_attr(
                 self.client,
@@ -112,10 +131,13 @@ class OfflineDownloadHelper:
                 file_path=file_path,
                 rmt_mediaext=rmt_mediaext,
             )
+            self.__remove_transfer_list_by_hash(item[0])
         except Exception as e:
-            logger.error(f"【离线下载】{item[0]} 无法添加到网盘整理队列: {e}")
+            logger.error(
+                f"【离线下载】{item[0]} 无法添加到网盘整理队列: {e}", exc_info=True
+            )
 
-    def add_urls(self, url_list: List, cid: int):
+    def add_urls(self, url_list: List, cid: int) -> Dict[str, Any]:
         """
         添加一组任务
         """
@@ -124,15 +146,19 @@ class OfflineDownloadHelper:
             payload, **configer.get_ios_ua_app(app=False)
         )
 
-    def get_tasks(self):
+    def get_tasks(self) -> Iterator[Dict[str, Any]]:
         """
         获取当前所有任务
         """
         return clouddownload_iter(
-            self.client, cooldown=2, type="web", **configer.get_ios_ua_app(app=False)
+            self.client,
+            cooldown=2,
+            type="web",
+            raise_for_update=True,
+            **configer.get_ios_ua_app(app=False),
         )
 
-    def get_tasks_status(self, info_hash: List):
+    def get_tasks_status(self, info_hash: List) -> Iterator[List[Any]]:
         """
         获取一组任务的状态和信息
         """
@@ -156,7 +182,7 @@ class OfflineDownloadHelper:
         try:
             # 寻找离线下载目录中可运行网盘整理的目录，如果无则调用 add_urls_to_path 函数
             parent_path = None
-            for path in configer.pan_transfer_paths.split("\n"):
+            for path in (configer.pan_transfer_paths or "").split("\n"):
                 if not path:
                     continue
                 if path in configer.offline_download_paths:
@@ -187,10 +213,16 @@ class OfflineDownloadHelper:
             )
 
             # 获取所有任务的 hash，添加到待整理列表中
-            for item in result or []:
-                self.transfer_list.append(
-                    {"hash": str(item.get("info_hash")), "path": str(parent_path)}
-                )
+            with self._lock:
+                retry = self._load_state()
+                for item in result or []:
+                    info_hash = item.get("info_hash")
+                    if info_hash and not self.__exists_in_transfer_list(str(info_hash)):
+                        self.transfer_list.append(
+                            {"hash": str(info_hash), "path": str(parent_path)}
+                        )
+                retry.save()
+                self.offline_list_cache["data"] = None
 
             for url in url_list:
                 self.post_offline_info(url)
@@ -234,27 +266,50 @@ class OfflineDownloadHelper:
             logger.error(f"【离线下载】未知错误：{e}")
             return False, 0
 
-    def pull_status_to_task(self):
+    def pull_status_to_task(self) -> None:
         """
-        等待下载完成运行指定任务
+        轮询失败重试及下载完成后的整理任务
         """
-        if not self.transfer_list:
+        if not configer.cookies:
             return
-        # 获取待整理的 hash 列表
-        hash_list = list(map(lambda x: x["hash"], self.transfer_list))
-        for item in self.get_tasks_status(hash_list):
-            # 判断是否是中止状态
-            if item[1].get("status"):
-                # 判断是否属于整理队列
-                if self.__exists_in_transfer_list(item[0]):
-                    self.__add_transfer_task(item)
-        if self.transfer_list:
-            logger.info(f"【离线下载】等待任务下载完成：{hash_list}")
+        with self._lock:
+            retry = self._load_state()
+            if not self.transfer_list and not configer.offline_retry_enabled:
+                return
+            # 完整读取后再重试，避免重启改变分页顺序而漏掉其他任务
+            tasks = list(self.get_tasks())
+            retry.prune({str(task["info_hash"]) for task in tasks})
+            now = time.time()
+            self.offline_list_cache["data"] = None
+            for task in tasks:
+                info_hash = str(task["info_hash"])
+                keep_transfer = retry.process(task, now)
+                if not self.__exists_in_transfer_list(info_hash):
+                    continue
+                status = int(task.get("status", -1))
+                if status == 2:
+                    self.__add_transfer_task([info_hash, {"data": task}])
+                elif status == 1 and not keep_transfer:
+                    self.__add_transfer_task([info_hash, {"data": ""}])
+                else:
+                    transfer = next(
+                        t for t in self.transfer_list if t["hash"] == info_hash
+                    )
+                    if transfer.pop("count", None) is not None:
+                        retry.save()
+            if self.transfer_list:
+                logger.info(
+                    f"【离线下载】等待任务下载完成：{[t['hash'] for t in self.transfer_list]}"
+                )
 
-    def get_cached_data(self):
+    def get_cached_data(self) -> List[OfflineTaskItem]:
         """
         获取缓存离线下载列表
         """
+        with self._lock:
+            return self._get_cached_data()
+
+    def _get_cached_data(self) -> List[OfflineTaskItem]:
         status_mapping = {0: "下载中", 1: "下载失败", 2: "已完成", 3: "重试中"}
 
         now = time.time()
@@ -264,15 +319,19 @@ class OfflineDownloadHelper:
         ):
             raw_tasks = self.get_tasks()
             formatted_tasks = []
+            retry = self._load_state()
 
             for task in raw_tasks:
+                status = int(task.get("status", -1))
                 task_model = OfflineTaskItem(
                     info_hash=task.get("info_hash", ""),
                     name=task.get("name", ""),
                     size=task.get("size", 0),
                     size_text=StringUtils.format_size(task.get("size", 0)),
-                    status=task.get("status", 0),
-                    status_text=status_mapping.get(task.get("status", 4), "未知状态"),
+                    status=status,
+                    status_text=retry.status_text(
+                        task, status_mapping.get(status, "未知状态")
+                    ),
                     percent=task.get("percentDone", 0.0),
                     add_time=task.get("add_time", 0),
                 )
@@ -283,7 +342,7 @@ class OfflineDownloadHelper:
         return self.offline_list_cache["data"]
 
     @staticmethod
-    def post_offline_info(url: str):
+    def post_offline_info(url: str) -> None:
         """
         上传离线下载信息
         """

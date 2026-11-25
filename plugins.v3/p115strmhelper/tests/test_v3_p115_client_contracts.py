@@ -270,6 +270,7 @@ class TestP115ClientContracts(TestCase):
         response = {
             "state": True,
             "tasks": [{"info_hash": "task"}],
+            "count": 1,
             "page": 1,
             "page_count": 1,
         }

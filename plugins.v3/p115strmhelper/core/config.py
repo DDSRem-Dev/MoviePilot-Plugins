@@ -725,6 +725,15 @@ class ConfigManager(BaseModel):
     offline_download_paths: Optional[List] = Field(
         default_factory=list, description="离线下载目录"
     )
+    offline_retry_enabled: bool = Field(
+        default=False, description="离线下载失败自动重试"
+    )
+    offline_retry_max_attempts: int = Field(
+        default=3, ge=1, le=100, description="每个离线任务自动重试次数上限"
+    )
+    offline_retry_interval_hours: int = Field(
+        default=24, ge=1, le=8760, description="离线下载失败重试间隔（小时）"
+    )
 
     fuse_enabled: bool = Field(default=False, description="FUSE 文件系统开关")
     fuse_mountpoint: Optional[str] = Field(default=None, description="FUSE 挂载点路径")

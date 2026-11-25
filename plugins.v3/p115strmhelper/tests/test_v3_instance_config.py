@@ -11,6 +11,8 @@ from typing import Any, Dict, Optional
 from unittest import TestCase
 from unittest.mock import MagicMock
 
+from pydantic import ValidationError
+
 
 def _module(name: str, **attributes: Any) -> ModuleType:
     result = ModuleType(name)
@@ -126,6 +128,32 @@ class TestV3InstanceConfig(TestCase):
         owner.get_config = MagicMock(return_value=source_config or {})
         owner.update_config = MagicMock(return_value=True)
         return owner
+
+    def test_offline_retry_defaults_and_validation(self) -> None:
+        """
+        旧配置默认不启用重试，次数与间隔经真实配置模型校验并可序列化保存
+        """
+        config = self.config_type()
+        self.assertFalse(config.offline_retry_enabled)
+        self.assertEqual(config.offline_retry_max_attempts, 3)
+        self.assertEqual(config.offline_retry_interval_hours, 24)
+        updated = self.config_type(
+            offline_retry_enabled=True,
+            offline_retry_max_attempts=5,
+            offline_retry_interval_hours=48,
+        )
+        restored = self.config_type(**updated.model_dump())
+        self.assertTrue(restored.offline_retry_enabled)
+        self.assertEqual(restored.offline_retry_max_attempts, 5)
+        self.assertEqual(restored.offline_retry_interval_hours, 48)
+        for field, values in (
+            ("offline_retry_max_attempts", (0, -1, 101, 1.5, None, "invalid")),
+            ("offline_retry_interval_hours", (0, -1, 8761, 1.5, None, "invalid")),
+        ):
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(ValidationError):
+                        self.config_type(**{field: value})
 
     def test_config_uses_bound_instance_and_excludes_runtime_owner(self) -> None:
         """
